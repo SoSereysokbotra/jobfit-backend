@@ -1,0 +1,186 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  JOB_SEEKER
+  EMPLOYER
+  ADMIN
+}
+
+enum JobStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+}
+
+enum ApplicationStatus {
+  APPLIED
+  REVIEWING
+  INTERVIEWING
+  OFFERED
+  REJECTED
+  ACCEPTED
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  role      UserRole @default(JOB_SEEKER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Job seeker profile
+  jobSeekerProfile JobSeekerProfile?
+  // Employer profile
+  employerProfile  EmployerProfile?
+
+  @@map("users")
+}
+
+model JobSeekerProfile {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  firstName String
+  lastName  String
+  bio       String?
+  location  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  resume       Resume?
+  applications Application[]
+  matchScores  MatchScore[]
+
+  @@map("job_seeker_profiles")
+}
+
+model EmployerProfile {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  firstName String
+  lastName  String
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("employer_profiles")
+}
+
+model Company {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  website     String?
+  logoUrl     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  employers EmployerProfile[]
+  jobs      Job[]
+
+  @@map("companies")
+}
+
+model Job {
+  id          String    @id @default(uuid())
+  companyId   String
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  title       String
+  description String
+  status      JobStatus @default(DRAFT)
+  remoteType  String    // e.g. "REMOTE", "HYBRID", "ON_SITE"
+  location    String?
+  minSalary   Int?
+  maxSalary   Int?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  applications Application[]
+  matchScores  MatchScore[]
+  skills       JobSkill[]
+
+  @@map("jobs")
+}
+
+model Resume {
+  id                 String           @id @default(uuid())
+  jobSeekerProfileId String           @unique
+  jobSeekerProfile   JobSeekerProfile @relation(fields: [jobSeekerProfileId], references: [id], onDelete: Cascade)
+  fileUrl            String
+  parsedContent      Json?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@map("resumes")
+}
+
+model Application {
+  id                 String            @id @default(uuid())
+  jobId              String
+  job                Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  jobSeekerProfileId String
+  jobSeekerProfile   JobSeekerProfile  @relation(fields: [jobSeekerProfileId], references: [id], onDelete: Cascade)
+  resumeUrl          String
+  status             ApplicationStatus @default(APPLIED)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  @@unique([jobId, jobSeekerProfileId])
+  @@map("applications")
+}
+
+model MatchScore {
+  id                 String           @id @default(uuid())
+  jobId              String
+  job                Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  jobSeekerProfileId String
+  jobSeekerProfile   JobSeekerProfile @relation(fields: [jobSeekerProfileId], references: [id], onDelete: Cascade)
+  score              Float            // 0 - 100
+  breakdown          Json?            // sub-scores e.g. skill, experience
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@unique([jobId, jobSeekerProfileId])
+  @@map("match_scores")
+}
+
+model Skill {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  jobs JobSkill[]
+
+  @@map("skills")
+}
+
+model JobSkill {
+  jobId   String
+  job     Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  skillId String
+  skill   Skill  @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@id([jobId, skillId])
+  @@map("job_skills")
+}
+
+model Industry {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("industries")
+}
