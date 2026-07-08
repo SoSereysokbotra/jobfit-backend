@@ -1,17 +1,18 @@
-import { createParamDecorator, ExecutionContext } from '@nestjs/common';
-import { Request } from 'express';
-import { SupabaseJwtPayload } from '@infra/supabase/supabase-auth.service';
+// src/common/decorators/current-user.decorator.ts
+//
+// Generic param decorator that pulls the authenticated principal off the request.
+// It makes no assumptions about the user shape — it simply returns `request.user`
+// (or one property of it) that an auth guard/strategy is expected to populate later.
+//
+//   @Get() me(@CurrentUser() user) {}
+//   @Get() myId(@CurrentUser('id') id: string) {}
 
-/**
- * @CurrentUser() — extracts the verified Supabase JWT payload attached by SupabaseAuthGuard.
- *
- * Usage:
- *   @Get('me')
- *   getMe(@CurrentUser() user: SupabaseJwtPayload) { ... }
- */
+import { createParamDecorator, ExecutionContext } from '@nestjs/common';
+
 export const CurrentUser = createParamDecorator(
-  (_data: unknown, ctx: ExecutionContext): SupabaseJwtPayload => {
-    const request = ctx.switchToHttp().getRequest<Request & { user: SupabaseJwtPayload }>();
-    return request.user;
+  (data: string | undefined, ctx: ExecutionContext) => {
+    const request = ctx.switchToHttp().getRequest();
+    const user = request.user;
+    return data ? user?.[data] : user;
   },
 );

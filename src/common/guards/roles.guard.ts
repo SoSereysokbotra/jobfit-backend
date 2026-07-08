@@ -1,33 +1,37 @@
-import {
-  CanActivate,
-  ExecutionContext,
-  ForbiddenException,
-  Injectable,
-} from '@nestjs/common';
+// src/common/guards/roles.guard.ts
+//
+// Generic RBAC guard. Reads the roles required by @Roles(...) and compares them to
+// the roles carried on request.user. It does not authenticate — it assumes some
+// upstream guard already populated request.user — so it works with any user shape
+// that exposes `roles: string[]` or a single `role: string`.
+
+import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { AppRole, ROLES_KEY } from '../decorators/roles.decorator';
-import { SupabaseJwtPayload } from '@infra/supabase/supabase-auth.service';
+import { ROLES_KEY } from '../decorators/roles.decorator';
 
 @Injectable()
 export class RolesGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector) {}
+  constructor(private readonly reflector: Reflector) { }
 
   canActivate(context: ExecutionContext): boolean {
-    const requiredRoles = this.reflector.getAllAndOverride<AppRole[]>(ROLES_KEY, [
+    const requiredRoles = this.reflector.getAllAndOverride<string[]>(ROLES_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
 
-    // No @Roles() decorator — route is accessible to any authenticated user
-    if (!requiredRoles || requiredRoles.length === 0) return true;
-
-    const request = context.switchToHttp().getRequest<{ user: SupabaseJwtPayload }>();
-    const userRole = request.user?.app_metadata?.role as AppRole | undefined;
-
-    if (!userRole || !requiredRoles.includes(userRole)) {
-      throw new ForbiddenException('Insufficient permissions');
+    // No @Roles() metadata -> route is not role-restricted.
+    if (!requiredRoles || requiredRoles.length === 0) {
+      return true;
     }
 
-    return true;
+    const request = context.switchToHttp().getRequest();
+    const user = request.user;
+    const userRoles: string[] = Array.isArray(user?.roles)
+      ? user.roles
+      : user?.role
+        ? [user.role]
+        : [];
+
+    return requiredRoles.some((role) => userRoles.includes(role));
   }
 }

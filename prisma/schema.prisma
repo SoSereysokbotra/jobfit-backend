@@ -29,18 +29,55 @@ enum ApplicationStatus {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  role      UserRole @default(JOB_SEEKER)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String   @id @default(uuid())
+  email        String   @unique
+  name         String   @default("")
+  passwordHash String   @default("")
+  role         UserRole @default(JOB_SEEKER)
+  avatarUrl    String?
+  isActive     Boolean  @default(true)
+
+  // Email verification (isVerified in the domain maps to this column)
+  emailVerified          Boolean   @default(false)
+  verificationCode       String?
+  verificationCodeExpiry DateTime?
+
+  // Password reset (6-digit code flow — see Flow 0.3)
+  passwordResetCode       String?
+  passwordResetCodeExpiry DateTime?
+
+  lastLogin DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   // Job seeker profile
   jobSeekerProfile JobSeekerProfile?
   // Employer profile
   employerProfile  EmployerProfile?
+  // Auth sessions
+  refreshTokens    RefreshToken[]
 
+  @@index([email])
   @@map("users")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // SHA-256 hash of the refresh token — plaintext is never stored.
+  tokenHash String    @unique
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+  // Soft-delete for rotation: NULL = live, non-null = consumed/revoked (kept so a
+  // replayed already-rotated token can be detected as reuse/theft).
+  revokedAt DateTime?
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@index([userId, revokedAt])
+  @@map("refresh_tokens")
 }
 
 model JobSeekerProfile {

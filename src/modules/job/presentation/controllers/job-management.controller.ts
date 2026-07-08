@@ -15,7 +15,7 @@ import { JobResponseDto } from '../dto/job-response.dto';
 @ApiTags('Job Management')
 @ApiBearerAuth()
 @UseGuards(RolesGuard)
-@Roles('employer')
+@Roles('EMPLOYER')
 @Controller('employer/jobs')
 export class JobManagementController {
   constructor(private readonly jobService: JobService) {}

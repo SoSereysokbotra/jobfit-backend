@@ -1,10 +1,11 @@
-import { NestFactory, Reflector } from '@nestjs/core';
+import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import * as cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
-import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
+import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
-import { ResponseTransformInterceptor } from './common/interceptors/response-transform.interceptor';
+import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -12,8 +13,15 @@ async function bootstrap() {
   // Global prefix
   app.setGlobalPrefix('api/v1');
 
-  // CORS
-  app.enableCors({ origin: process.env.CORS_ORIGIN ?? 'http://localhost:3000' });
+  // Cookie parsing — the auth flow uses httpOnly cookies (refresh token, verification
+  // sessions). Must run before guards/controllers read req.cookies.
+  app.use(cookieParser());
+
+  // CORS — credentials enabled so the browser sends/receives auth cookies.
+  app.enableCors({
+    origin: process.env.CORS_ORIGIN ?? 'http://localhost:3000',
+    credentials: true,
+  });
 
   // Global validation pipe
   app.useGlobalPipes(
@@ -25,13 +33,12 @@ async function bootstrap() {
   );
 
   // Global exception filter
-  app.useGlobalFilters(new GlobalExceptionFilter());
+  app.useGlobalFilters(new AllExceptionsFilter());
 
   // Global interceptors
-  const reflector = app.get(Reflector);
   app.useGlobalInterceptors(
     new LoggingInterceptor(),
-    new ResponseTransformInterceptor(),
+    new TransformInterceptor(),
   );
 
   // Swagger
@@ -40,6 +47,7 @@ async function bootstrap() {
     .setDescription('Job matching platform API')
     .setVersion('1.0')
     .addBearerAuth()
+    .addCookieAuth('refresh_token')
     .build();
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/docs', app, document);

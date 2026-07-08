@@ -1,10 +1,11 @@
-import { Request } from 'express';
-import { SupabaseJwtPayload } from '../infra/supabase/supabase-auth.service';
+import { AuthenticatedUser } from '../common/guards/jwt-auth.guard';
 
 declare global {
   namespace Express {
     interface Request {
-      user: SupabaseJwtPayload;
+      // Populated by JwtAuthGuard (self-managed JWT auth). Optional because
+      // @Public() / OptionalJwtAuthGuard routes may be anonymous.
+      user?: AuthenticatedUser;
     }
   }
 }
