@@ -325,17 +325,37 @@ model EmployerProfile {
 }
 
 model Company {
-  id          String   @id @default(uuid())
-  name        String
+  id          String  @id @default(uuid())
+  name        String  @unique
   description String?
   website     String?
   logoUrl     String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  industry    String? // Industry ID
+  size        String? // STARTUP | SMALL | MEDIUM | LARGE | ENTERPRISE
+  foundedYear Int?
+
+  // Location
+  city    String?
+  state   String?
+  country String?
+
+  // Glassdoor data
+  glassdoorId      String?
+  glassdoorRating  Float?
+  glassdoorReviews Int?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   employers EmployerProfile[]
   jobs      Job[]
 
+  // NOTE: Prisma's @@fulltext is MySQL-only and invalid on PostgreSQL. Company search is
+  // implemented with case-insensitive `contains` in the repository; for production-grade
+  // full-text search add a tsvector GIN index via a raw migration and switch to $queryRaw.
+  @@index([name])
+  @@index([industry])
   @@map("companies")
 }
 
