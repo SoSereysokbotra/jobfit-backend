@@ -24,7 +24,8 @@
       "@infra/*": ["src/infra/*"],
       "@events/*": ["src/events/*"],
       "@core/*": ["src/core/*"],
-      "@shared-kernel/*": ["src/shared-kernel/*"]
+      "@shared-kernel/*": ["src/shared-kernel/*"],
+      "@shared/*": ["src/shared/*"]
     }
   },
   "include": ["src/**/*"],

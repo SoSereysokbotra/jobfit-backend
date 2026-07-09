@@ -28,14 +28,56 @@ enum ApplicationStatus {
   ACCEPTED
 }
 
+// ── Shared-kernel enums (Phase 3) ────────────────────────────────────────────
+enum SubscriptionTier {
+  FREE
+  PREMIUM
+  PROFESSIONAL
+}
+
+enum JobLevel {
+  INTERN
+  ENTRY
+  MID
+  SENIOR
+  LEAD
+  MANAGER
+  DIRECTOR
+  C_LEVEL
+}
+
+enum RemoteType {
+  ON_SITE
+  HYBRID
+  REMOTE
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  TEMPORARY
+  FREELANCE
+}
+
+enum DegreeLevel {
+  HIGH_SCHOOL
+  ASSOCIATE
+  BACHELOR
+  MASTER
+  DOCTORATE
+  CERTIFICATION
+}
+
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
-  name         String   @default("")
-  passwordHash String   @default("")
-  role         UserRole @default(JOB_SEEKER)
-  avatarUrl    String?
-  isActive     Boolean  @default(true)
+  id               String           @id @default(uuid())
+  email            String           @unique
+  name             String           @default("")
+  passwordHash     String           @default("")
+  role             UserRole         @default(JOB_SEEKER)
+  subscriptionTier SubscriptionTier @default(FREE)
+  avatarUrl        String?
+  isActive         Boolean          @default(true)
 
   // Email verification (isVerified in the domain maps to this column)
   emailVerified          Boolean   @default(false)
@@ -51,14 +93,23 @@ model User {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  // Job seeker profile
+  // Job seeker profile (legacy — kept for job/application/company modules)
   jobSeekerProfile JobSeekerProfile?
   // Employer profile
   employerProfile  EmployerProfile?
   // Auth sessions
   refreshTokens    RefreshToken[]
 
+  // ── User module (Phase 3) ──────────────────────────────────────────────────
+  profile        Profile?
+  experiences    Experience[]
+  educations     Education[]
+  certifications Certification[]
+  skills         UserSkill[]
+  analytics      UserAnalytics?
+
   @@index([email])
+  @@index([subscriptionTier])
   @@map("users")
 }
 
@@ -78,6 +129,167 @@ model RefreshToken {
   @@index([tokenHash])
   @@index([userId, revokedAt])
   @@map("refresh_tokens")
+}
+
+// ── User module (Phase 3) ──────────────────────────────────────────────────────
+
+model Profile {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  firstName String
+  lastName  String
+  phone     String?
+  photoUrl  String?
+  bio       String?
+  headline  String? // e.g. "Senior Software Engineer at Google"
+
+  // Location
+  city      String?
+  state     String?
+  country   String?
+  latitude  Float?
+  longitude Float?
+
+  // Work preferences
+  desiredJobLevels       JobLevel[]
+  desiredRemoteTypes     RemoteType[]
+  desiredEmploymentTypes EmploymentType[]
+  desiredIndustries      String[] // Industry IDs
+
+  // Salary
+  minSalary      Int?
+  maxSalary      Int?
+  salaryCurrency String @default("USD")
+
+  // Social links
+  linkedinUrl  String?
+  githubUrl    String?
+  portfolioUrl String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([userId])
+  @@map("profiles")
+}
+
+model Experience {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  company        String
+  title          String
+  jobLevel       JobLevel
+  employmentType EmploymentType
+  industry       String // Industry ID
+
+  description  String?
+  isCurrentJob Boolean @default(false)
+
+  startDate DateTime
+  endDate   DateTime?
+
+  technologies String[] // tech used
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([userId])
+  @@index([company])
+  @@map("experiences")
+}
+
+model Education {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  institution  String
+  degreeLevel  DegreeLevel
+  fieldOfStudy String
+  description  String?
+
+  startDate DateTime
+  endDate   DateTime?
+  gpa       Float?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([userId])
+  @@index([institution])
+  @@map("educations")
+}
+
+model Certification {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name          String
+  issuer        String
+  credentialId  String?
+  credentialUrl String?
+
+  issueDate      DateTime
+  expirationDate DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([userId])
+  @@map("certifications")
+}
+
+model UserSkill {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  skillId String
+  skill   Skill  @relation(fields: [skillId], references: [id], onDelete: Restrict)
+
+  endorsementCount  Int    @default(0)
+  proficiencyLevel  String @default("INTERMEDIATE") // BEGINNER, INTERMEDIATE, ADVANCED, EXPERT
+  yearsOfExperience Float?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@unique([userId, skillId])
+  @@index([userId])
+  @@index([skillId])
+  @@map("user_skills")
+}
+
+model UserAnalytics {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  totalApplications         Int   @default(0)
+  totalInterviews           Int   @default(0)
+  totalOffers               Int   @default(0)
+  applicationAcceptanceRate Float @default(0)
+  interviewAcceptanceRate   Float @default(0)
+
+  profileViewCount    Int       @default(0)
+  lastProfileViewDate DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([userId])
+  @@map("user_analytics")
 }
 
 model JobSeekerProfile {
@@ -134,7 +346,7 @@ model Job {
   title       String
   description String
   status      JobStatus @default(DRAFT)
-  remoteType  String    // e.g. "REMOTE", "HYBRID", "ON_SITE"
+  remoteType  String // e.g. "REMOTE", "HYBRID", "ON_SITE"
   location    String?
   minSalary   Int?
   maxSalary   Int?
@@ -181,8 +393,8 @@ model MatchScore {
   job                Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
   jobSeekerProfileId String
   jobSeekerProfile   JobSeekerProfile @relation(fields: [jobSeekerProfileId], references: [id], onDelete: Cascade)
-  score              Float            // 0 - 100
-  breakdown          Json?            // sub-scores e.g. skill, experience
+  score              Float // 0 - 100
+  breakdown          Json? // sub-scores e.g. skill, experience
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
 
@@ -197,7 +409,8 @@ model Skill {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  jobs JobSkill[]
+  jobs       JobSkill[]
+  userSkills UserSkill[]
 
   @@map("skills")
 }
