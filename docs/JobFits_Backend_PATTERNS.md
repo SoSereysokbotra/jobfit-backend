@@ -31,7 +31,7 @@ Just replace `[Entity]` with your entity name.
 ```typescript
 // src/modules/[entity]/domain/entities/[entity].entity.ts
 
-import { Entity } from '@/common/abstracts/entity';
+import { Entity } from '@core/domain/entity';
 
 export class [Entity] extends Entity {
   // Properties
@@ -84,7 +84,7 @@ export class [Entity] extends Entity {
 ```typescript
 // src/modules/[entity]/domain/entities/[aggregate].entity.ts
 
-import { AggregateRoot } from '@/common/abstracts/aggregate-root';
+import { AggregateRoot } from '@core/domain/aggregate-root';
 import { [Entity]CreatedEvent } from '../events/[entity]-created.event';
 import { [Entity]UpdatedEvent } from '../events/[entity]-updated.event';
 
@@ -186,7 +186,7 @@ export class [Aggregate] extends AggregateRoot {
 ```typescript
 // src/shared/kernel/value-objects/[value-object].vo.ts
 
-import { ValueObject } from '@/common/abstracts/value-object';
+import { ValueObject } from '@core/domain/value-object';
 
 export class [ValueObject] extends ValueObject {
   readonly value: string;
@@ -227,7 +227,7 @@ export class [ValueObject] extends ValueObject {
 ```typescript
 // src/shared/kernel/value-objects/[complex].vo.ts
 
-import { ValueObject } from '@/common/abstracts/value-object';
+import { ValueObject } from '@core/domain/value-object';
 
 export class [Complex] extends ValueObject {
   readonly property1: string;
@@ -293,7 +293,7 @@ export class [Complex] extends ValueObject {
 ```typescript
 // src/modules/[entity]/domain/events/[entity]-[action].event.ts
 
-import { DomainEvent } from '@/common/abstracts/domain-event';
+import { DomainEvent } from '@core/domain/domain-event';
 
 export class [Entity]CreatedEvent extends DomainEvent {
   constructor(
@@ -385,7 +385,7 @@ export class [Entity]CreatedListener implements OnModuleInit {
 ## Repository Interface
 
 ```typescript
-// src/common/abstracts/repository.ts
+// src/core/repository/base-repository.interface.ts
 
 export interface IRepository<T> {
   save(entity: T): Promise<void>;
@@ -404,7 +404,7 @@ export interface IRepository<T> {
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/infrastructure/database/prisma.service';
 import { [Entity] } from '../../domain/entities/[entity].entity';
-import { IRepository } from '@/common/abstracts/repository';
+import { IRepository } from '@core/repository/base-repository.interface';
 
 @Injectable()
 export class [Entity]Repository implements IRepository<[Entity]> {
@@ -1580,8 +1580,8 @@ When creating new files, start with these headers:
 
 ```typescript
 // Entity
-import { Entity } from '@/common/abstracts/entity';
-import { AggregateRoot } from '@/common/abstracts/aggregate-root';
+import { Entity } from '@core/domain/entity';
+import { AggregateRoot } from '@core/domain/aggregate-root';
 
 // Service
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';

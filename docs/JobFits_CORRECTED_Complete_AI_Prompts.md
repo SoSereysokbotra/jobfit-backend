@@ -38,11 +38,11 @@ REFERENCES (read all):
 Task: Create the core DDD building block abstracts
 
 Files to create:
-1. src/common/abstracts/entity.ts
-2. src/common/abstracts/aggregate-root.ts
-3. src/common/abstracts/value-object.ts
-4. src/common/abstracts/domain-event.ts
-5. src/common/abstracts/repository.ts
+1. src/core/domain/entity.ts
+2. src/core/domain/aggregate-root.ts
+3. src/core/domain/value-object.ts
+4. src/core/domain/domain-event.ts
+5. src/core/repository/base-repository.interface.ts
 
 Requirements:
 - Entity: base class with id, createdAt, updatedAt properties
@@ -384,7 +384,7 @@ Requirements (from BACKEND_PART1.md & PATTERNS.md):
 Code quality:
 - All immutable, no setters
 - Include validation in constructor
-- All extend ValueObject from src/common/abstracts/value-object.ts
+- All extend ValueObject from src/core/domain/value-object.ts
 - Follow Value Object Pattern from PATTERNS.md exactly
 ```
 
@@ -486,7 +486,7 @@ Requirements (from PATTERNS.md & BACKEND_PART1.md):
     - Updates updatedAt
 
 Code quality:
-- Extend AggregateRoot from @/common/abstracts/aggregate-root.ts
+- Extend AggregateRoot from @core/domain/aggregate-root.ts
 - Use enums from @/shared/kernel/enums
 - Include JSDoc comments
 - Follow Aggregate Root Pattern from PATTERNS.md
@@ -536,7 +536,7 @@ Requirements (from PATTERNS.md):
   - skillName: string
 
 Code quality:
-- All extend DomainEvent from @/common/abstracts/domain-event.ts
+- All extend DomainEvent from @core/domain/domain-event.ts
 - All call super(aggregateId) in constructor
 - Export all from index.ts
 - Follow Domain Event Pattern from PATTERNS.md
@@ -704,7 +704,7 @@ Profile entity:
   - static create(props): Profile
   - get fullName(): string (return firstName + " " + lastName)
   - updateWorkPreferences(prefs: { jobLevels?, remoteTypes?, employmentTypes?, industries? }): void
-  - Extends Entity from @/common/abstracts/entity.ts
+  - Extends Entity from @core/domain/entity.ts
  
 Experience entity:
 - Properties (from BACKEND_PART1.md):
@@ -757,7 +757,7 @@ Certification entity:
   - Extends Entity
  
 CODE QUALITY (from PATTERNS.md):
-- All extend Entity from @/common/abstracts/entity.ts
+- All extend Entity from @core/domain/entity.ts
 - All have constructor with props parameter
 - All have static create() factory method
 - Include business logic methods as specified
@@ -1523,7 +1523,7 @@ Company entity (extends Entity):
 - Properties: name, description?, website?, logoUrl?, industry?, size?, location?, glassdoorRating?
 - static create(props): Company
 - get displayName(): string (return name)
-- Extends Entity from @/common/abstracts/entity.ts
+- Extends Entity from @core/domain/entity.ts
  
 CompanyRepository (implements IRepository<Company>):
 - save(company), findById(id), delete(id)

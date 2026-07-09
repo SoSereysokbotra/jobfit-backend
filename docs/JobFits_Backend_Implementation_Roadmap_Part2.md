@@ -47,7 +47,7 @@ model Company {
 
 ### 4.2 Company Entity
 ```typescript
-import { Entity } from '@/common/abstracts/entity';
+import { Entity } from '@core/domain/entity';
 import { Location } from '@/shared/kernel/value-objects/location.vo';
 
 export class Company extends Entity {
@@ -170,7 +170,7 @@ model Job {
 
 ### 5A.2 Job Entity
 ```typescript
-import { AggregateRoot } from '@/common/abstracts/aggregate-root';
+import { AggregateRoot } from '@core/domain/aggregate-root';
 import { JobLevel } from '@/shared/kernel/enums/job-level.enum';
 import { RemoteType } from '@/shared/kernel/enums/remote-type.enum';
 import { JobCreatedEvent } from '../events/job-created.event';

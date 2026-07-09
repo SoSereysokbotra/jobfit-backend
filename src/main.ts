@@ -1,5 +1,5 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, Logger } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import * as cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
@@ -8,6 +8,7 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 
 async function bootstrap() {
+  const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule);
 
   // Global prefix
@@ -29,6 +30,7 @@ async function bootstrap() {
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
+      transformOptions: { enableImplicitConversion: true },
     }),
   );
 
@@ -52,10 +54,30 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/docs', app, document);
 
+  // Graceful shutdown — lets Nest run onModuleDestroy / onApplicationShutdown
+  // hooks (closing Prisma/Redis connections, etc.) on SIGINT/SIGTERM.
+  app.enableShutdownHooks();
+
   const port = process.env.PORT ?? 3000;
-  await app.listen(port);
-  console.log(`🚀  JobFit API running on http://localhost:${port}/api/v1`);
-  console.log(`📚  Swagger docs at   http://localhost:${port}/api/docs`);
+  const environment = process.env.NODE_ENV ?? 'development';
+
+  try {
+    await app.listen(port);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EADDRINUSE') {
+      logger.error(
+        `Port ${port} is already in use — is another instance running?`,
+      );
+    } else {
+      logger.error('Failed to start application', (error as Error).stack);
+    }
+    process.exit(1);
+  }
+
+  logger.log(
+    `🚀  JobFit API running on http://localhost:${port}/api/v1 (env: ${environment})`,
+  );
+  logger.log(`📚  Swagger docs at   http://localhost:${port}/api/docs`);
 }
 
 bootstrap();
