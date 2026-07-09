@@ -41,6 +41,11 @@ export class UserService {
     return this.userRepository.findByEmail(email);
   }
 
+  /** List non-deleted users, newest first, paginated. */
+  async getAll(skip = 0, take = 20): Promise<User[]> {
+    return this.userRepository.findAll(skip, take);
+  }
+
   /** Change a user's subscription tier, persist, and publish any resulting events. */
   async upgradeSubscription(
     userId: string,

@@ -62,7 +62,7 @@ export class SkillsService {
     return this.userSkillRepository.findByUserId(userId);
   }
 
-  async endorseSkill(userId: string, skillId: string): Promise<void> {
+  async endorseSkill(userId: string, skillId: string): Promise<UserSkill> {
     const userSkill = await this.userSkillRepository.findByUserAndSkill(
       userId,
       skillId,
@@ -71,5 +71,6 @@ export class SkillsService {
 
     userSkill.endorse();
     await this.userSkillRepository.save(userSkill);
+    return userSkill;
   }
 }
