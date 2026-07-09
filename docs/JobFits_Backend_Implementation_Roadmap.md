@@ -95,7 +95,7 @@ Tasks:
 ```
 
 ### 1.4 DDD Building Blocks (Core Infrastructure)
-Create in `src/common/abstracts/`:
+Create in `src/core/domain/`:
 
 **entity.ts**
 ```typescript
@@ -172,7 +172,7 @@ Create `src/events/`:
 **domain-event-bus.service.ts**
 ```typescript
 import { Injectable } from '@nestjs/common';
-import { DomainEvent } from '@/common/abstracts/domain-event';
+import { DomainEvent } from '@core/domain/domain-event';
 
 @Injectable()
 export class DomainEventBus {
@@ -483,7 +483,7 @@ export enum DegreeLevel {
 
 **salary-range.vo.ts**
 ```typescript
-import { ValueObject } from '@/common/abstracts/value-object';
+import { ValueObject } from '@core/domain/value-object';
 
 export class SalaryRange extends ValueObject {
   readonly min: number;
@@ -510,7 +510,7 @@ export class SalaryRange extends ValueObject {
 
 **location.vo.ts**
 ```typescript
-import { ValueObject } from '@/common/abstracts/value-object';
+import { ValueObject } from '@core/domain/value-object';
 
 export class Location extends ValueObject {
   readonly city: string;
@@ -552,7 +552,7 @@ export class Location extends ValueObject {
 
 **email.vo.ts**
 ```typescript
-import { ValueObject } from '@/common/abstracts/value-object';
+import { ValueObject } from '@core/domain/value-object';
 
 export class Email extends ValueObject {
   readonly value: string;
@@ -578,7 +578,7 @@ export class Email extends ValueObject {
 
 **phone.vo.ts**
 ```typescript
-import { ValueObject } from '@/common/abstracts/value-object';
+import { ValueObject } from '@core/domain/value-object';
 
 export class Phone extends ValueObject {
   readonly value: string;
@@ -602,7 +602,7 @@ export class Phone extends ValueObject {
 
 **currency.vo.ts**
 ```typescript
-import { ValueObject } from '@/common/abstracts/value-object';
+import { ValueObject } from '@core/domain/value-object';
 
 export class Currency extends ValueObject {
   readonly code: string;
@@ -625,7 +625,7 @@ export class Currency extends ValueObject {
 
 **skill.entity.ts**
 ```typescript
-import { Entity } from '@/common/abstracts/entity';
+import { Entity } from '@core/domain/entity';
 
 export class Skill extends Entity {
   name: string;
@@ -650,7 +650,7 @@ export class Skill extends Entity {
 
 **industry.entity.ts**
 ```typescript
-import { Entity } from '@/common/abstracts/entity';
+import { Entity } from '@core/domain/entity';
 
 export class Industry extends Entity {
   name: string;
@@ -1047,7 +1047,7 @@ Create `src/modules/user/domain/entities/`:
 
 **user.entity.ts**
 ```typescript
-import { AggregateRoot } from '@/common/abstracts/aggregate-root';
+import { AggregateRoot } from '@core/domain/aggregate-root';
 import { UserRole } from '@/shared/kernel/enums/user-role.enum';
 import { SubscriptionTier } from '@/shared/kernel/enums/subscription-tier.enum';
 import { UserCreatedEvent } from '../events/user-created.event';
@@ -1098,7 +1098,7 @@ export class User extends AggregateRoot {
 
 **profile.entity.ts**
 ```typescript
-import { Entity } from '@/common/abstracts/entity';
+import { Entity } from '@core/domain/entity';
 import { Location } from '@/shared/kernel/value-objects/location.vo';
 import { SalaryRange } from '@/shared/kernel/value-objects/salary-range.vo';
 
@@ -1205,7 +1205,7 @@ Create `src/modules/user/infrastructure/repositories/`:
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@/infrastructure/database/prisma.service';
 import { User } from '../../domain/entities/user.entity';
-import { IRepository } from '@/common/abstracts/repository';
+import { IRepository } from '@core/repository/base-repository.interface';
 
 @Injectable()
 export class UserRepository implements IRepository<User> {
@@ -1405,7 +1405,7 @@ Create `src/modules/user/domain/events/`:
 
 **user-created.event.ts**
 ```typescript
-import { DomainEvent } from '@/common/abstracts/domain-event';
+import { DomainEvent } from '@core/domain/domain-event';
 
 export class UserCreatedEvent extends DomainEvent {
   constructor(
