@@ -1,11 +1,15 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { DomainEventBus } from './domain-event-bus.service';
 
 /**
- * EventBusModule wraps NestJS EventEmitter2.
- * In Phase 2+, the EventEmitter2 can be swapped out for BullMQ or an
- * external message broker (NATS, RabbitMQ) without touching the listeners.
+ * EventBusModule wraps NestJS EventEmitter2 and exposes the DomainEventBus used by the
+ * application layer to publish aggregate domain events.
+ * Global so any module can inject DomainEventBus without re-importing this module.
+ * In Phase 2+, the EventEmitter2 can be swapped out for BullMQ or an external message
+ * broker (NATS, RabbitMQ) without touching the listeners.
  */
+@Global()
 @Module({
   imports: [
     EventEmitterModule.forRoot({
@@ -19,6 +23,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
       verboseMemoryLeak: true,
     }),
   ],
-  exports: [EventEmitterModule],
+  providers: [DomainEventBus],
+  exports: [EventEmitterModule, DomainEventBus],
 })
 export class EventBusModule {}
