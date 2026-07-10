@@ -72,4 +72,23 @@ export class StorageService {
       throw new Error(`Storage delete failed: ${error.message}`);
     }
   }
+
+  /**
+   * Downloads a file from a bucket as a Buffer (used by the resume parser).
+   */
+  async download(bucket: StorageBucket, path: string): Promise<Buffer> {
+    const { data, error } = await this.supabase.instance.storage
+      .from(bucket)
+      .download(path);
+
+    if (error || !data) {
+      this.logger.error(
+        `Storage download failed [${bucket}/${path}]: ${error?.message}`,
+      );
+      throw new Error(`Storage download failed: ${error?.message}`);
+    }
+
+    const arrayBuffer = await data.arrayBuffer();
+    return Buffer.from(arrayBuffer);
+  }
 }

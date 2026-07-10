@@ -107,6 +107,7 @@ model User {
   certifications Certification[]
   skills         UserSkill[]
   analytics      UserAnalytics?
+  resumes        Resume[]
 
   @@index([email])
   @@index([subscriptionTier])
@@ -303,7 +304,6 @@ model JobSeekerProfile {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  resume       Resume?
   applications Application[]
   matchScores  MatchScore[]
 
@@ -380,16 +380,66 @@ model Job {
   @@map("jobs")
 }
 
-model Resume {
-  id                 String           @id @default(uuid())
-  jobSeekerProfileId String           @unique
-  jobSeekerProfile   JobSeekerProfile @relation(fields: [jobSeekerProfileId], references: [id], onDelete: Cascade)
-  fileUrl            String
-  parsedContent      Json?
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
+enum ResumeParsingStatus {
+  PENDING
+  PROCESSING
+  SUCCESS
+  FAILED
+}
 
+model Resume {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  fileName String
+  fileUrl  String
+  fileSize Int
+  fileType String // "PDF" | "DOCX"
+
+  title     String?
+  isDefault Boolean @default(false)
+
+  parsingStatus ResumeParsingStatus @default(PENDING)
+  parsingError  String?
+
+  atsScore     Int?
+  qualityScore Int?
+  version      Int @default(1)
+
+  parsedData ParsedResumeData?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([userId])
+  @@index([isDefault])
+  @@index([parsingStatus])
   @@map("resumes")
+}
+
+model ParsedResumeData {
+  id       String @id @default(uuid())
+  resumeId String @unique
+  resume   Resume @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+
+  fullName String?
+  email    String?
+  phone    String?
+  location String?
+
+  summary        String?
+  experiences    String? // JSON string
+  educations     String? // JSON string
+  skills         String? // JSON string
+  certifications String? // JSON string
+  rawText        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("parsed_resume_data")
 }
 
 model Application {
