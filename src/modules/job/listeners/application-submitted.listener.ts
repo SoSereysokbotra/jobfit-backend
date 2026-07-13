@@ -12,7 +12,7 @@ export class ApplicationSubmittedListener {
 
   @OnEvent('ApplicationSubmittedEvent')
   async handleApplicationSubmitted(event: ApplicationSubmittedEvent): Promise<void> {
-    this.logger.log(`Job ${event.jobId} received a new application from ${event.jobSeekerId}`);
+    this.logger.log(`Job ${event.jobId} received a new application from ${event.userId}`);
     // TODO: increment job.applicantCount via jobRepo when that field is added to the schema
   }
 }

@@ -40,6 +40,7 @@ import { MatchingModule } from './modules/matching/matching.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { PaymentModule } from './modules/payment/payment.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { LearningModule } from './modules/learning/learning.module';
 
 @Module({
   imports: [
@@ -73,6 +74,7 @@ import { AdminModule } from './modules/admin/admin.module';
     NotificationModule,
     PaymentModule,
     AdminModule,
+    LearningModule,
   ],
   providers: [
     // Apply JwtAuthGuard globally — secure by default; use @Public() to open a route.

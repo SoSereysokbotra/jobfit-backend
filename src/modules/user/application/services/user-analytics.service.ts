@@ -8,6 +8,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { UserAnalyticsRepository } from '../../infrastructure/repositories/user-analytics.repository';
 import { UserRepository } from '../../infrastructure/repositories/user.repository';
 import { UserAnalytics } from '../../domain/entities/user-analytics.entity';
+import { AnalyticsStatsResponseDto } from '../dtos/analytics-stats.dto';
 import { ERROR_MESSAGES } from '@common/constants/error-messages';
 
 @Injectable()
@@ -28,6 +29,12 @@ export class UserAnalyticsService {
     const analytics = UserAnalytics.create({ userId });
     await this.userAnalyticsRepository.save(analytics);
     return analytics;
+  }
+
+  /** Funnel + engagement stats for the user (Phase 11 — analytics feature). */
+  async getMyStats(userId: string): Promise<AnalyticsStatsResponseDto> {
+    const analytics = await this.getAnalytics(userId);
+    return new AnalyticsStatsResponseDto(analytics);
   }
 
   async recordApplicationSubmitted(userId: string): Promise<void> {

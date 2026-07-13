@@ -1,11 +1,16 @@
-import { IDomainEvent } from '@core/domain/domain-event';
+// src/modules/application/domain/events/application-status-changed.event.ts
+//
+// Raised when an application transitions to a new status.
 
-export class ApplicationStatusChangedEvent implements IDomainEvent {
-  public readonly dateTimeOccurred = new Date();
+import { DomainEvent } from '@common/abstracts/domain-event';
+import { ApplicationStatus } from '@shared/kernel/enums/application-status.enum';
+
+export class ApplicationStatusChangedEvent extends DomainEvent {
   constructor(
-    public readonly applicationId: string,
-    public readonly previousStatus: string,
-    public readonly newStatus: string,
-  ) {}
-  getAggregateId(): string { return this.applicationId; }
+    aggregateId: string,
+    public readonly oldStatus: ApplicationStatus,
+    public readonly newStatus: ApplicationStatus,
+  ) {
+    super(aggregateId);
+  }
 }

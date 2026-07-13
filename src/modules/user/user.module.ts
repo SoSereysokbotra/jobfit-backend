@@ -4,6 +4,7 @@ import { ProfileController } from './presentation/controllers/profile.controller
 import { SkillsController } from './presentation/controllers/skills.controller';
 import { ExperienceController } from './presentation/controllers/experience.controller';
 import { EducationController } from './presentation/controllers/education.controller';
+import { AnalyticsController } from './presentation/controllers/analytics.controller';
 
 // Repositories (Prisma-backed). PrismaService is provided globally by PrismaModule.
 import { UserRepository } from './infrastructure/repositories/user.repository';
@@ -28,6 +29,7 @@ import { UserAnalyticsService } from './application/services/user-analytics.serv
     SkillsController,
     ExperienceController,
     EducationController,
+    AnalyticsController,
   ],
   providers: [
     // Repositories

@@ -20,12 +20,16 @@ enum JobStatus {
 }
 
 enum ApplicationStatus {
-  APPLIED
-  REVIEWING
-  INTERVIEWING
-  OFFERED
-  REJECTED
+  DRAFT
+  SUBMITTED
+  SCREENING
+  INTERVIEW
+  OFFER
   ACCEPTED
+  NEGOTIATING
+  REJECTED
+  WITHDRAWN
+  ARCHIVED
 }
 
 // ── Shared-kernel enums (Phase 3) ────────────────────────────────────────────
@@ -108,6 +112,7 @@ model User {
   skills         UserSkill[]
   analytics      UserAnalytics?
   resumes        Resume[]
+  applications   Application[]
 
   @@index([email])
   @@index([subscriptionTier])
@@ -304,7 +309,6 @@ model JobSeekerProfile {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  applications Application[]
   matchScores  MatchScore[]
 
   @@map("job_seeker_profiles")
@@ -407,7 +411,8 @@ model Resume {
   qualityScore Int?
   version      Int @default(1)
 
-  parsedData ParsedResumeData?
+  parsedData   ParsedResumeData?
+  applications Application[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -443,18 +448,62 @@ model ParsedResumeData {
 }
 
 model Application {
-  id                 String            @id @default(uuid())
-  jobId              String
-  job                Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  jobSeekerProfileId String
-  jobSeekerProfile   JobSeekerProfile  @relation(fields: [jobSeekerProfileId], references: [id], onDelete: Cascade)
-  resumeUrl          String
-  status             ApplicationStatus @default(APPLIED)
-  createdAt          DateTime          @default(now())
-  updatedAt          DateTime          @updatedAt
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobId  String
+  job    Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
-  @@unique([jobId, jobSeekerProfileId])
+  resumeId String?
+  resume   Resume? @relation(fields: [resumeId], references: [id], onDelete: SetNull)
+
+  status     ApplicationStatus @default(SUBMITTED)
+  appliedAt  DateTime          @default(now())
+  notes      String?
+  coverLetter String?
+
+  timeline      ApplicationTimeline[]
+  contactPerson ContactPerson?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@unique([userId, jobId])
+  @@index([userId])
+  @@index([status])
   @@map("applications")
+}
+
+model ApplicationTimeline {
+  id            String      @id @default(uuid())
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  status      ApplicationStatus
+  eventType   String
+  description String?
+  eventDate   DateTime          @default(now())
+
+  @@index([applicationId])
+  @@map("application_timelines")
+}
+
+model ContactPerson {
+  id            String      @id @default(uuid())
+  applicationId String      @unique
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  name        String
+  email       String?
+  phone       String?
+  title       String?
+  linkedinUrl String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("contact_persons")
 }
 
 model MatchScore {
