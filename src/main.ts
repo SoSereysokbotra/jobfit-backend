@@ -43,16 +43,40 @@ async function bootstrap() {
     new TransformInterceptor(),
   );
 
-  // Swagger
+  // Swagger — interactive API docs / test console at /api/docs.
+  //
+  // To test protected routes: call an auth login (e.g. POST /api/v1/auth/login or
+  // /api/v1/admin/login), copy the `accessToken` from the response, click "Authorize"
+  // and paste it. Two bearer schemes are registered because controllers use both the
+  // default (@ApiBearerAuth()) and the named 'access-token' (@ApiBearerAuth('access-token'))
+  // form — authorizing either covers every secured endpoint.
   const config = new DocumentBuilder()
     .setTitle('JobFit API')
-    .setDescription('Job matching platform API')
+    .setDescription(
+      'Job matching platform API. Includes the Admin (`/admin/*`) and Employer ' +
+        '(`/employer/*`) modules. Authorize with a JWT access token to call protected routes.',
+    )
     .setVersion('1.0')
-    .addBearerAuth()
+    .addBearerAuth(
+      { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+      'bearer',
+    )
+    .addBearerAuth(
+      { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+      'access-token',
+    )
     .addCookieAuth('refresh_token')
     .build();
   const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/docs', app, document);
+  SwaggerModule.setup('api/docs', app, document, {
+    // Keep the entered token across page reloads so you don't re-authorize each time.
+    swaggerOptions: {
+      persistAuthorization: true,
+      tagsSorter: 'alpha',
+      operationsSorter: 'alpha',
+    },
+    customSiteTitle: 'JobFit API — Docs',
+  });
 
   // Graceful shutdown — lets Nest run onModuleDestroy / onApplicationShutdown
   // hooks (closing Prisma/Redis connections, etc.) on SIGINT/SIGTERM.

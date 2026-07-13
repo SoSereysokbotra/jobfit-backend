@@ -7,11 +7,15 @@ import { CloseJobUseCase } from './application/use-cases/close-job.use-case';
 import { SearchJobsUseCase } from './application/use-cases/search-jobs.use-case';
 import { JobService } from './application/job.service';
 import { JobController } from './presentation/controllers/job.controller';
-import { JobManagementController } from './presentation/controllers/job-management.controller';
 import { ApplicationSubmittedListener } from './listeners/application-submitted.listener';
 
+// NOTE: employer-facing job management (`employer/jobs`) now lives in the Employer module
+// (EmployerJobController), which resolves the real company via EmployerProfile and stamps
+// the poster. The old placeholder JobManagementController here has been removed to avoid a
+// duplicate `employer/jobs` route registration.
+
 @Module({
-  controllers: [JobController, JobManagementController],
+  controllers: [JobController],
   providers: [
     // Repository binding: token → concrete Prisma implementation
     { provide: JOB_REPOSITORY, useClass: PrismaJobRepository },

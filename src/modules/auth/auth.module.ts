@@ -7,7 +7,7 @@
 // NOTE: no controller yet — the presentation layer comes next. Handlers are dispatched
 // via the CommandBus (CqrsModule) once the controller is added.
 
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { CqrsModule } from '@nestjs/cqrs';
 import { SharedModule } from '../../shared/shared.module';
 import { AuthController } from './presentation/controllers/auth.controller';
@@ -54,6 +54,9 @@ const CommandHandlers = [
   LogoutHandler,
 ];
 
+// Global so TokenBlacklistService (needed by the app-wide JwtAuthGuard, and by any feature
+// controller referencing it via @UseGuards(JwtAuthGuard)) is injectable everywhere.
+@Global()
 @Module({
   imports: [CqrsModule, SharedModule],
   controllers: [AuthController],

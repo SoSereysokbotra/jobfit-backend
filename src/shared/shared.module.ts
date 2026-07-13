@@ -6,7 +6,7 @@
 // is added here (as shown in NESTJS-QUICK-START-GUIDE.md's SharedModule) so the module
 // actually resolves and boots. JwtModule is also re-exported for downstream modules.
 
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from './services/prisma.service';
@@ -15,6 +15,9 @@ import { EmailService } from './services/email.service';
 import { LoggerService } from './services/logger.service';
 import { RedisService } from './services/redis.service';
 
+// Global so the app-wide JwtAuthGuard (and any feature controller that references it via
+// @UseGuards(JwtAuthGuard)) can inject JwtService without each module re-importing this.
+@Global()
 @Module({
   imports: [
     JwtModule.registerAsync({

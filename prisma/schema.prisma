@@ -114,6 +114,14 @@ enum AuditResourceType {
   SYSTEM
 }
 
+// ── Employer module enums (Employer Phase 2) ─────────────────────────────────
+// How a company's ownership was verified. Two methods only (docs' simplified scope):
+// email-domain match, or manual admin review.
+enum CompanyVerificationMethod {
+  EMAIL_DOMAIN
+  ADMIN_REVIEW
+}
+
 model User {
   id               String           @id @default(uuid())
   email            String           @unique
@@ -159,6 +167,12 @@ model User {
   // Admin actions this user performed / system alerts this admin acknowledged.
   auditLogs                AuditLog[]    @relation("AdminAuditLogs")
   acknowledgedSystemEvents SystemEvent[] @relation("AcknowledgedSystemEvents")
+
+  // ── Employer module (Employer Phase 2) ─────────────────────────────────────
+  // Jobs this employer posted, applications they reviewed, and pipeline moves they made.
+  postedJobs             Job[]                     @relation("PostedByEmployer")
+  reviewedApplications   Application[]             @relation("ReviewedByEmployer")
+  movedApplicationStages ApplicationStageHistory[] @relation("MovedByUser")
 
   @@index([email])
   @@index([role])
@@ -395,6 +409,11 @@ model Company {
   glassdoorRating  Float?
   glassdoorReviews Int?
 
+  // ── Employer module: ownership verification (Employer Phase 2) ──────────────
+  isVerified         Boolean                    @default(false)
+  verificationMethod CompanyVerificationMethod?
+  verifiedAt         DateTime?
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
@@ -407,6 +426,7 @@ model Company {
   // full-text search add a tsvector GIN index via a raw migration and switch to $queryRaw.
   @@index([name])
   @@index([industry])
+  @@index([isVerified])
   @@map("companies")
 }
 
@@ -424,10 +444,16 @@ model Job {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
+  // ── Employer module (Employer Phase 2) ──────────────────────────────────────
+  // Employer (user) who posted this job. NULL = external/ingested job (no employer).
+  postedByEmployerId String?
+  postedByEmployer   User?   @relation("PostedByEmployer", fields: [postedByEmployerId], references: [id], onDelete: SetNull)
+
   applications Application[]
   matchScores  MatchScore[]
   skills       JobSkill[]
 
+  @@index([postedByEmployerId])
   @@map("jobs")
 }
 
@@ -509,8 +535,14 @@ model Application {
   notes       String?
   coverLetter String?
 
+  // ── Employer module: pipeline review (Employer Phase 2) ─────────────────────
+  employerNotes        String?
+  reviewedByEmployerId String?
+  reviewedByEmployer   User?   @relation("ReviewedByEmployer", fields: [reviewedByEmployerId], references: [id], onDelete: SetNull)
+
   timeline      ApplicationTimeline[]
   contactPerson ContactPerson?
+  stageHistory  ApplicationStageHistory[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -519,7 +551,30 @@ model Application {
   @@unique([userId, jobId])
   @@index([userId])
   @@index([status])
+  @@index([reviewedByEmployerId])
   @@map("applications")
+}
+
+// ── Employer module: application pipeline stage history (Employer Phase 2) ─────
+// One row per pipeline transition. Reuses ApplicationStatus (not a separate pipeline
+// enum) to stay consistent with the rest of the system.
+model ApplicationStageHistory {
+  id            String      @id @default(uuid())
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  previousStatus ApplicationStatus?
+  newStatus      ApplicationStatus
+
+  movedByUserId String?
+  movedByUser   User?   @relation("MovedByUser", fields: [movedByUserId], references: [id], onDelete: SetNull)
+
+  notes     String?
+  createdAt DateTime @default(now())
+
+  @@index([applicationId])
+  @@index([createdAt])
+  @@map("application_stage_history")
 }
 
 model ApplicationTimeline {

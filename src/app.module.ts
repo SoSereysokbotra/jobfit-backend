@@ -40,6 +40,7 @@ import { MatchingModule } from './modules/matching/matching.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { PaymentModule } from './modules/payment/payment.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { EmployerModule } from './modules/employer/employer.module';
 import { LearningModule } from './modules/learning/learning.module';
 
 @Module({
@@ -74,6 +75,7 @@ import { LearningModule } from './modules/learning/learning.module';
     NotificationModule,
     PaymentModule,
     AdminModule,
+    EmployerModule,
     LearningModule,
   ],
   providers: [
