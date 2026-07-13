@@ -1,4 +1,5 @@
 # JobFits Backend - CORRECTED Complete AI Prompts
+
 ## WITH ALL FILES REFERENCED FOR MAXIMUM CONTEXT
 
 **IMPORTANT:** Each prompt now references ALL relevant documentation files.  
@@ -23,7 +24,11 @@ Copilot will have complete context and generate better code.
 
 ---
 
+
+
 # PHASE 1: Foundation & Infrastructure (Week 1)
+
+
 
 ## Prompt 1.1: DDD Building Blocks (CORRECTED)
 
@@ -38,11 +43,11 @@ REFERENCES (read all):
 Task: Create the core DDD building block abstracts
 
 Files to create:
-1. src/core/domain/entity.ts
-2. src/core/domain/aggregate-root.ts
-3. src/core/domain/value-object.ts
-4. src/core/domain/domain-event.ts
-5. src/core/repository/base-repository.interface.ts
+1. src/common/abstracts/entity.ts
+2. src/common/abstracts/aggregate-root.ts
+3. src/common/abstracts/value-object.ts
+4. src/common/abstracts/domain-event.ts
+5. src/common/abstracts/repository.ts
 
 Requirements:
 - Entity: base class with id, createdAt, updatedAt properties
@@ -59,6 +64,8 @@ Code quality requirements:
 ```
 
 ---
+
+
 
 ## Prompt 1.2: Event Bus Infrastructure (CORRECTED)
 
@@ -98,6 +105,8 @@ Code quality:
 
 ---
 
+
+
 ## Prompt 1.3: Global Exception Filter (CORRECTED)
 
 ```
@@ -136,6 +145,8 @@ Code quality:
 ```
 
 ---
+
+
 
 ## Prompt 1.4: Custom Decorators (CORRECTED)
 
@@ -180,6 +191,8 @@ Code quality:
 
 ---
 
+
+
 ## Prompt 1.5: Supabase Auth Guard (CORRECTED)
 
 ```
@@ -217,6 +230,8 @@ Code quality:
 
 ---
 
+
+
 ## Prompt 1.6: App Module Setup (CORRECTED)
 
 ```
@@ -251,6 +266,8 @@ Include JSDoc explanation.
 ```
 
 ---
+
+
 
 ## Prompt 1.7: Main Bootstrap File (CORRECTED)
 
@@ -291,7 +308,11 @@ Code quality:
 
 ---
 
+
+
 # PHASE 2: Shared Kernel & Enums (Week 2)
+
+
 
 ## Prompt 2.1: All Enums (CORRECTED)
 
@@ -335,6 +356,8 @@ Code quality:
 ```
 
 ---
+
+
 
 ## Prompt 2.2: Value Objects (CORRECTED)
 
@@ -384,13 +407,17 @@ Requirements (from BACKEND_PART1.md & PATTERNS.md):
 Code quality:
 - All immutable, no setters
 - Include validation in constructor
-- All extend ValueObject from src/core/domain/value-object.ts
+- All extend ValueObject from src/common/abstracts/value-object.ts
 - Follow Value Object Pattern from PATTERNS.md exactly
 ```
 
 ---
 
+
+
 # PHASE 3: User Module (Weeks 3-4)
+
+
 
 ## Prompt 3.1: Prisma Schema for User Module (CORRECTED)
 
@@ -444,6 +471,8 @@ Code quality:
 
 ---
 
+
+
 ## Prompt 3.2: User Entity (CORRECTED)
 
 ```
@@ -486,13 +515,15 @@ Requirements (from PATTERNS.md & BACKEND_PART1.md):
     - Updates updatedAt
 
 Code quality:
-- Extend AggregateRoot from @core/domain/aggregate-root.ts
+- Extend AggregateRoot from @/common/abstracts/aggregate-root.ts
 - Use enums from @/shared/kernel/enums
 - Include JSDoc comments
 - Follow Aggregate Root Pattern from PATTERNS.md
 ```
 
 ---
+
+
 
 ## Prompt 3.3: User Domain Events (CORRECTED)
 
@@ -536,13 +567,15 @@ Requirements (from PATTERNS.md):
   - skillName: string
 
 Code quality:
-- All extend DomainEvent from @core/domain/domain-event.ts
+- All extend DomainEvent from @/common/abstracts/domain-event.ts
 - All call super(aggregateId) in constructor
 - Export all from index.ts
 - Follow Domain Event Pattern from PATTERNS.md
 ```
 
 ---
+
+
 
 ## Prompt 3.4: User Service (CORRECTED)
 
@@ -600,6 +633,8 @@ Code quality:
 ```
 
 ---
+
+
 
 ## Prompt 3.5: User Repository (CORRECTED)
 
@@ -661,8 +696,10 @@ Code quality:
 
 ---
 
+
+
 ## Prompt 3.6: Profile, Experience, Education, Certification Entities
- 
+
 ```
 I'm implementing Phase 3 of JobFits backend - User Module (Additional Entities).
  
@@ -704,7 +741,7 @@ Profile entity:
   - static create(props): Profile
   - get fullName(): string (return firstName + " " + lastName)
   - updateWorkPreferences(prefs: { jobLevels?, remoteTypes?, employmentTypes?, industries? }): void
-  - Extends Entity from @core/domain/entity.ts
+  - Extends Entity from @/common/abstracts/entity.ts
  
 Experience entity:
 - Properties (from BACKEND_PART1.md):
@@ -757,7 +794,7 @@ Certification entity:
   - Extends Entity
  
 CODE QUALITY (from PATTERNS.md):
-- All extend Entity from @core/domain/entity.ts
+- All extend Entity from @/common/abstracts/entity.ts
 - All have constructor with props parameter
 - All have static create() factory method
 - Include business logic methods as specified
@@ -771,11 +808,13 @@ VALIDATION (from QUICK_REFERENCE.md):
 - NAME_MAX_LENGTH (100) for company, institution
 - BIO_MAX_LENGTH (500) for description fields
 ```
- 
+
 ---
- 
+
+
+
 ## Prompt 3.7: UserSkill and UserAnalytics Entities
- 
+
 ```
 I'm implementing Phase 3 of JobFits backend - User Module (Skills & Analytics).
  
@@ -834,11 +873,13 @@ CODE QUALITY (from PATTERNS.md):
 - Immutable calculations (don't store if can be calculated)
 - Import Skill from Shared Kernel
 ```
- 
+
 ---
- 
+
+
+
 ## Prompt 3.8: Skills & Experience Services
- 
+
 ```
 I'm implementing Phase 3 of JobFits backend - User Module (Services).
  
@@ -927,11 +968,13 @@ REPOSITORIES (from PATTERNS.md):
 - UserSkillRepository: save(), findById(), findByUserId(), delete()
 - ExperienceRepository: save(), findById(), findByUserId(), delete()
 ```
- 
+
 ---
- 
+
+
+
 ## Prompt 3.9: Education, Analytics & Profile Services
- 
+
 ```
 I'm implementing Phase 3 of JobFits backend - User Module (More Services).
  
@@ -1047,11 +1090,13 @@ CODE QUALITY (from PATTERNS.md):
 - Error handling with appropriate exceptions
 - Return domain entities only
 ```
- 
+
 ---
- 
+
+
+
 ## Prompt 3.10: User DTOs & Validation
- 
+
 ```
 I'm implementing Phase 3 of JobFits backend - User Module (DTOs).
  
@@ -1148,11 +1193,13 @@ CODE QUALITY (from PATTERNS.md):
 - Import from class-validator and @nestjs/class-validator
 - Validation rules from QUICK_REFERENCE.md VALIDATION object
 ```
- 
+
 ---
- 
+
+
+
 ## Prompt 3.11: User Controllers
- 
+
 ```
 I'm implementing Phase 3 of JobFits backend - User Module (Controllers).
  
@@ -1230,11 +1277,13 @@ CODE QUALITY (from PATTERNS.md):
 - Throw appropriate exceptions: NotFoundException, BadRequestException
 - Use error messages from QUICK_REFERENCE.md
 ```
- 
+
 ---
- 
+
+
+
 ## Prompt 3.12: Profile Controller
- 
+
 ```
 I'm implementing Phase 3 of JobFits backend - User Module (Profile Controller).
  
@@ -1304,11 +1353,13 @@ CODE QUALITY (from PATTERNS.md):
 - Error handling for not found
 - Return response DTOs
 ```
- 
+
 ---
- 
+
+
+
 ## Prompt 3.13: Skills, Experience, Education Controllers
- 
+
 ```
 I'm implementing Phase 3 of JobFits backend - User Module (Skills/Exp/Ed Controllers).
  
@@ -1405,11 +1456,13 @@ CODE QUALITY (from PATTERNS.md):
 - Return response DTOs
 - Appropriate HTTP status codes from QUICK_REFERENCE.md
 ```
- 
+
 ---
- 
+
+
+
 ## Prompt 3.14: User Module Registration
- 
+
 ```
 I'm implementing Phase 3 of JobFits backend - User Module (Module Registration).
  
@@ -1475,13 +1528,17 @@ CODE QUALITY (from PATTERNS.md):
 - Organize providers list clearly
 - Add comments for clarity
 ```
- 
+
 ---
- 
+
+
+
 # PHASE 4: Company Module (Week 4.5)
- 
+
+
+
 ## Prompt 4.1: Company Entity, Repository, Service (COMPLETE)
- 
+
 ```
 I'm implementing Phase 4 of JobFits backend - Company Module.
  
@@ -1523,7 +1580,7 @@ Company entity (extends Entity):
 - Properties: name, description?, website?, logoUrl?, industry?, size?, location?, glassdoorRating?
 - static create(props): Company
 - get displayName(): string (return name)
-- Extends Entity from @core/domain/entity.ts
+- Extends Entity from @/common/abstracts/entity.ts
  
 CompanyRepository (implements IRepository<Company>):
 - save(company), findById(id), delete(id)
@@ -1573,98 +1630,115 @@ After creating:
 2. npx prisma migrate dev --name company_module
 3. npx prisma generate
 ```
- 
+
 ---
- 
+
+
+
 ## Prompt 4.2: Company DTO, Controller, Module
- 
+
 ```
-I'm implementing Phase 4 of JobFits backend - Company Module (Controller & Module).
+I'm implementing Phase 4 of JobFits backend - Company Module.
  
 REFERENCES (read all):
-1. ./docs/IMPLEMENTATION_ROADMAP.md (Phase 4: Controller, lines 400-600)
-2. ./docs/BACKEND_PART2.md (Company Module: API Endpoints)
-3. ./docs/PATTERNS.md (DTO Pattern, Controller Pattern, Module Pattern sections)
-4. ./docs/QUICK_REFERENCE.md (HTTP Status Codes)
+1. ./docs/IMPLEMENTATION_ROADMAP.md (Phase 4: Company Module, lines 1-400)
+2. ./docs/BACKEND_PART2.md (Company Module section)
+3. ./docs/PATTERNS.md (Entity Pattern, Repository Pattern, Service Pattern sections)
+4. ./docs/QUICK_REFERENCE.md (Full enums for context)
  
-Task: Create Company DTO, controller, and module
+Task: Create Company entity, repository, and service
  
 Files to create:
-1. src/modules/company/application/dtos/create-company.dto.ts
-2. src/modules/company/presentation/controllers/company.controller.ts
-3. src/modules/company/company.module.ts
+1. Update prisma/schema.prisma - Add Company model
+2. src/modules/company/domain/entities/company.entity.ts
+3. src/modules/company/infrastructure/repositories/company.repository.ts
+4. src/modules/company/application/services/company.service.ts
  
-REQUIREMENTS:
+REQUIREMENTS FROM BACKEND_PART2.md:
  
-CreateCompanyDto (from PATTERNS.md):
-- @IsNotEmpty() @IsString() @MinLength(2) name
-- @IsOptional() @IsString() description
-- @IsOptional() @IsString() website (validate URL_REGEX from QUICK_REFERENCE.md)
-- @IsOptional() @IsString() logoUrl
-- @IsOptional() @IsString() industry
-- @IsOptional() @IsEnum(['STARTUP', 'SMALL', 'MEDIUM', 'LARGE', 'ENTERPRISE']) size
-- @IsOptional() @IsNumber() foundedYear
-- @IsOptional() city, state, country
+Prisma Company model:
+- id (String @id @default(cuid()))
+- name (String @unique)
+- description (String?)
+- website (String?)
+- logoUrl (String?)
+- industry (String?) - Industry ID
+- size (String?) - STARTUP, SMALL, MEDIUM, LARGE, ENTERPRISE
+- foundedYear (Int?)
+- city, state, country
+- glassdoorId (String?)
+- glassdoorRating (Float?)
+- glassdoorReviews (Int?)
+- jobs relation []
+- createdAt, updatedAt
+- Indexes: name, industry
+- Fulltext search on name, description
  
-CompanyController (@Controller('companies')):
-- Constructor: inject CompanyService
+Company entity (extends Entity):
+- Properties: name, description?, website?, logoUrl?, industry?, size?, location?, glassdoorRating?
+- static create(props): Company
+- get displayName(): string (return name)
+- Extends Entity from @/common/abstracts/entity.ts
  
-Endpoints (from BACKEND_PART2.md):
-1. @Post()
-   - POST /companies
-   - @UseGuards(SupabaseAuthGuard)
-   - @Body() dto: CreateCompanyDto
-   - Call createCompany(dto)
-   - Return company
-   - Response: 201 CREATED
+CompanyRepository (implements IRepository<Company>):
+- save(company), findById(id), delete(id)
+- findByName(name): Promise<Company | null>
+- search(query: string, filters?): Promise<Company[]> - Postgres FTS
+  - Filter by: industry, size
+  - Search in: name, description using FTS
+- findAll(skip, take): Promise<Company[]>
+- private mapToDomain(raw): Company
  
-2. @Get('search')
-   - GET /companies/search?q=google&industry=tech
-   - @Public()
-   - @Query('q') query: string
-   - @Query('industry') industry?: string
-   - @Query('size') size?: string
-   - Call searchCompanies(query, { industry, size })
-   - Return array of companies
-   - Response: 200 OK
+CompanyService (@Injectable):
+- Constructor: inject CompanyRepository
  
-3. @Get(':id')
-   - GET /companies/:id
-   - @Public()
-   - Call getCompanyById(id)
-   - Return company
-   - Response: 200 OK
+- Methods (from BACKEND_PART2.md):
+  - async createCompany(dto: CreateCompanyDto): Promise<Company>
+    - Validate no duplicate name
+    - Create entity
+    - Save
+    - Return company
  
-4. @Get(':id/stats')
-   - GET /companies/:id/stats
-   - @Public()
-   - Call getCompanyStats(id)
-   - Return { jobCount, reviews }
-   - Response: 200 OK
+  - async getCompanyById(id: string): Promise<Company>
+    - Find by ID
+    - Throw NotFoundException if not found
+    - Return company
  
-CompanyModule (@Module()):
-- Controllers: [CompanyController]
-- Providers: [CompanyService, CompanyRepository]
-- Exports: [CompanyService]
-- Imports: []
+  - async searchCompanies(query: string, filters?: { industry?, size? }): Promise<Company[]>
+    - Call repository.search()
+    - Return results
  
-Update app.module.ts:
-- Import CompanyModule
-- Add to imports array after UserModule
+  - async getCompanyStats(id: string): Promise<{ jobCount: number, reviews: number }>
+    - Get company
+    - Count jobs for company
+    - Return stats
+ 
+  - async deleteCompany(id: string): Promise<void>
+    - Soft delete
  
 CODE QUALITY (from PATTERNS.md):
-- DTO validation
-- Controller pattern
-- Module pattern
-- Error handling
+- Entity pattern for Company
+- Repository pattern with FTS search
+- Service pattern
+- Error handling: NotFoundException, BadRequestException
+- Return entities, not Prisma models
+ 
+After creating:
+1. npx prisma format
+2. npx prisma migrate dev --name company_module
+3. npx prisma generate
 ```
- 
+
 ---
- 
+
+
+
 # PHASE 5A: Job Module - Core (Week 5)
- 
+
+
+
 ## Prompt 5A.1: Job Entity, Events, Repository, Service
- 
+
 ```
 I'm implementing Phase 5A of JobFits backend - Job Module (Core).
  
@@ -1775,11 +1849,13 @@ CODE QUALITY (from PATTERNS.md):
 After creating:
 1. npx prisma migrate dev --name job_module
 ```
- 
+
 ---
- 
+
+
+
 ## Prompt 5A.2: Job DTO, Controller, Module
- 
+
 ```
 I'm implementing Phase 5A of JobFits backend - Job Module (Controller & Module).
  
@@ -1861,13 +1937,17 @@ JobModule (@Module()):
 Update app.module.ts:
 - Add JobModule to imports
 ```
- 
+
 ---
- 
+
+
+
 # PHASE 5B: Resume Module - Upload & Parsing (Weeks 5-6)
- 
+
+
+
 ## Prompt 5B.1: Resume Module - Upload with Supabase
- 
+
 ```
 I'm implementing Phase 5B of JobFits backend - Resume Module (Upload).
  
@@ -1976,11 +2056,13 @@ After creating:
 2. Configure Supabase environment variables
 3. Install npm packages: pdf-parse, mammoth
 ```
- 
+
 ---
- 
+
+
+
 ## Prompt 5B.2: Resume Async Parsing with BullMQ
- 
+
 ```
 I'm implementing Phase 5B of JobFits backend - Resume Module (Async Parsing).
  
@@ -2060,11 +2142,13 @@ Dependencies:
 - npm install pdf-parse mammoth
 - Configure BullModule in resume.module.ts
 ```
- 
+
 ---
- 
+
+
+
 ## Prompt 5B.3: Resume Controller & Module
- 
+
 ```
 I'm implementing Phase 5B of JobFits backend - Resume Module (Controller).
  
@@ -2157,13 +2241,17 @@ ResumeModule (@Module()):
 Update app.module.ts:
 - Add ResumeModule to imports after JobModule
 ```
- 
+
 ---
- 
+
+
+
 # PHASE 5C: Resume Scoring (Week 6)
- 
+
+
+
 ## Prompt 5C.1: Resume Scoring Service
- 
+
 ```
 I'm implementing Phase 5C of JobFits backend - Resume Module (Scoring).
  
@@ -2255,11 +2343,13 @@ CODE QUALITY (from PATTERNS.md):
 - Cacheable: save scores to Resume.atsScore, Resume.qualityScore
 - Error handling for missing parsed data
 ```
- 
+
 ---
- 
+
+
+
 ## Prompt 5C.2: Resume Scoring Endpoints
- 
+
 ```
 I'm implementing Phase 5C of JobFits backend - Resume Module (Scoring Endpoints).
  
@@ -2310,13 +2400,17 @@ CODE QUALITY (from PATTERNS.md):
 - Return properly formatted responses
 - Error handling for invalid resume IDs
 ```
- 
+
 ---
- 
+
+
+
 # PHASE 6: Application Module (Week 7)
- 
+
+
+
 ## Prompt 6.1: Application Entity, Timeline, Contact Person
- 
+
 ```
 I'm implementing Phase 6 of JobFits backend - Application Module.
  
@@ -2391,11 +2485,13 @@ CODE QUALITY (from PATTERNS.md):
 - Event publishing
 - Error handling for invalid status transitions
 ```
- 
+
 ---
- 
+
+
+
 ## Prompt 6.2: Application Repositories & Services
- 
+
 ```
 I'm implementing Phase 6 of JobFits backend - Application Module (Repos & Services).
  
@@ -2482,11 +2578,13 @@ CODE QUALITY (from PATTERNS.md):
 - Validation of status transitions
 - Error handling: NotFoundException, BadRequestException
 ```
- 
+
 ---
- 
+
+
+
 ## Prompt 6.3: Application Controller & Module
- 
+
 ```
 I'm implementing Phase 6 of JobFits backend - Application Module (Controller).
  
@@ -2571,13 +2669,17 @@ ApplicationModule (@Module()):
 Update app.module.ts:
 - Add ApplicationModule to imports
 ```
- 
+
 ---
- 
+
+
+
 # PHASE 7: Matching Module (Week 8)
- 
+
+
+
 ## Prompt 7.1: Match Score Calculator & Recommendation Service
- 
+
 ```
 I'm implementing Phase 7 of JobFits backend - Matching Module.
  
@@ -2683,11 +2785,13 @@ CODE QUALITY (from PATTERNS.md):
 - Event publishing
 - Weighted scoring algorithm
 ```
- 
+
 ---
- 
+
+
+
 ## Prompt 7.2: Nightly Batch Job & Controller
- 
+
 ```
 I'm implementing Phase 7 of JobFits backend - Matching Module (Batch & Controller).
  
@@ -2791,13 +2895,17 @@ CODE QUALITY (from PATTERNS.md):
 - Error handling in batch job
 - Event publishing
 ```
- 
+
 ---
- 
+
+
+
 # PHASES 8-12: Summary Prompts
- 
+
+
+
 ## Prompt 8: Notification Module (Summary)
- 
+
 ```
 I'm implementing Phase 8 of JobFits backend - Notification Module.
  
@@ -2850,11 +2958,13 @@ Expected outcomes:
 - Preferences honored (quiet hours, disabled types)
 - Full event-to-notification pipeline
 ```
- 
+
 ---
- 
+
+
+
 ## Prompt 9: Payment Module (Summary)
- 
+
 ```
 I'm implementing Phase 9 of JobFits backend - Payment Module.
  
@@ -2912,11 +3022,13 @@ Expected outcomes:
 - Premium feature access control
 - Billing history & invoices
 ```
- 
+
 ---
- 
+
+
+
 ## Prompt 10: Admin Module (Summary)
- 
+
 ```
 I'm implementing Phase 10 of JobFits backend - Admin Module.
  
@@ -2974,11 +3086,13 @@ Expected outcomes:
 - Content moderation
 - Platform analytics
 ```
- 
+
 ---
- 
+
+
+
 ## Prompt 11: Advanced Features (Summary - Optional)
- 
+
 ```
 I'm implementing Phase 11 of JobFits backend - Advanced Features (Optional).
  
@@ -3031,11 +3145,13 @@ Expected outcomes:
 - Additional premium value propositions
 - Better job matching and preparation
 ```
- 
+
 ---
- 
+
+
+
 ## Prompt 12: Testing & Deployment (Summary)
- 
+
 ```
 I'm implementing Phase 12 of JobFits backend - Testing & Deployment.
  
@@ -3122,13 +3238,15 @@ Expected outcomes:
 - Automated CI/CD pipeline
 - Easy deployment & rollback
 ```
- 
+
 ---
- 
+
+
+
 # SUMMARY: COMPLETE PROMPT STRUCTURE
- 
+
 Each prompt now includes:
- 
+
 ✅ All 4 file references (ROADMAP, BACKEND_PART, PATTERNS, QUICK_REFERENCE)  
 ✅ Specific line numbers for reference  
 ✅ Complete requirements from all documents  
@@ -3140,16 +3258,15 @@ Each prompt now includes:
 ✅ Error handling requirements  
 ✅ Code quality standards  
 ✅ What to do after creating  
- 
-**Copy entire prompt including ALL REFERENCES section into Copilot/Codex for best results!**
- 
----
- 
-**READY TO BUILD!** 🚀
- 
-Pick Phase 1, Prompt 1.1, and start building.
- 
-All prompts are complete, detailed, and reference ALL documentation files.
- 
-Good luck! 💪
 
+**Copy entire prompt including ALL REFERENCES section into Copilot/Codex for best results!**
+
+---
+
+**READY TO BUILD!** 🚀
+
+Pick Phase 1, Prompt 1.1, and start building.
+
+All prompts are complete, detailed, and reference ALL documentation files.
+
+Good luck! 💪

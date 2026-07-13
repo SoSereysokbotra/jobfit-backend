@@ -13,6 +13,12 @@
     "incremental": true,
     "skipLibCheck": true,
     "strictNullChecks": true,
+    // Decorated DTO/response classes across this codebase declare properties without
+    // initializers (e.g. `@ApiProperty() email: string;`). That is valid because this
+    // project does not enable full `strict` mode, so `strictPropertyInitialization` is
+    // off. Pinned explicitly so every TypeScript engine (CLI and IDE language server)
+    // agrees and does not intermittently surface TS2564 on these properties.
+    "strictPropertyInitialization": false,
     "noImplicitAny": true,
     "strictBindCallApply": true,
     "forceConsistentCasingInFileNames": true,

@@ -73,6 +73,47 @@ enum DegreeLevel {
   CERTIFICATION
 }
 
+// ── Admin module enums (Admin MVP) ───────────────────────────────────────────
+// NOTE: the admin docs spell these lowercase (e.g. 'health_check'); we follow this
+// project's existing convention of UPPERCASE Prisma enum members (see UserRole above).
+
+enum SystemEventType {
+  HEALTH_CHECK
+  API_LATENCY_HIGH
+  ERROR_RATE_HIGH
+  QUEUE_BACKED_UP
+  EMAIL_DELIVERY_LOW
+  DATABASE_ERROR
+}
+
+enum SystemEventSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+enum EmailEventType {
+  SENT
+  DELIVERED
+  BOUNCED_SOFT
+  BOUNCED_HARD
+  COMPLAINED
+  UNSUBSCRIBED
+}
+
+enum AuditActionType {
+  USER_RESET_PASSWORD
+  USER_ACCOUNT_DELETED
+  USER_UNLOCKED
+  EMAIL_SUPPRESSED
+}
+
+enum AuditResourceType {
+  USER
+  EMAIL
+  SYSTEM
+}
+
 model User {
   id               String           @id @default(uuid())
   email            String           @unique
@@ -114,7 +155,13 @@ model User {
   resumes        Resume[]
   applications   Application[]
 
+  // ── Admin module (Admin MVP) ───────────────────────────────────────────────
+  // Admin actions this user performed / system alerts this admin acknowledged.
+  auditLogs                AuditLog[]    @relation("AdminAuditLogs")
+  acknowledgedSystemEvents SystemEvent[] @relation("AcknowledgedSystemEvents")
+
   @@index([email])
+  @@index([role])
   @@index([subscriptionTier])
   @@map("users")
 }
@@ -309,7 +356,7 @@ model JobSeekerProfile {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  matchScores  MatchScore[]
+  matchScores MatchScore[]
 
   @@map("job_seeker_profiles")
 }
@@ -409,7 +456,7 @@ model Resume {
 
   atsScore     Int?
   qualityScore Int?
-  version      Int @default(1)
+  version      Int  @default(1)
 
   parsedData   ParsedResumeData?
   applications Application[]
@@ -457,9 +504,9 @@ model Application {
   resumeId String?
   resume   Resume? @relation(fields: [resumeId], references: [id], onDelete: SetNull)
 
-  status     ApplicationStatus @default(SUBMITTED)
-  appliedAt  DateTime          @default(now())
-  notes      String?
+  status      ApplicationStatus @default(SUBMITTED)
+  appliedAt   DateTime          @default(now())
+  notes       String?
   coverLetter String?
 
   timeline      ApplicationTimeline[]
@@ -552,4 +599,63 @@ model Industry {
   updatedAt DateTime @updatedAt
 
   @@map("industries")
+}
+
+// ── Admin module models (Admin MVP) ──────────────────────────────────────────
+
+/// System health alerts (Feature 1). Emitted by monitoring / health checks; admins
+/// can acknowledge them from the dashboard.
+model SystemEvent {
+  id        String              @id @default(uuid())
+  eventType SystemEventType
+  severity  SystemEventSeverity @default(INFO)
+  message   String
+  details   Json? // structured payload: latency_ms, endpoint, error_count, ...
+
+  acknowledgedAt        DateTime?
+  acknowledgedByAdminId String?
+  acknowledgedByAdmin   User?     @relation("AcknowledgedSystemEvents", fields: [acknowledgedByAdminId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([severity])
+  @@index([createdAt])
+  @@index([acknowledgedAt])
+  @@map("system_events")
+}
+
+/// Email delivery events (Feature 3). Fed by the email provider (SendGrid/SES) webhook.
+/// `notificationId` is a soft reference kept for future linkage — there is no
+/// notifications table yet, so it is a plain nullable column (no FK).
+model EmailEvent {
+  id              String         @id @default(uuid())
+  recipientEmail  String
+  notificationId  String?
+  eventType       EmailEventType
+  reason          String? // for bounces/complaints: why it failed
+  externalEventId String? // provider event id (SendGrid/SES)
+
+  createdAt DateTime @default(now())
+
+  @@index([recipientEmail])
+  @@index([createdAt])
+  @@index([eventType])
+  @@map("email_events")
+}
+
+/// Basic admin action log (Audit Logging). Intentionally minimal for the MVP —
+/// no old/new values, IP, or free-text reason (Phase 2+).
+model AuditLog {
+  id           String            @id @default(uuid())
+  adminId      String
+  admin        User              @relation("AdminAuditLogs", fields: [adminId], references: [id], onDelete: Cascade)
+  actionType   AuditActionType
+  resourceType AuditResourceType
+  resourceId   String? // user id or email address the action targeted
+
+  createdAt DateTime @default(now())
+
+  @@index([adminId])
+  @@index([createdAt])
+  @@map("audit_logs")
 }
