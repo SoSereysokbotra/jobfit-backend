@@ -139,15 +139,26 @@ export class SystemHealthService {
     });
   }
 
-  /** Proxy for the background job queue: resumes still awaiting parsing. */
-  private countPendingQueue(): Promise<number> {
-    return this.prisma.resume.count({
-      where: {
-        parsingStatus: {
-          in: [ResumeParsingStatus.PENDING, ResumeParsingStatus.PROCESSING],
+  /**
+   * Proxy for the background job queue: resumes still awaiting parsing.
+   * Resilient by design — a single unavailable metric (e.g. a schema/DB mismatch on the
+   * resumes table) must never fail the whole health snapshot, so we log and return 0.
+   */
+  private async countPendingQueue(): Promise<number> {
+    try {
+      return await this.prisma.resume.count({
+        where: {
+          parsingStatus: {
+            in: [ResumeParsingStatus.PENDING, ResumeParsingStatus.PROCESSING],
+          },
         },
-      },
-    });
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Queue-depth probe unavailable (returning 0): ${(err as Error).message}`,
+      );
+      return 0;
+    }
   }
 
   private async computeEmailDeliveryRate(now: Date): Promise<number> {
