@@ -14,6 +14,12 @@ const envSchema = z.object({
     .optional(),
   LOG_FORMAT: z.enum(['json', 'pretty']).optional(),
 
+  // ── Service identity (Phase 2 — GCP Error Reporting) ──────────────────────
+  // Attached to reported errors as serviceContext. SERVICE_VERSION falls back to
+  // Cloud Run's auto-injected K_REVISION, then 'local'.
+  SERVICE_NAME: z.string().optional(),
+  SERVICE_VERSION: z.string().optional(),
+
   // Database
   DATABASE_URL: z.string().url(),
 

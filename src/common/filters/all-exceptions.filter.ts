@@ -22,12 +22,24 @@ import {
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Request, Response } from 'express';
 import { PinoLogger } from 'nestjs-pino';
+import { redactString } from '../logging/redaction';
+import { toReportedErrorEvent } from '../logging/error-reporting';
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
-  constructor(private readonly logger: PinoLogger) {}
+  private readonly service: string;
+  private readonly version: string;
+
+  constructor(
+    private readonly logger: PinoLogger,
+    config: ConfigService,
+  ) {
+    this.service = config.get<string>('app.serviceName', 'jobfit-backend');
+    this.version = config.get<string>('app.serviceVersion', 'local');
+  }
 
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
@@ -51,28 +63,39 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const isServerError = status >= 500;
     const userId = (request as Request & { user?: { id?: string } }).user?.id;
 
-    const logContext = {
-      context: AllExceptionsFilter.name,
-      method: request.method,
-      path: request.url,
-      statusCode: status,
-      userId,
-      err:
-        exception instanceof Error
-          ? {
-              type: exception.name,
-              message: exception.message,
-              // Stack only for genuine failures — keeps 4xx logs lean.
-              ...(isServerError ? { stack: exception.stack } : {}),
-            }
-          : { message: String(exception) },
-    };
-
-    const logMessage = `[${request.method}] ${request.url} -> ${status}`;
     if (isServerError) {
-      this.logger.error(logContext, logMessage);
+      // Emit as a GCP Error Reporting ReportedErrorEvent so it is auto-grouped with
+      // stack trace, serviceContext (release), request + user context. requestId is
+      // attached by the pino request logger. The stack `message` is scrubbed for any
+      // secret-shaped substrings before it leaves the process.
+      const { payload, message } = toReportedErrorEvent(exception, {
+        service: this.service,
+        version: this.version,
+        method: request.method,
+        path: request.url,
+        statusCode: status,
+        userId,
+        userAgent: request.headers['user-agent'],
+        remoteIp: request.ip,
+      });
+      this.logger.error(payload, redactString(message));
     } else {
-      this.logger.warn(logContext, logMessage);
+      // 4xx are expected/operational — WARN, not ERROR, so Error Reporting stays
+      // focused on genuine failures.
+      this.logger.warn(
+        {
+          context: AllExceptionsFilter.name,
+          method: request.method,
+          path: request.url,
+          statusCode: status,
+          userId,
+          err:
+            exception instanceof Error
+              ? { type: exception.name, message: exception.message }
+              : { message: String(exception) },
+        },
+        `[${request.method}] ${request.url} -> ${status}`,
+      );
     }
 
     response.status(status).json({

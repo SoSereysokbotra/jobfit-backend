@@ -15,5 +15,11 @@ export default registerAs('app', () => {
     logLevel: process.env.LOG_LEVEL ?? 'info',
     logFormat: (process.env.LOG_FORMAT ??
       (nodeEnv === 'development' ? 'pretty' : 'json')) as LogFormat,
+
+    // Service identity (Phase 2). serviceVersion prefers an explicit SERVICE_VERSION
+    // (git SHA at build), then Cloud Run's K_REVISION, then 'local'.
+    serviceName: process.env.SERVICE_NAME ?? 'jobfit-backend',
+    serviceVersion:
+      process.env.SERVICE_VERSION ?? process.env.K_REVISION ?? 'local',
   };
 });

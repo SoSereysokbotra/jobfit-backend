@@ -95,13 +95,22 @@ export function buildLoggerParams(
       quietReqLogger: true,
       customAttributeKeys: { reqId: 'requestId' },
 
-      // Minimal redaction of credentials in the auto request/response logs.
-      // Full field/body redaction is Phase 1.
+      // fast-redact layer for known paths. Complements the recursive `formatters.log`
+      // redactor: fast-redact also covers child-logger bindings (e.g. anything added
+      // via PinoLogger.assign), which formatters.log does not see.
       redact: {
         paths: [
           'req.headers.authorization',
           'req.headers.cookie',
           'res.headers["set-cookie"]',
+          // Top-level secret keys (catch child-bound values too).
+          'authorization',
+          'password',
+          'token',
+          'accessToken',
+          'refreshToken',
+          'apiKey',
+          'secret',
         ],
         censor: '**REDACTED**',
       },
