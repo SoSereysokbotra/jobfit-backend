@@ -1,3 +1,6 @@
+// Tracing must be imported FIRST so OpenTelemetry can patch http/pg/ioredis before they load
+// (self-starting; no-op unless TRACE_ENABLED=true). Phase 3.
+import './tracing';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';

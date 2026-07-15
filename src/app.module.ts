@@ -48,6 +48,10 @@ import { AdminModule } from './modules/admin/admin.module';
 import { EmployerModule } from './modules/employer/employer.module';
 import { LearningModule } from './modules/learning/learning.module';
 
+// Observability (Phase 3) — health probes + Prometheus metrics.
+import { HealthModule } from './modules/health/health.module';
+import { MetricsModule } from './modules/metrics/metrics.module';
+
 @Module({
   imports: [
     // ── Config (global) ──────────────────────────────────────────────────────
@@ -96,6 +100,10 @@ import { LearningModule } from './modules/learning/learning.module';
     AdminModule,
     EmployerModule,
     LearningModule,
+
+    // ── Observability (Phase 3) ──────────────────────────────────────────────
+    HealthModule,
+    MetricsModule,
   ],
   providers: [
     // Apply JwtAuthGuard globally — secure by default; use @Public() to open a route.

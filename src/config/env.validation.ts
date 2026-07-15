@@ -20,6 +20,14 @@ const envSchema = z.object({
   SERVICE_NAME: z.string().optional(),
   SERVICE_VERSION: z.string().optional(),
 
+  // ── Metrics & tracing (Phase 3) ───────────────────────────────────────────
+  // METRICS_ENABLED (default true) toggles /metrics; METRICS_TOKEN gates scrapes.
+  // TRACE_ENABLED turns on OpenTelemetry → Cloud Trace (needs GCP_PROJECT_ID).
+  METRICS_ENABLED: z.enum(['true', 'false']).optional(),
+  METRICS_TOKEN: z.string().optional(),
+  TRACE_ENABLED: z.enum(['true', 'false']).optional(),
+  GCP_PROJECT_ID: z.string().optional(),
+
   // Database
   DATABASE_URL: z.string().url(),
 

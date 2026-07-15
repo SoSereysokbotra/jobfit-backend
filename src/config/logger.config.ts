@@ -16,6 +16,7 @@
 
 import { randomUUID } from 'crypto';
 import type { IncomingMessage, ServerResponse } from 'http';
+import { trace } from '@opentelemetry/api';
 import { stdTimeFunctions } from 'pino';
 import type { Params } from 'nestjs-pino';
 import { redactValue } from '../common/logging/redaction';
@@ -41,6 +42,24 @@ const REQUEST_ID_HEADER = 'x-request-id';
  *  3. a fresh UUID.
  * The chosen id is echoed back on the response so clients can correlate.
  */
+/**
+ * Log↔trace correlation (Phase 3). When an OpenTelemetry span is active AND GCP_PROJECT_ID
+ * is set, stamp the Cloud Logging trace fields so a log line links to its Cloud Trace span.
+ * No-op (empty object) when tracing is off or no span is active — zero overhead in dev.
+ */
+function traceMixin(): Record<string, string> {
+  const projectId = process.env.GCP_PROJECT_ID;
+  if (!projectId) return {};
+  const span = trace.getActiveSpan();
+  if (!span) return {};
+  const ctx = span.spanContext();
+  if (!ctx?.traceId) return {};
+  return {
+    'logging.googleapis.com/trace': `projects/${projectId}/traces/${ctx.traceId}`,
+    'logging.googleapis.com/spanId': ctx.spanId,
+  };
+}
+
 function resolveRequestId(req: IncomingMessage, res: ServerResponse): string {
   const headers = req.headers;
   const fromHeader = headers[REQUEST_ID_HEADER];
@@ -94,6 +113,9 @@ export function buildLoggerParams(
       genReqId: resolveRequestId,
       quietReqLogger: true,
       customAttributeKeys: { reqId: 'requestId' },
+
+      // Log↔trace correlation (Phase 3) — adds Cloud Logging trace fields when a span is active.
+      mixin: traceMixin,
 
       // fast-redact layer for known paths. Complements the recursive `formatters.log`
       // redactor: fast-redact also covers child-logger bindings (e.g. anything added
