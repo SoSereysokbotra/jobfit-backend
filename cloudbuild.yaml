@@ -71,4 +71,5 @@ steps:
       # TRACE_ENABLED=false until the runtime SA has roles/cloudtrace.agent.
       - '--set-env-vars=NODE_ENV=production,LOG_FORMAT=json,LOG_LEVEL=info,METRICS_ENABLED=true,TRACE_ENABLED=false,SERVICE_NAME=${_SERVICE},SERVICE_VERSION=$BUILD_ID,GCP_PROJECT_ID=$PROJECT_ID'
       # SLACK_WEBHOOK_URL / REDIS_URL omitted until those secret values exist (optional/fail-open).
-      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,METRICS_TOKEN=METRICS_TOKEN:latest'
+      # SUPABASE_* are required at boot (SupabaseClientService.getOrThrow url + serviceRoleKey).
+      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,METRICS_TOKEN=METRICS_TOKEN:latest,SUPABASE_URL=SUPABASE_URL:latest,SUPABASE_SERVICE_ROLE_KEY=SUPABASE_SERVICE_ROLE_KEY:latest,SUPABASE_ANON_KEY=SUPABASE_ANON_KEY:latest,SUPABASE_JWT_SECRET=SUPABASE_JWT_SECRET:latest'
