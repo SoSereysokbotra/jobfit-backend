@@ -1,0 +1,110 @@
+{
+  "displayName": "JobFit — Overview",
+  "mosaicLayout": {
+    "columns": 12,
+    "tiles": [
+      {
+        "xPos": 0, "yPos": 0, "width": 6, "height": 4,
+        "widget": {
+          "title": "Request rate (req/s)",
+          "xyChart": {
+            "dataSets": [{
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"run.googleapis.com/request_count\" resource.type=\"cloud_run_revision\" resource.label.\"service_name\"=\"jobfit-backend\"",
+                  "aggregation": { "alignmentPeriod": "60s", "perSeriesAligner": "ALIGN_RATE", "crossSeriesReducer": "REDUCE_SUM" }
+                }
+              },
+              "plotType": "LINE"
+            }]
+          }
+        }
+      },
+      {
+        "xPos": 6, "yPos": 0, "width": 6, "height": 4,
+        "widget": {
+          "title": "Request latency (p95, ms)",
+          "xyChart": {
+            "dataSets": [{
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"run.googleapis.com/request_latencies\" resource.type=\"cloud_run_revision\" resource.label.\"service_name\"=\"jobfit-backend\"",
+                  "aggregation": { "alignmentPeriod": "60s", "perSeriesAligner": "ALIGN_PERCENTILE_95", "crossSeriesReducer": "REDUCE_MEAN" }
+                }
+              },
+              "plotType": "LINE"
+            }]
+          }
+        }
+      },
+      {
+        "xPos": 0, "yPos": 4, "width": 6, "height": 4,
+        "widget": {
+          "title": "5xx responses",
+          "xyChart": {
+            "dataSets": [{
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"run.googleapis.com/request_count\" resource.type=\"cloud_run_revision\" resource.label.\"service_name\"=\"jobfit-backend\" metric.label.\"response_code_class\"=\"5xx\"",
+                  "aggregation": { "alignmentPeriod": "60s", "perSeriesAligner": "ALIGN_RATE", "crossSeriesReducer": "REDUCE_SUM" }
+                }
+              },
+              "plotType": "LINE"
+            }]
+          }
+        }
+      },
+      {
+        "xPos": 6, "yPos": 4, "width": 6, "height": 4,
+        "widget": {
+          "title": "App server errors (log-based: jobfit_server_errors)",
+          "xyChart": {
+            "dataSets": [{
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"logging.googleapis.com/user/jobfit_server_errors\" resource.type=\"cloud_run_revision\"",
+                  "aggregation": { "alignmentPeriod": "60s", "perSeriesAligner": "ALIGN_DELTA", "crossSeriesReducer": "REDUCE_SUM" }
+                }
+              },
+              "plotType": "STACKED_BAR"
+            }]
+          }
+        }
+      },
+      {
+        "xPos": 0, "yPos": 8, "width": 6, "height": 4,
+        "widget": {
+          "title": "Instance count",
+          "xyChart": {
+            "dataSets": [{
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"run.googleapis.com/container/instance_count\" resource.type=\"cloud_run_revision\" resource.label.\"service_name\"=\"jobfit-backend\"",
+                  "aggregation": { "alignmentPeriod": "60s", "perSeriesAligner": "ALIGN_MEAN", "crossSeriesReducer": "REDUCE_SUM" }
+                }
+              },
+              "plotType": "LINE"
+            }]
+          }
+        }
+      },
+      {
+        "xPos": 6, "yPos": 8, "width": 6, "height": 4,
+        "widget": {
+          "title": "Container CPU utilization",
+          "xyChart": {
+            "dataSets": [{
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"run.googleapis.com/container/cpu/utilizations\" resource.type=\"cloud_run_revision\" resource.label.\"service_name\"=\"jobfit-backend\"",
+                  "aggregation": { "alignmentPeriod": "60s", "perSeriesAligner": "ALIGN_PERCENTILE_95", "crossSeriesReducer": "REDUCE_MEAN" }
+                }
+              },
+              "plotType": "LINE"
+            }]
+          }
+        }
+      }
+    ]
+  }
+}
