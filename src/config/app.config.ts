@@ -32,5 +32,8 @@ export default registerAs('app', () => {
     // `logging.googleapis.com/trace` field that links logs to traces.
     traceEnabled: process.env.TRACE_ENABLED === 'true',
     gcpProjectId: process.env.GCP_PROJECT_ID || undefined,
+
+    // Alerting (Phase 4). SLACK_WEBHOOK_URL enables Slack alerts; unset = silent no-op.
+    slackWebhookUrl: process.env.SLACK_WEBHOOK_URL || undefined,
   };
 });

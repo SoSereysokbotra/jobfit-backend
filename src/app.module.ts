@@ -52,6 +52,9 @@ import { LearningModule } from './modules/learning/learning.module';
 import { HealthModule } from './modules/health/health.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
 
+// Alerting (Phase 4) — system_events + Slack, used by the global exception filter.
+import { AlertingModule } from './modules/alerting/alerting.module';
+
 @Module({
   imports: [
     // ── Config (global) ──────────────────────────────────────────────────────
@@ -104,6 +107,9 @@ import { MetricsModule } from './modules/metrics/metrics.module';
     // ── Observability (Phase 3) ──────────────────────────────────────────────
     HealthModule,
     MetricsModule,
+
+    // ── Alerting (Phase 4) ───────────────────────────────────────────────────
+    AlertingModule,
   ],
   providers: [
     // Apply JwtAuthGuard globally — secure by default; use @Public() to open a route.

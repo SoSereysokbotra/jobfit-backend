@@ -27,6 +27,7 @@ import { Request, Response } from 'express';
 import { PinoLogger } from 'nestjs-pino';
 import { redactString } from '../logging/redaction';
 import { toReportedErrorEvent } from '../logging/error-reporting';
+import { AlertingService } from '@modules/alerting/alerting.service';
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
@@ -36,6 +37,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
   constructor(
     private readonly logger: PinoLogger,
     config: ConfigService,
+    private readonly alerting: AlertingService,
   ) {
     this.service = config.get<string>('app.serviceName', 'jobfit-backend');
     this.version = config.get<string>('app.serviceVersion', 'local');
@@ -79,6 +81,18 @@ export class AllExceptionsFilter implements ExceptionFilter {
         remoteIp: request.ip,
       });
       this.logger.error(payload, redactString(message));
+
+      // Phase 4 — raise an in-app + Slack alert (deduped, suppressed during boot). Fire-
+      // and-forget: alerting is fully fail-open and must never affect the response.
+      const requestId = (request as Request & { id?: string }).id;
+      void this.alerting.onServerError({
+        error: exception,
+        statusCode: status,
+        method: request.method,
+        path: request.url,
+        requestId: typeof requestId === 'string' ? requestId : undefined,
+        userId,
+      });
     } else {
       // 4xx are expected/operational — WARN, not ERROR, so Error Reporting stays
       // focused on genuine failures.

@@ -4,6 +4,7 @@ import type { ConfigService } from '@nestjs/config';
 import type { PinoLogger } from 'nestjs-pino';
 import { AllExceptionsFilter } from './all-exceptions.filter';
 import { REPORTED_ERROR_TYPE } from '../logging/error-reporting';
+import type { AlertingService } from '@modules/alerting/alerting.service';
 
 function makeHost(request: Record<string, unknown>) {
   const json = jest.fn();
@@ -29,11 +30,17 @@ const config = {
 
 describe('AllExceptionsFilter', () => {
   let logger: { error: jest.Mock; warn: jest.Mock };
+  let alerting: { onServerError: jest.Mock; raiseAlert: jest.Mock };
   let filter: AllExceptionsFilter;
 
   beforeEach(() => {
     logger = { error: jest.fn(), warn: jest.fn() };
-    filter = new AllExceptionsFilter(logger as unknown as PinoLogger, config);
+    alerting = { onServerError: jest.fn(), raiseAlert: jest.fn() };
+    filter = new AllExceptionsFilter(
+      logger as unknown as PinoLogger,
+      config,
+      alerting as unknown as AlertingService,
+    );
   });
 
   it('logs a 5xx as a GCP ReportedErrorEvent and returns a generic client message', () => {
@@ -72,6 +79,17 @@ describe('AllExceptionsFilter', () => {
       expect.objectContaining({ statusCode: 500, message: 'Internal server error' }),
     );
     expect(logger.warn).not.toHaveBeenCalled();
+
+    // Phase 4 — a 5xx triggers an alert (fire-and-forget) with request context.
+    expect(alerting.onServerError).toHaveBeenCalledTimes(1);
+    expect(alerting.onServerError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        statusCode: 500,
+        method: 'GET',
+        path: '/api/v1/boom',
+        userId: 'user-1',
+      }),
+    );
   });
 
   it('logs a 4xx at WARN and passes the HttpException message to the client', () => {
@@ -94,5 +112,7 @@ describe('AllExceptionsFilter', () => {
       expect.objectContaining({ statusCode: 400, message: 'email must be an email' }),
     );
     expect(logger.error).not.toHaveBeenCalled();
+    // 4xx is operational — no alert.
+    expect(alerting.onServerError).not.toHaveBeenCalled();
   });
 });

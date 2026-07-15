@@ -28,6 +28,10 @@ const envSchema = z.object({
   TRACE_ENABLED: z.enum(['true', 'false']).optional(),
   GCP_PROJECT_ID: z.string().optional(),
 
+  // ── Alerting (Phase 4) ─────────────────────────────────────────────────────
+  // SLACK_WEBHOOK_URL enables Slack alerts (in-app system_events are always written).
+  SLACK_WEBHOOK_URL: z.string().url().optional(),
+
   // Database
   DATABASE_URL: z.string().url(),
 
