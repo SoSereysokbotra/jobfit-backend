@@ -6,6 +6,14 @@ const envSchema = z.object({
   PORT: z.string().default('3000'),
   CORS_ORIGIN: z.string().optional(),
 
+  // ── Logging (Phase 0 monitoring) ──────────────────────────────────────────
+  // LOG_LEVEL: pino level floor. LOG_FORMAT: `pretty` for human dev output,
+  // `json` for GCP-structured Cloud Logging (defaults derived from NODE_ENV).
+  LOG_LEVEL: z
+    .enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent'])
+    .optional(),
+  LOG_FORMAT: z.enum(['json', 'pretty']).optional(),
+
   // Database
   DATABASE_URL: z.string().url(),
 

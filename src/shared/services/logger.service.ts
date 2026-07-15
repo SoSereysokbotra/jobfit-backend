@@ -1,24 +1,30 @@
 // src/shared/services/logger.service.ts
+//
+// Thin injectable wrapper over nestjs-pino's PinoLogger (Phase 0). Keeps the small
+// log/error/warn/debug API but routes through the structured pino pipeline, so any
+// caller automatically gets JSON output, GCP `severity`, and the request-scoped
+// `requestId` (via AsyncLocalStorage) for free.
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
+import { PinoLogger } from 'nestjs-pino';
 
 @Injectable()
 export class LoggerService {
-  private logger = new Logger();
+  constructor(private readonly logger: PinoLogger) {}
 
-  log(message: string, context?: string) {
-    this.logger.log(message, context);
+  log(message: string, context?: string): void {
+    this.logger.info({ context }, message);
   }
 
-  error(message: string, trace?: string, context?: string) {
-    this.logger.error(message, trace, context);
+  error(message: string, trace?: string, context?: string): void {
+    this.logger.error({ context, trace }, message);
   }
 
-  warn(message: string, context?: string) {
-    this.logger.warn(message, context);
+  warn(message: string, context?: string): void {
+    this.logger.warn({ context }, message);
   }
 
-  debug(message: string, context?: string) {
-    this.logger.debug(message, context);
+  debug(message: string, context?: string): void {
+    this.logger.debug({ context }, message);
   }
 }

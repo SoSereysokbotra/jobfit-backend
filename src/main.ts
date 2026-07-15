@@ -1,15 +1,18 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { Logger as PinoAppLogger } from 'nestjs-pino';
 import * as cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
-import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
-import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
-  const app = await NestFactory.create(AppModule);
+  // bufferLogs: hold early bootstrap logs until the pino logger is installed, then
+  // flush them through it — so every line (including startup) is structured.
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  app.useLogger(app.get(PinoAppLogger));
+  app.flushLogs();
 
   // Global prefix
   app.setGlobalPrefix('api/v1');
@@ -34,14 +37,12 @@ async function bootstrap() {
     }),
   );
 
-  // Global exception filter
-  app.useGlobalFilters(new AllExceptionsFilter());
+  // Global exception filter is registered via APP_FILTER in AppModule (so it can
+  // inject PinoLogger for structured, redacted error logs).
 
-  // Global interceptors
-  app.useGlobalInterceptors(
-    new LoggingInterceptor(),
-    new TransformInterceptor(),
-  );
+  // Global interceptors. Request/response logging is handled by pino-http
+  // (nestjs-pino) — no separate logging interceptor.
+  app.useGlobalInterceptors(new TransformInterceptor());
 
   // Swagger — interactive API docs / test console at /api/docs.
   //

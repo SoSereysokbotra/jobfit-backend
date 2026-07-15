@@ -3,4 +3,5 @@ allowBuilds:
   '@prisma/client': true
   '@prisma/engines': true
   msgpackr-extract: set this to true or false
+  nestjs-pino: set this to true or false
   prisma: true
