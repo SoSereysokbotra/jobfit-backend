@@ -10,6 +10,8 @@
 # ---------- builder ----------
 FROM node:22-slim AS builder
 WORKDIR /app
+# Use the pnpm version pinned by package.json "packageManager"; don't prompt to download.
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
 
 # Prisma needs OpenSSL to build/generate its query engine.

@@ -17,3 +17,4 @@ import { ApplicationStatusChangedListener } from './listeners/application-status
   exports: [SlackNotifierService],
 })
 export class NotificationModule {}
+

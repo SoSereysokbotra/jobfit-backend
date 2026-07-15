@@ -17,7 +17,7 @@ options:
   logging: CLOUD_LOGGING_ONLY
 
 images:
-  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$SHORT_SHA'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$BUILD_ID'
 
 availableSecrets:
   secretManager:
@@ -31,7 +31,7 @@ steps:
     args:
       - build
       - '-t'
-      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$SHORT_SHA'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$BUILD_ID'
       - '-t'
       - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:latest'
       - '.'
@@ -41,62 +41,34 @@ steps:
     name: gcr.io/cloud-builders/docker
     args: ['push', '--all-tags', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}']
 
-  # 3) Apply pending Prisma migrations (never migrate dev). Runs against the prod DB using
-  #    the freshly-built image so the schema matches the code being deployed.
+  # 3) Apply pending Prisma migrations (never migrate dev). Runs from the source workspace
+  #    (which has prisma/schema.prisma + migrations) in a clean root node image — the app
+  #    image runs as non-root and has the prisma CLI pruned, so we don't use it here.
   - id: migrate
-    name: '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$SHORT_SHA'
+    name: node:22
     entrypoint: npx
-    args: ['prisma', 'migrate', 'deploy']
+    args: ['--yes', 'prisma@5.22.0', 'migrate', 'deploy']
     secretEnv: ['DATABASE_URL']
 
   # 4) Deploy a new revision WITHOUT traffic, addressable via the `candidate` tag.
   #    Secrets are wired from Secret Manager; non-secret config via env vars.
-  - id: deploy-no-traffic
+  # Cloud Run health-gates the rollout itself: a new revision only receives traffic after it
+  # boots and its startup check passes; a failed revision leaves the previous one serving.
+  # (For zero-downtime canaries later, switch to --no-traffic --tag=candidate + a health-gate
+  #  step — that only works once the service already exists.)
+  - id: deploy
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
     args:
       - run
       - deploy
       - '${_SERVICE}'
-      - '--image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$SHORT_SHA'
+      - '--image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$BUILD_ID'
       - '--region=${_REGION}'
       - '--platform=managed'
-      - '--no-traffic'
-      - '--tag=candidate'
+      - '--allow-unauthenticated'
       - '--port=8080'
-      - '--set-env-vars=NODE_ENV=production,LOG_FORMAT=json,LOG_LEVEL=info,METRICS_ENABLED=true,TRACE_ENABLED=true,SERVICE_NAME=${_SERVICE},SERVICE_VERSION=$SHORT_SHA,GCP_PROJECT_ID=$PROJECT_ID'
-      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,SLACK_WEBHOOK_URL=SLACK_WEBHOOK_URL:latest,METRICS_TOKEN=METRICS_TOKEN:latest,REDIS_URL=REDIS_URL:latest'
-      - '--startup-probe=httpGet.path=/api/v1/health/live,initialDelaySeconds=5,timeoutSeconds=3,periodSeconds=5,failureThreshold=6'
-      - '--liveness-probe=httpGet.path=/api/v1/health/live,timeoutSeconds=3,periodSeconds=30'
-
-  # 5) Health-gate: probe the candidate revision's /health/ready. Fails the build if not 200.
-  - id: health-gate
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk
-    entrypoint: bash
-    args:
-      - -c
-      - |
-        set -e
-        URL="$(gcloud run services describe ${_SERVICE} --region=${_REGION} \
-          --format='value(status.traffic.filter("tag=candidate").firstof(url))')"
-        echo "Probing candidate: $URL/api/v1/health/ready"
-        for i in $(seq 1 10); do
-          CODE="$(curl -s -o /dev/null -w '%{http_code}' "$URL/api/v1/health/ready" || echo 000)"
-          echo "  attempt $i -> HTTP $CODE"
-          [ "$CODE" = "200" ] && exit 0
-          sleep 6
-        done
-        echo "Candidate failed readiness — NOT shifting traffic (old revision stays live)."
-        exit 1
-
-  # 6) Promote: shift 100% of traffic to the healthy candidate revision.
-  - id: promote
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk
-    entrypoint: gcloud
-    args:
-      - run
-      - services
-      - update-traffic
-      - '${_SERVICE}'
-      - '--region=${_REGION}'
-      - '--to-latest'
+      # TRACE_ENABLED=false until the runtime SA has roles/cloudtrace.agent.
+      - '--set-env-vars=NODE_ENV=production,LOG_FORMAT=json,LOG_LEVEL=info,METRICS_ENABLED=true,TRACE_ENABLED=false,SERVICE_NAME=${_SERVICE},SERVICE_VERSION=$BUILD_ID,GCP_PROJECT_ID=$PROJECT_ID'
+      # SLACK_WEBHOOK_URL / REDIS_URL omitted until those secret values exist (optional/fail-open).
+      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,METRICS_TOKEN=METRICS_TOKEN:latest'
