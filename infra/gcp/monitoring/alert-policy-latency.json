@@ -1,0 +1,24 @@
+{
+  "displayName": "JobFit — high request latency (p95 > 1s for 10m)",
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "p95 request latency > 1000ms (10m)",
+      "conditionThreshold": {
+        "filter": "metric.type=\"run.googleapis.com/request_latencies\" resource.type=\"cloud_run_revision\" resource.label.\"service_name\"=\"jobfit-backend\"",
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 1000,
+        "duration": "600s",
+        "aggregations": [
+          { "alignmentPeriod": "60s", "perSeriesAligner": "ALIGN_PERCENTILE_95", "crossSeriesReducer": "REDUCE_MEAN" }
+        ],
+        "trigger": { "count": 1 }
+      }
+    }
+  ],
+  "documentation": {
+    "content": "p95 latency above 1s for 10m. Check Cloud Trace for the slow span and the Overview dashboard. Runbook: docs/runbooks/RUNBOOKS.md (High latency).",
+    "mimeType": "text/markdown"
+  },
+  "alertStrategy": { "autoClose": "1800s" }
+}

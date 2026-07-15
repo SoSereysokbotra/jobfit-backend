@@ -1,0 +1,102 @@
+# Phase 6 — CI/CD: build → Artifact Registry → migrate → Cloud Run (health-gated).
+#
+# Flow: build image → push → `prisma migrate deploy` → deploy a NEW revision with
+# `--no-traffic` (tagged `candidate`) → probe its /health/ready → only then shift 100% of
+# traffic to it. If the probe fails the build fails and the OLD revision keeps serving
+# (automatic effective rollback).
+#
+# Secrets come from Secret Manager (see availableSecrets); non-secret config via --set-env-vars.
+# Trigger: connect this repo in Cloud Build with substitutions for _REGION/_REPO/_SERVICE.
+
+substitutions:
+  _REGION: asia-northeast1
+  _REPO: jobfit               # Artifact Registry repo
+  _SERVICE: jobfit-backend    # Cloud Run service name
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+images:
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$SHORT_SHA'
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/$PROJECT_ID/secrets/DATABASE_URL/versions/latest
+      env: DATABASE_URL
+
+steps:
+  # 1) Build the image (tagged with the commit SHA + latest).
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$SHORT_SHA'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:latest'
+      - '.'
+
+  # 2) Push (both tags).
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args: ['push', '--all-tags', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}']
+
+  # 3) Apply pending Prisma migrations (never migrate dev). Runs against the prod DB using
+  #    the freshly-built image so the schema matches the code being deployed.
+  - id: migrate
+    name: '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$SHORT_SHA'
+    entrypoint: npx
+    args: ['prisma', 'migrate', 'deploy']
+    secretEnv: ['DATABASE_URL']
+
+  # 4) Deploy a new revision WITHOUT traffic, addressable via the `candidate` tag.
+  #    Secrets are wired from Secret Manager; non-secret config via env vars.
+  - id: deploy-no-traffic
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - '${_SERVICE}'
+      - '--image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$SHORT_SHA'
+      - '--region=${_REGION}'
+      - '--platform=managed'
+      - '--no-traffic'
+      - '--tag=candidate'
+      - '--port=8080'
+      - '--set-env-vars=NODE_ENV=production,LOG_FORMAT=json,LOG_LEVEL=info,METRICS_ENABLED=true,TRACE_ENABLED=true,SERVICE_NAME=${_SERVICE},SERVICE_VERSION=$SHORT_SHA,GCP_PROJECT_ID=$PROJECT_ID'
+      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,SLACK_WEBHOOK_URL=SLACK_WEBHOOK_URL:latest,METRICS_TOKEN=METRICS_TOKEN:latest,REDIS_URL=REDIS_URL:latest'
+      - '--startup-probe=httpGet.path=/api/v1/health/live,initialDelaySeconds=5,timeoutSeconds=3,periodSeconds=5,failureThreshold=6'
+      - '--liveness-probe=httpGet.path=/api/v1/health/live,timeoutSeconds=3,periodSeconds=30'
+
+  # 5) Health-gate: probe the candidate revision's /health/ready. Fails the build if not 200.
+  - id: health-gate
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -e
+        URL="$(gcloud run services describe ${_SERVICE} --region=${_REGION} \
+          --format='value(status.traffic.filter("tag=candidate").firstof(url))')"
+        echo "Probing candidate: $URL/api/v1/health/ready"
+        for i in $(seq 1 10); do
+          CODE="$(curl -s -o /dev/null -w '%{http_code}' "$URL/api/v1/health/ready" || echo 000)"
+          echo "  attempt $i -> HTTP $CODE"
+          [ "$CODE" = "200" ] && exit 0
+          sleep 6
+        done
+        echo "Candidate failed readiness — NOT shifting traffic (old revision stays live)."
+        exit 1
+
+  # 6) Promote: shift 100% of traffic to the healthy candidate revision.
+  - id: promote
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - services
+      - update-traffic
+      - '${_SERVICE}'
+      - '--region=${_REGION}'
+      - '--to-latest'

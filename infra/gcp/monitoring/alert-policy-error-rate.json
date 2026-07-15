@@ -1,0 +1,28 @@
+{
+  "displayName": "JobFit — high 5xx error ratio (>1% for 5m)",
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "5xx / all requests > 1% (5m)",
+      "conditionThreshold": {
+        "filter": "metric.type=\"run.googleapis.com/request_count\" resource.type=\"cloud_run_revision\" resource.label.\"service_name\"=\"jobfit-backend\" metric.label.\"response_code_class\"=\"5xx\"",
+        "denominatorFilter": "metric.type=\"run.googleapis.com/request_count\" resource.type=\"cloud_run_revision\" resource.label.\"service_name\"=\"jobfit-backend\"",
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 0.01,
+        "duration": "300s",
+        "aggregations": [
+          { "alignmentPeriod": "60s", "perSeriesAligner": "ALIGN_RATE", "crossSeriesReducer": "REDUCE_SUM" }
+        ],
+        "denominatorAggregations": [
+          { "alignmentPeriod": "60s", "perSeriesAligner": "ALIGN_RATE", "crossSeriesReducer": "REDUCE_SUM" }
+        ],
+        "trigger": { "count": 1 }
+      }
+    }
+  ],
+  "documentation": {
+    "content": "5xx error ratio exceeded 1% for 5 minutes. See runbook: docs/runbooks/RUNBOOKS.md (High error rate). Check Error Reporting + Logs Explorer (severity>=ERROR, last 1h).",
+    "mimeType": "text/markdown"
+  },
+  "alertStrategy": { "autoClose": "1800s" }
+}
