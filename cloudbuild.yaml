@@ -70,6 +70,6 @@ steps:
       - '--port=8080'
       # TRACE_ENABLED=false until the runtime SA has roles/cloudtrace.agent.
       - '--set-env-vars=NODE_ENV=production,LOG_FORMAT=json,LOG_LEVEL=info,METRICS_ENABLED=true,TRACE_ENABLED=false,SERVICE_NAME=${_SERVICE},SERVICE_VERSION=$BUILD_ID,GCP_PROJECT_ID=$PROJECT_ID'
-      # SLACK_WEBHOOK_URL / REDIS_URL omitted until those secret values exist (optional/fail-open).
-      # SUPABASE_* are required at boot (SupabaseClientService.getOrThrow url + serviceRoleKey).
-      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,METRICS_TOKEN=METRICS_TOKEN:latest,SUPABASE_URL=SUPABASE_URL:latest,SUPABASE_SERVICE_ROLE_KEY=SUPABASE_SERVICE_ROLE_KEY:latest,SUPABASE_ANON_KEY=SUPABASE_ANON_KEY:latest,SUPABASE_JWT_SECRET=SUPABASE_JWT_SECRET:latest'
+      # REDIS_URL omitted until that secret value exists (optional/fail-open). SLACK_WEBHOOK_URL wired (Phase 4 alerts).
+      # HEALTHCHECKS_PING_URL wired (external dead-man's-switch heartbeat). SUPABASE_* required at boot.
+      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,METRICS_TOKEN=METRICS_TOKEN:latest,SLACK_WEBHOOK_URL=SLACK_WEBHOOK_URL:latest,HEALTHCHECKS_PING_URL=HEALTHCHECKS_PING_URL:latest,SUPABASE_URL=SUPABASE_URL:latest,SUPABASE_SERVICE_ROLE_KEY=SUPABASE_SERVICE_ROLE_KEY:latest,SUPABASE_ANON_KEY=SUPABASE_ANON_KEY:latest,SUPABASE_JWT_SECRET=SUPABASE_JWT_SECRET:latest'

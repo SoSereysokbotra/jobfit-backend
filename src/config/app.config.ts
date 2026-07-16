@@ -35,5 +35,12 @@ export default registerAs('app', () => {
 
     // Alerting (Phase 4). SLACK_WEBHOOK_URL enables Slack alerts; unset = silent no-op.
     slackWebhookUrl: process.env.SLACK_WEBHOOK_URL || undefined,
+
+    // External heartbeat (Healthchecks.io dead-man's-switch). The app pings this URL on
+    // an interval while healthy; if the app crashes or the DB is unreachable the pings
+    // stop (or hit the /fail endpoint) and Healthchecks.io alerts. Unset = disabled.
+    healthchecksPingUrl: process.env.HEALTHCHECKS_PING_URL || undefined,
+    healthchecksIntervalMs:
+      parseInt(process.env.HEALTHCHECKS_INTERVAL_SECONDS ?? '60', 10) * 1000,
   };
 });

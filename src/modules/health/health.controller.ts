@@ -9,12 +9,13 @@
 //
 // Both are @Public() (no JWT) so probes and the load balancer can reach them.
 
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
 import { HealthCheck, HealthCheckService } from '@nestjs/terminus';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Public } from '@common/decorators/public.decorator';
 import { DatabaseHealthIndicator } from './indicators/database.health-indicator';
 import { RedisHealthIndicator } from './indicators/redis.health-indicator';
+import { HeartbeatService } from './heartbeat.service';
 
 @ApiTags('Health')
 @Controller('health')
@@ -23,6 +24,7 @@ export class HealthController {
     private readonly health: HealthCheckService,
     private readonly db: DatabaseHealthIndicator,
     private readonly redis: RedisHealthIndicator,
+    private readonly heartbeat: HeartbeatService,
   ) {}
 
   @Get('live')
@@ -46,5 +48,26 @@ export class HealthController {
       () => this.redis.isHealthy('redis'),
       () => this.redis.isQueueHealthy('queue'),
     ]);
+  }
+
+  @Get('heartbeat')
+  @Public()
+  @ApiOperation({
+    summary:
+      'External heartbeat — checks the DB and pings Healthchecks.io. Triggered every minute ' +
+      'by Cloud Scheduler (Cloud Run scales to zero, so a background timer is unreliable). ' +
+      'Returns 200 when healthy, 503 when the DB is down (a /fail ping is still sent).',
+  })
+  async heartbeatPing() {
+    const result = await this.heartbeat.beat();
+    if (!result.healthy) {
+      // Surface as 503 so the beat also shows up as a failure in Cloud Scheduler/logs.
+      throw new ServiceUnavailableException({
+        status: 'error',
+        database: 'down',
+        pinged: result.pinged,
+      });
+    }
+    return { status: 'ok', database: 'up', pinged: result.pinged };
   }
 }

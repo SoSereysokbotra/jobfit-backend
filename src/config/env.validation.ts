@@ -32,6 +32,13 @@ const envSchema = z.object({
   // SLACK_WEBHOOK_URL enables Slack alerts (in-app system_events are always written).
   SLACK_WEBHOOK_URL: z.string().url().optional(),
 
+  // ── External heartbeat (Healthchecks.io) ──────────────────────────────────
+  // HEALTHCHECKS_PING_URL: the check's ping URL (e.g. https://hc-ping.com/<uuid>).
+  // The app pings it on an interval while healthy; unset = heartbeat disabled.
+  // HEALTHCHECKS_INTERVAL_SECONDS: how often to ping (default 60).
+  HEALTHCHECKS_PING_URL: z.string().url().optional(),
+  HEALTHCHECKS_INTERVAL_SECONDS: z.string().optional(),
+
   // Database
   DATABASE_URL: z.string().url(),
 
