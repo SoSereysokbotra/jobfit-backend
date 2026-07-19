@@ -67,6 +67,7 @@ import { LoginCommand } from '../../application/commands/login.command';
 import { RefreshTokenCommand } from '../../application/commands/refresh-token.command';
 import { LogoutCommand } from '../../application/commands/logout.command';
 import { LoginResult } from '../../application/commands/login.handler';
+import { VerifyEmailResult } from '../../application/commands/verify-email.handler';
 import { RefreshResult } from '../../application/commands/refresh-token.handler';
 
 import { RegisterDto } from '../../application/dtos/register.dto';
@@ -161,7 +162,10 @@ export class AuthController {
       '6-digit code.',
   })
   @ApiBody({ type: VerifyEmailDto })
-  @ApiOkResponse({ description: 'Email verified.', type: MessageResponseDto })
+  @ApiOkResponse({
+    description: 'Email verified; session issued (auto-login).',
+    type: AuthResponseDto,
+  })
   @ApiResponse({ status: 400, description: 'Code expired or no verification session.' })
   @ApiResponse({ status: 401, description: 'Invalid code.' })
   @ApiResponse({ status: 409, description: 'Email already verified.' })
@@ -171,9 +175,19 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const email = this.readEmailCookie(req, COOKIE.registrationVerification);
-    await this.commandBus.execute(new VerifyEmailCommand(email, dto.code));
+    const result = (await this.commandBus.execute(
+      new VerifyEmailCommand(email, dto.code),
+    )) as VerifyEmailResult;
+    // Verification succeeded — swap the short-lived verification cookie for a
+    // real session so the client lands on onboarding already authenticated.
     this.clearCookie(res, COOKIE.registrationVerification);
-    return { success: true };
+    this.setCookie(
+      res,
+      COOKIE.refreshToken,
+      result.refreshToken,
+      REFRESH_TOKEN_TTL_SECONDS * 1000,
+    );
+    return { accessToken: result.accessToken };
   }
 
   @Post('resend-email-verification')
