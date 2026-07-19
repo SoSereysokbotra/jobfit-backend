@@ -162,6 +162,7 @@ model User {
   analytics      UserAnalytics?
   resumes        Resume[]
   applications   Application[]
+  savedJobs      SavedJob[]
 
   // ── Admin module (Admin MVP) ───────────────────────────────────────────────
   // Admin actions this user performed / system alerts this admin acknowledged.
@@ -452,9 +453,26 @@ model Job {
   applications Application[]
   matchScores  MatchScore[]
   skills       JobSkill[]
+  savedBy      SavedJob[]
 
   @@index([postedByEmployerId])
   @@map("jobs")
+}
+
+// A job a seeker bookmarked for later. Simple join of (user, job); unique so a
+// job can't be saved twice, cascade so it disappears if either side is deleted.
+model SavedJob {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobId     String
+  job       Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, jobId])
+  @@index([userId])
+  @@index([jobId])
+  @@map("saved_jobs")
 }
 
 enum ResumeParsingStatus {
