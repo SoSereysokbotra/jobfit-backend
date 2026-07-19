@@ -9,6 +9,12 @@ export class SalaryRangeResponseDto {
 export class JobResponseDto {
   @ApiProperty() id: string;
   @ApiProperty() companyId: string;
+  @ApiPropertyOptional({
+    description:
+      'Display name of the posting company. Enriched by JobService from the ' +
+      'Company table; absent if the company row is missing.',
+  })
+  companyName?: string;
   @ApiProperty() title: string;
   @ApiProperty() description: string;
   @ApiProperty() status: string;

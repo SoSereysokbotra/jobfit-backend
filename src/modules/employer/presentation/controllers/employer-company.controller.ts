@@ -66,6 +66,20 @@ export class EmployerCompanyController {
     return this.companyService.verifyEmail(user.id, user.email, id);
   }
 
+  @Get('me')
+  @ApiOperation({
+    summary: 'View the company you manage (resolved from your profile)',
+    description:
+      'Bootstrap endpoint: returns the acting employer’s company without needing its id. ' +
+      'Declared before :id so the literal "me" is not parsed as a UUID.',
+  })
+  @ApiOkResponse({ type: EmployerCompanyResponseDto })
+  getMyCompany(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<EmployerCompanyResponseDto> {
+    return this.companyService.getMyCompany(user.id);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'View the company you manage' })
   @ApiOkResponse({ type: EmployerCompanyResponseDto })

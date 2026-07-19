@@ -6,8 +6,10 @@
 // job module's JobService; this repository only covers what that service doesn't.
 
 import { Injectable } from '@nestjs/common';
-import { ApplicationStatus, Job } from '@prisma/client';
+import { ApplicationStatus, Job, JobSkill } from '@prisma/client';
 import { PrismaService } from '@infra/prisma/prisma.service';
+
+export type JobWithSkills = Job & { skills: JobSkill[] };
 
 export interface JobAnalytics {
   applicationsCount: number;
@@ -36,9 +38,14 @@ export class EmployerJobRepository {
     return row?.companyId ?? null;
   }
 
-  findByCompany(companyId: string, skip: number, take: number): Promise<Job[]> {
+  findByCompany(
+    companyId: string,
+    skip: number,
+    take: number,
+  ): Promise<JobWithSkills[]> {
     return this.prisma.job.findMany({
       where: { companyId },
+      include: { skills: true },
       orderBy: { createdAt: 'desc' },
       skip,
       take,

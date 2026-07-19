@@ -101,6 +101,17 @@ export class EmployerCompanyService {
     return new EmployerCompanyResponseDto(company);
   }
 
+  /**
+   * The company the acting employer manages, resolved from their EmployerProfile —
+   * so the frontend can bootstrap without already knowing the company id.
+   */
+  async getMyCompany(userId: string): Promise<EmployerCompanyResponseDto> {
+    const ctx = await this.context.requireContext(userId);
+    const company = await this.companyRepo.findById(ctx.companyId);
+    if (!company) throw new NotFoundException('Company not found');
+    return new EmployerCompanyResponseDto(company);
+  }
+
   async updateProfile(
     userId: string,
     companyId: string,

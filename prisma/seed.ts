@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import * as bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
@@ -45,7 +46,193 @@ async function main() {
     });
   }
 
-  console.log('✅  Seed complete.');
+  // Look up the industry + skill ids we just upserted, keyed by slug, so jobs can
+  // reference real rows regardless of the (random) uuids Prisma assigned them.
+  const industryBySlug = new Map(
+    (await prisma.industry.findMany()).map((i) => [i.slug, i.id]),
+  );
+  const skillBySlug = new Map(
+    (await prisma.skill.findMany()).map((s) => [s.slug, s.id]),
+  );
+
+  // ── Seed Companies ──────────────────────────────────────────────────────────
+  // Employer-less demo companies so the public job board has real names/logos.
+  // `name` is unique, so upsert-by-name is idempotent.
+  const companies = [
+    { name: 'Stripe',      industry: 'technology', city: 'San Francisco', state: 'CA', country: 'USA',
+      logoUrl: 'https://logo.clearbit.com/stripe.com',  website: 'https://stripe.com',
+      description: 'Payments infrastructure for the internet.' },
+    { name: 'Airbnb',      industry: 'technology', city: 'San Francisco', state: 'CA', country: 'USA',
+      logoUrl: 'https://logo.clearbit.com/airbnb.com',  website: 'https://airbnb.com',
+      description: 'Global marketplace for stays and experiences.' },
+    { name: 'Figma',       industry: 'technology', city: 'New York',      state: 'NY', country: 'USA',
+      logoUrl: 'https://logo.clearbit.com/figma.com',   website: 'https://figma.com',
+      description: 'Collaborative interface design tool.' },
+    { name: 'Nexus AI',    industry: 'technology', city: 'Seattle',       state: 'WA', country: 'USA',
+      logoUrl: null,                                     website: null,
+      description: 'Applied machine-learning products.' },
+    { name: 'HealthHub',   industry: 'healthcare', city: 'Boston',        state: 'MA', country: 'USA',
+      logoUrl: null,                                     website: null,
+      description: 'Telehealth and patient-experience platform.' },
+    { name: 'GreenGrid',   industry: 'technology', city: 'Portland',      state: 'OR', country: 'USA',
+      logoUrl: null,                                     website: null,
+      description: 'Monitoring for residential solar fleets.' },
+  ];
+
+  const companyByName = new Map<string, string>();
+  for (const c of companies) {
+    const row = await prisma.company.upsert({
+      where: { name: c.name },
+      update: {
+        industry: industryBySlug.get(c.industry) ?? null,
+        logoUrl: c.logoUrl,
+        website: c.website,
+        description: c.description,
+        city: c.city,
+        state: c.state,
+        country: c.country,
+      },
+      create: {
+        name: c.name,
+        industry: industryBySlug.get(c.industry) ?? null,
+        logoUrl: c.logoUrl,
+        website: c.website,
+        description: c.description,
+        city: c.city,
+        state: c.state,
+        country: c.country,
+      },
+    });
+    companyByName.set(c.name, row.id);
+  }
+
+  // ── Seed Jobs ───────────────────────────────────────────────────────────────
+  // Stable string ids make re-seeding idempotent (upsert by id). All PUBLISHED so
+  // the public `GET /jobs?status=PUBLISHED` returns them. remoteType uses the
+  // backend's canonical tokens: REMOTE | HYBRID | ON_SITE.
+  const jobs: Array<{
+    id: string; company: string; title: string; remoteType: string; location: string;
+    minSalary: number; maxSalary: number; skills: string[]; description: string;
+  }> = [
+    { id: '11111111-1111-4111-8111-111111111111', company: 'Stripe', title: 'Senior Frontend Engineer',
+      remoteType: 'HYBRID', location: 'San Francisco, CA', minSalary: 165000, maxSalary: 210000,
+      skills: ['react', 'typescript'],
+      description: 'Build and scale the payment dashboard used by millions of businesses worldwide, working with React, TypeScript, and design systems.' },
+    { id: '22222222-2222-4222-8222-222222222222', company: 'Airbnb', title: 'React Specialist Developer',
+      remoteType: 'REMOTE', location: 'Remote (US)', minSalary: 150000, maxSalary: 195000,
+      skills: ['react', 'typescript', 'nodejs'],
+      description: 'Own core booking-flow components and drive performance improvements across the guest experience platform.' },
+    { id: '33333333-3333-4333-8333-333333333333', company: 'Figma', title: 'Software Engineer – Platforms',
+      remoteType: 'HYBRID', location: 'New York, NY', minSalary: 140000, maxSalary: 185000,
+      skills: ['typescript', 'nodejs', 'postgresql'],
+      description: 'Develop the multiplayer editing infrastructure that powers real-time collaboration for design teams.' },
+    { id: '44444444-4444-4444-8444-444444444444', company: 'Nexus AI', title: 'Machine Learning Engineer',
+      remoteType: 'HYBRID', location: 'Seattle, WA', minSalary: 175000, maxSalary: 230000,
+      skills: ['python', 'aws', 'docker'],
+      description: 'Productionize LLM-powered features end to end, from evaluation pipelines to low-latency serving.' },
+    { id: '55555555-5555-4555-8555-555555555555', company: 'HealthHub', title: 'Product Designer',
+      remoteType: 'HYBRID', location: 'Boston, MA', minSalary: 110000, maxSalary: 145000,
+      skills: ['react'],
+      description: 'Design patient-facing telehealth experiences with a focus on accessibility and clinical-workflow integration.' },
+    { id: '66666666-6666-4666-8666-666666666666', company: 'GreenGrid', title: 'Full-Stack Engineer',
+      remoteType: 'REMOTE', location: 'Portland, OR', minSalary: 125000, maxSalary: 160000,
+      skills: ['typescript', 'react', 'postgresql', 'aws'],
+      description: 'Build monitoring dashboards and APIs for residential solar fleets using Next.js and PostgreSQL.' },
+  ];
+
+  // Heal older seeds that used non-UUID job ids (employer routes require UUIDs):
+  // drop their applications (cascades timeline/contacts) then the jobs themselves.
+  const legacyJobs = await prisma.job.findMany({
+    where: { id: { startsWith: 'seed-job-' } },
+    select: { id: true },
+  });
+  if (legacyJobs.length > 0) {
+    const legacyIds = legacyJobs.map((j) => j.id);
+    await prisma.application.deleteMany({ where: { jobId: { in: legacyIds } } });
+    await prisma.job.deleteMany({ where: { id: { in: legacyIds } } });
+    console.log(`   🧹  Removed ${legacyIds.length} legacy string-id job(s).`);
+  }
+
+  for (const j of jobs) {
+    const companyId = companyByName.get(j.company);
+    if (!companyId) continue;
+    const skillLinks = j.skills
+      .map((slug) => skillBySlug.get(slug))
+      .filter((id): id is string => Boolean(id))
+      .map((skillId) => ({ skillId }));
+
+    await prisma.job.upsert({
+      where: { id: j.id },
+      update: {
+        companyId,
+        title: j.title,
+        description: j.description,
+        status: 'PUBLISHED',
+        remoteType: j.remoteType,
+        location: j.location,
+        minSalary: j.minSalary,
+        maxSalary: j.maxSalary,
+        skills: { deleteMany: {}, create: skillLinks },
+      },
+      create: {
+        id: j.id,
+        companyId,
+        title: j.title,
+        description: j.description,
+        status: 'PUBLISHED',
+        remoteType: j.remoteType,
+        location: j.location,
+        minSalary: j.minSalary,
+        maxSalary: j.maxSalary,
+        skills: { create: skillLinks },
+      },
+    });
+  }
+
+  // ── Seed a demo EMPLOYER (so the employer dashboard has a real, reproducible login) ──
+  // Role EMPLOYER + a verified email + an EmployerProfile linking them to Stripe. The
+  // email domain (stripe.com) matches Stripe's website so verify-email can be demoed too.
+  const stripeId = companyByName.get('Stripe');
+  if (stripeId) {
+    const employer = await prisma.user.upsert({
+      where: { email: 'employer@stripe.com' },
+      update: { role: 'EMPLOYER', emailVerified: true },
+      create: {
+        email: 'employer@stripe.com',
+        passwordHash: bcrypt.hashSync('Employer123', 10),
+        role: 'EMPLOYER',
+        emailVerified: true,
+      },
+    });
+    await prisma.employerProfile.upsert({
+      where: { userId: employer.id },
+      update: { companyId: stripeId },
+      create: {
+        userId: employer.id,
+        companyId: stripeId,
+        firstName: 'Evan',
+        lastName: 'Employer',
+      },
+    });
+    console.log('   👔  Employer login: employer@stripe.com / Employer123 (manages Stripe)');
+  }
+
+  // ── Seed a demo ADMIN (so the admin console has a real, reproducible login) ──
+  await prisma.user.upsert({
+    where: { email: 'admin@jobfit.com' },
+    update: { role: 'ADMIN', emailVerified: true },
+    create: {
+      email: 'admin@jobfit.com',
+      passwordHash: bcrypt.hashSync('Admin123!', 10),
+      role: 'ADMIN',
+      emailVerified: true,
+    },
+  });
+  console.log('   🛡️   Admin login: admin@jobfit.com / Admin123! (role ADMIN)');
+
+  console.log(
+    `✅  Seed complete — ${companies.length} companies, ${jobs.length} published jobs.`,
+  );
 }
 
 main()

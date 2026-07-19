@@ -38,6 +38,15 @@ import { JobAnalyticsResponseDto } from '../../application/dtos/job-analytics-re
 export class EmployerJobController {
   constructor(private readonly jobService: EmployerJobService) {}
 
+  @Get()
+  @ApiOperation({ summary: "List your company's job postings" })
+  @ApiOkResponse({ type: JobResponseDto, isArray: true })
+  listMine(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<JobResponseDto[]> {
+    return this.jobService.listMine(user.id);
+  }
+
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create a new job posting (draft)' })

@@ -15,7 +15,10 @@ import { CreateJobDto } from '@modules/job/presentation/dto/create-job.dto';
 import { UpdateJobDto } from '@modules/job/presentation/dto/update-job.dto';
 import { JobResponseDto } from '@modules/job/presentation/dto/job-response.dto';
 import { EmployerContextService } from './employer-context.service';
-import { EmployerJobRepository } from '../../infrastructure/repositories/employer-job.repository';
+import {
+  EmployerJobRepository,
+  JobWithSkills,
+} from '../../infrastructure/repositories/employer-job.repository';
 import { JobAnalyticsResponseDto } from '../dtos/job-analytics-response.dto';
 
 @Injectable()
@@ -32,6 +35,20 @@ export class EmployerJobService {
     const job = await this.jobService.create(dto, ctx.companyId);
     await this.jobRepo.setPostedBy(job.id, userId);
     return job;
+  }
+
+  /**
+   * List every job posting for the employer's company (drafts + published + closed),
+   * newest first. Lets the frontend render the employer's job dashboard.
+   */
+  async listMine(
+    userId: string,
+    skip = 0,
+    take = 100,
+  ): Promise<JobResponseDto[]> {
+    const ctx = await this.context.requireContext(userId);
+    const rows = await this.jobRepo.findByCompany(ctx.companyId, skip, take);
+    return rows.map(toJobResponse);
   }
 
   /** Edit a job — JobService enforces the company-ownership check. */
@@ -64,4 +81,24 @@ export class EmployerJobService {
     const analytics = await this.jobRepo.analytics(jobId);
     return new JobAnalyticsResponseDto({ jobId, ...analytics });
   }
+}
+
+/** Prisma job row (with skills) -> the shared JobResponseDto shape. */
+function toJobResponse(row: JobWithSkills): JobResponseDto {
+  return {
+    id: row.id,
+    companyId: row.companyId,
+    title: row.title,
+    description: row.description,
+    status: row.status,
+    remoteType: row.remoteType,
+    location: row.location ?? undefined,
+    salaryRange:
+      row.minSalary !== null && row.maxSalary !== null
+        ? { min: row.minSalary, max: row.maxSalary, currency: 'USD' }
+        : undefined,
+    skillIds: row.skills.map((s) => s.skillId),
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
 }
