@@ -442,6 +442,13 @@ model Job {
   location    String?
   minSalary   Int?
   maxSalary   Int?
+
+  // ── Ingestion (FR-JOBS-001): external-source tracking + dedup ──────────────
+  source      String? // e.g. "THEMUSE"; NULL = direct employer posting
+  externalId  String? // the source's job id, for dedup + updates
+  externalUrl String? // apply / landing page on the source
+  lastSeenAt  DateTime? // last ingestion run that saw this posting (freshness)
+
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -455,7 +462,11 @@ model Job {
   skills       JobSkill[]
   savedBy      SavedJob[]
 
+  // Dedup key for ingested jobs. NULLs are distinct in Postgres, so direct
+  // employer postings (source = externalId = NULL) never collide here.
+  @@unique([source, externalId])
   @@index([postedByEmployerId])
+  @@index([source])
   @@map("jobs")
 }
 

@@ -9,12 +9,14 @@ import appConfig from './config/app.config';
 import databaseConfig from './config/database.config';
 import supabaseConfig from './config/supabase.config';
 import redisConfig from './config/redis.config';
+import aiConfig from './config/ai.config';
 import { validateEnv } from './config/env.validation';
 import { authThrottlers } from './config/throttler.config';
 import { buildLoggerParams, LogFormat } from './config/logger.config';
 
 // Infra
 import { PrismaModule } from './infra/prisma/prisma.module';
+import { AiModule } from './infra/ai/ai.module';
 
 // Events
 import { EventBusModule } from './events/event-bus.module';
@@ -42,6 +44,7 @@ import { JobModule } from './modules/job/job.module';
 import { ResumeModule } from './modules/resume/resume.module';
 import { ApplicationModule } from './modules/application/application.module';
 import { SavedJobModule } from './modules/saved-job/saved-job.module';
+import { IngestionModule } from './modules/ingestion/ingestion.module';
 import { MatchingModule } from './modules/matching/matching.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { PaymentModule } from './modules/payment/payment.module';
@@ -61,7 +64,7 @@ import { AlertingModule } from './modules/alerting/alerting.module';
     // ── Config (global) ──────────────────────────────────────────────────────
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig, databaseConfig, supabaseConfig, redisConfig],
+      load: [appConfig, databaseConfig, supabaseConfig, redisConfig, aiConfig],
       validate: validateEnv,
     }),
 
@@ -86,6 +89,7 @@ import { AlertingModule } from './modules/alerting/alerting.module';
     PrismaModule,
     EventBusModule,
     SharedModule,
+    AiModule,
 
     // ── Shared Kernel ────────────────────────────────────────────────────────
     SkillModule,
@@ -99,6 +103,7 @@ import { AlertingModule } from './modules/alerting/alerting.module';
     ResumeModule,
     ApplicationModule,
     SavedJobModule,
+    IngestionModule,
     MatchingModule,
     NotificationModule,
     PaymentModule,

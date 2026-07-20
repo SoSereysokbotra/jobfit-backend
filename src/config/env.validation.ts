@@ -39,6 +39,17 @@ const envSchema = z.object({
   HEALTHCHECKS_PING_URL: z.string().url().optional(),
   HEALTHCHECKS_INTERVAL_SECONDS: z.string().optional(),
 
+  // ── AI service (jobfits-ai-service) ───────────────────────────────────────
+  // AI_SERVICE_URL: versioned base URL of the FastAPI AI service (must include
+  // `/api/v1`). AI_SERVICE_KEY: shared secret sent as `X-AI-Service-Key`.
+  // Timeouts are milliseconds — generation/parse is slow, embed/health fast.
+  // All optional so the backend boots (and falls back to heuristics) with the
+  // AI box down or unconfigured.
+  AI_SERVICE_URL: z.string().url().optional(),
+  AI_SERVICE_KEY: z.string().optional(),
+  AI_TIMEOUT_MS_GENERATE: z.string().optional(),
+  AI_TIMEOUT_MS_EMBED: z.string().optional(),
+
   // Database
   DATABASE_URL: z.string().url(),
 
