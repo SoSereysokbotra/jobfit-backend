@@ -8,6 +8,7 @@
 // their own resumes.
 
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -35,7 +36,11 @@ import { ResumeService, ResumeFileUpload } from '../../application/services/resu
 import { ResumeScorerService } from '../../application/services/resume-scorer.service';
 import { UploadResumeDto } from '../../application/dtos/upload-resume.dto';
 import { ResumeResponseDto } from '../../application/dtos/resume-response.dto';
+import { ParsedResumeDataResponseDto } from '../../application/dtos/parsed-resume-data-response.dto';
+import { ParsedResumeDataRepository } from '../../infrastructure/repositories/parsed-resume-data.repository';
 import { Resume } from '../../domain/entities/resume.entity';
+import { UserRepository } from '../../../user/infrastructure/repositories/user.repository';
+import { SubscriptionTier } from '@shared/kernel/enums/subscription-tier.enum';
 
 const MAX_RESUME_SIZE = 5 * 1024 * 1024; // 5 MB
 
@@ -47,6 +52,8 @@ export class ResumeController {
   constructor(
     private readonly resumeService: ResumeService,
     private readonly resumeScorer: ResumeScorerService,
+    private readonly userRepository: UserRepository,
+    private readonly parsedResumeDataRepository: ParsedResumeDataRepository,
   ) {}
 
   @Post()
@@ -126,6 +133,22 @@ export class ResumeController {
     return { status: resume.parsingStatus, error: resume.parsingError };
   }
 
+  @Get(':id/parsed-data')
+  @ApiOperation({
+    summary: 'Get the structured data extracted from a resume (AI or heuristic)',
+  })
+  async parsedData(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<ParsedResumeDataResponseDto> {
+    await this.assertOwned(id, user);
+    const parsed = await this.parsedResumeDataRepository.findByResumeId(id);
+    if (!parsed) {
+      throw new BadRequestException('Resume has not been parsed yet');
+    }
+    return new ParsedResumeDataResponseDto(parsed);
+  }
+
   @Get(':id/ats-score')
   @ApiOperation({ summary: 'Calculate (and cache) a resume’s ATS score' })
   async atsScore(
@@ -155,8 +178,7 @@ export class ResumeController {
     @Param('id') id: string,
   ): Promise<{ atsScore: number; qualityScore: number; total: number }> {
     await this.assertOwned(id, user);
-    const atsScore = await this.resumeScorer.calculateATSScore(id);
-    const qualityScore = await this.resumeScorer.calculateQualityScore(id);
+    const { atsScore, qualityScore } = await this.resumeScorer.scoreResume(id);
     return {
       atsScore,
       qualityScore,
@@ -166,15 +188,44 @@ export class ResumeController {
 
   @Post(':id/score')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Trigger score calculation and persist to the resume' })
+  @ApiOperation({
+    summary:
+      'Score the resume (AI with heuristic fallback) and persist ats/quality. ' +
+      'Improvement suggestions are premium-only (PREMIUM/PROFESSIONAL).',
+  })
   async score(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
-  ): Promise<{ atsScore: number; qualityScore: number }> {
+  ): Promise<{
+    atsScore: number;
+    qualityScore: number;
+    breakdown: Record<string, number>;
+    scoredBy: string;
+    suggestions?: string[];
+  }> {
     await this.assertOwned(id, user);
-    const atsScore = await this.resumeScorer.calculateATSScore(id);
-    const qualityScore = await this.resumeScorer.calculateQualityScore(id);
-    return { atsScore, qualityScore };
+    const result = await this.resumeScorer.scoreResume(id);
+
+    const base = {
+      atsScore: result.atsScore,
+      qualityScore: result.qualityScore,
+      breakdown: result.breakdown,
+      scoredBy: result.scoredBy,
+    };
+    // Gate AI suggestions behind subscription tier — enforced server-side.
+    if (await this.hasPremiumAccess(user.id)) {
+      return { ...base, suggestions: result.suggestions };
+    }
+    return base;
+  }
+
+  /** True when the user's tier entitles them to AI suggestions (PREMIUM/PROFESSIONAL). */
+  private async hasPremiumAccess(userId: string): Promise<boolean> {
+    const account = await this.userRepository.findById(userId);
+    return (
+      account?.subscriptionTier === SubscriptionTier.PREMIUM ||
+      account?.subscriptionTier === SubscriptionTier.PROFESSIONAL
+    );
   }
 
   /** Load a resume and assert the caller owns it (404 if missing, 403 if not owner). */

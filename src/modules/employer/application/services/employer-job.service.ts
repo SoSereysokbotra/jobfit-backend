@@ -98,6 +98,10 @@ function toJobResponse(row: JobWithSkills): JobResponseDto {
         ? { min: row.minSalary, max: row.maxSalary, currency: 'USD' }
         : undefined,
     skillIds: row.skills.map((s) => s.skillId),
+    responsibilities: row.responsibilities ?? [],
+    requirements: row.requirements ?? [],
+    benefits: row.benefits ?? [],
+    bonusPct: row.bonusPct ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

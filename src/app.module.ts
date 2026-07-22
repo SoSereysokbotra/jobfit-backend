@@ -43,9 +43,11 @@ import { CompanyModule } from './modules/company/company.module';
 import { JobModule } from './modules/job/job.module';
 import { ResumeModule } from './modules/resume/resume.module';
 import { ApplicationModule } from './modules/application/application.module';
+import { OfferModule } from './modules/offer/offer.module';
 import { SavedJobModule } from './modules/saved-job/saved-job.module';
 import { IngestionModule } from './modules/ingestion/ingestion.module';
 import { MatchingModule } from './modules/matching/matching.module';
+import { GenerationModule } from './modules/generation/generation.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { PaymentModule } from './modules/payment/payment.module';
 import { AdminModule } from './modules/admin/admin.module';
@@ -102,9 +104,11 @@ import { AlertingModule } from './modules/alerting/alerting.module';
     JobModule,
     ResumeModule,
     ApplicationModule,
+    OfferModule,
     SavedJobModule,
     IngestionModule,
     MatchingModule,
+    GenerationModule,
     NotificationModule,
     PaymentModule,
     AdminModule,

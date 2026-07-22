@@ -163,6 +163,7 @@ model User {
   resumes        Resume[]
   applications   Application[]
   savedJobs      SavedJob[]
+  recommendations Recommendation[]
 
   // ── Admin module (Admin MVP) ───────────────────────────────────────────────
   // Admin actions this user performed / system alerts this admin acknowledged.
@@ -173,6 +174,7 @@ model User {
   // Jobs this employer posted, applications they reviewed, and pipeline moves they made.
   postedJobs             Job[]                     @relation("PostedByEmployer")
   reviewedApplications   Application[]             @relation("ReviewedByEmployer")
+  extendedOffers         Offer[]                   @relation("ExtendedOffers")
   movedApplicationStages ApplicationStageHistory[] @relation("MovedByUser")
 
   @@index([email])
@@ -235,6 +237,11 @@ model Profile {
   linkedinUrl  String?
   githubUrl    String?
   portfolioUrl String?
+
+  // ── Semantic matching (Phase 3) ─────────────────────────────────────────────
+  // BGE-M3 candidate embedding (1024-dim), built from profile + latest parsed
+  // résumé. Managed via raw SQL — Prisma can't read/write the `vector` type.
+  embedding Unsupported("vector(1024)")?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -443,6 +450,12 @@ model Job {
   minSalary   Int?
   maxSalary   Int?
 
+  // Structured posting content (employer-authored). Empty arrays when unset.
+  responsibilities String[] @default([])
+  requirements     String[] @default([])
+  benefits         String[] @default([])
+  bonusPct         Int? // target annual bonus, % of base
+
   // ── Ingestion (FR-JOBS-001): external-source tracking + dedup ──────────────
   source      String? // e.g. "THEMUSE"; NULL = direct employer posting
   externalId  String? // the source's job id, for dedup + updates
@@ -457,10 +470,16 @@ model Job {
   postedByEmployerId String?
   postedByEmployer   User?   @relation("PostedByEmployer", fields: [postedByEmployerId], references: [id], onDelete: SetNull)
 
-  applications Application[]
-  matchScores  MatchScore[]
-  skills       JobSkill[]
-  savedBy      SavedJob[]
+  // ── Semantic matching (Phase 3) ─────────────────────────────────────────────
+  // BGE-M3 job embedding (1024-dim), built from title + description + skills.
+  // Managed via raw SQL — Prisma can't read/write the `vector` type.
+  embedding Unsupported("vector(1024)")?
+
+  applications    Application[]
+  matchScores     MatchScore[]
+  skills          JobSkill[]
+  savedBy         SavedJob[]
+  recommendations Recommendation[]
 
   // Dedup key for ingested jobs. NULLs are distinct in Postgres, so direct
   // employer postings (source = externalId = NULL) never collide here.
@@ -543,6 +562,10 @@ model ParsedResumeData {
   certifications String? // JSON string
   rawText        String?
 
+  // "ai" when the AI service produced the structured data, "heuristic" when the
+  // regex/section fallback did (AI service unavailable). Null for legacy rows.
+  parsedBy String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -572,6 +595,7 @@ model Application {
   timeline      ApplicationTimeline[]
   contactPerson ContactPerson?
   stageHistory  ApplicationStageHistory[]
+  offer         Offer?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -582,6 +606,49 @@ model Application {
   @@index([status])
   @@index([reviewedByEmployerId])
   @@map("applications")
+}
+
+// ── Offers (Offers & Decisions) ───────────────────────────────────────────────
+// A concrete offer an employer extends on an application. 1:1 with Application; all
+// the compensation the seeker's /offers dashboard needs lives here. The seeker's
+// accept/decline/negotiate decisions drive both this row and the Application status.
+enum OfferStatus {
+  EXTENDED
+  NEGOTIATING
+  ACCEPTED
+  DECLINED
+  WITHDRAWN
+}
+
+model Offer {
+  id            String      @id @default(uuid())
+  applicationId String      @unique
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  status OfferStatus @default(EXTENDED)
+
+  // Compensation
+  baseSalary     Int
+  currency       String  @default("USD")
+  signingBonus   Int?
+  annualBonusPct Float?
+  equityShares   Int?
+  equityPrice    Float?
+
+  startDate        DateTime?
+  responseDeadline DateTime?
+  notes            String?
+
+  // Who extended it (the employer user).
+  extendedByEmployerId String?
+  extendedByEmployer   User?   @relation("ExtendedOffers", fields: [extendedByEmployerId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  decidedAt DateTime?
+
+  @@index([status])
+  @@map("offers")
 }
 
 // ── Employer module: application pipeline stage history (Employer Phase 2) ─────
@@ -650,6 +717,28 @@ model MatchScore {
 
   @@unique([jobId, jobSeekerProfileId])
   @@map("match_scores")
+}
+
+// Seeker-facing job recommendation (Phase 3). Keyed by (userId, jobId) so it works
+// off the populated `Profile`/User rather than the empty legacy JobSeekerProfile.
+// Written by the matching batch; read by the /recommendations endpoint.
+model Recommendation {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobId  String
+  job    Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  score             Float // 0-100 weighted total
+  breakdown         Json? // sub-scores: skills, experience, location, salary
+  reasonExplanation String? // human-readable "why this matched"
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, jobId])
+  @@index([userId, score])
+  @@map("recommendations")
 }
 
 model Skill {

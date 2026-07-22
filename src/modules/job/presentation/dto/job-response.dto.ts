@@ -22,6 +22,10 @@ export class JobResponseDto {
   @ApiPropertyOptional() location?: string;
   @ApiPropertyOptional() salaryRange?: SalaryRangeResponseDto;
   @ApiProperty({ type: [String] }) skillIds: string[];
+  @ApiProperty({ type: [String] }) responsibilities: string[];
+  @ApiProperty({ type: [String] }) requirements: string[];
+  @ApiProperty({ type: [String] }) benefits: string[];
+  @ApiPropertyOptional({ type: Number, nullable: true }) bonusPct?: number | null;
   @ApiProperty() createdAt: string;
   @ApiProperty() updatedAt: string;
 }

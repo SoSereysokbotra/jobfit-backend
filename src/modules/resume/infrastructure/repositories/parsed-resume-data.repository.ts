@@ -21,6 +21,7 @@ export interface ParsedResumeDataInput {
   skills?: string; // JSON string
   certifications?: string; // JSON string
   rawText?: string;
+  parsedBy?: string; // "ai" | "heuristic"
 }
 
 @Injectable()
@@ -40,6 +41,7 @@ export class ParsedResumeDataRepository {
       skills: data.skills ?? null,
       certifications: data.certifications ?? null,
       rawText: data.rawText ?? null,
+      parsedBy: data.parsedBy ?? null,
     };
     await this.prisma.parsedResumeData.upsert({
       where: { resumeId: data.resumeId },

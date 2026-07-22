@@ -91,6 +91,10 @@ export class JobService {
       remoteType,
       salaryRange,
       skillIds: dto.skillIds,
+      responsibilities: dto.responsibilities,
+      requirements: dto.requirements,
+      benefits: dto.benefits,
+      bonusPct: dto.bonusPct,
     });
     if (updateResult.isFailure) throw new BadRequestException(updateResult.error);
 

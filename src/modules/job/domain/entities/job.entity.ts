@@ -16,6 +16,10 @@ export interface JobProps {
   location?: string;
   salaryRange?: SalaryRange;
   skillIds: string[];
+  responsibilities: string[];
+  requirements: string[];
+  benefits: string[];
+  bonusPct?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -44,6 +48,18 @@ export class Job extends AggregateRoot<JobProps> {
   }
   get skillIds(): string[] {
     return this.props.skillIds;
+  }
+  get responsibilities(): string[] {
+    return this.props.responsibilities;
+  }
+  get requirements(): string[] {
+    return this.props.requirements;
+  }
+  get benefits(): string[] {
+    return this.props.benefits;
+  }
+  get bonusPct(): number | undefined {
+    return this.props.bonusPct;
   }
 
   private constructor(props: JobProps, id?: string) {
@@ -110,6 +126,10 @@ export class Job extends AggregateRoot<JobProps> {
     remoteType?: RemoteType;
     salaryRange?: SalaryRange;
     skillIds?: string[];
+    responsibilities?: string[];
+    requirements?: string[];
+    benefits?: string[];
+    bonusPct?: number;
   }): Result<void> {
     if (this.props.status.isClosed()) {
       return Result.fail("Cannot update a closed job");
@@ -139,6 +159,22 @@ export class Job extends AggregateRoot<JobProps> {
     if (fields.skillIds !== undefined) {
       this.props.skillIds = fields.skillIds;
       changed.push("skillIds");
+    }
+    if (fields.responsibilities !== undefined) {
+      this.props.responsibilities = fields.responsibilities;
+      changed.push("responsibilities");
+    }
+    if (fields.requirements !== undefined) {
+      this.props.requirements = fields.requirements;
+      changed.push("requirements");
+    }
+    if (fields.benefits !== undefined) {
+      this.props.benefits = fields.benefits;
+      changed.push("benefits");
+    }
+    if (fields.bonusPct !== undefined) {
+      this.props.bonusPct = fields.bonusPct;
+      changed.push("bonusPct");
     }
 
     this.props.updatedAt = new Date();

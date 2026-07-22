@@ -13,17 +13,26 @@ import { StorageService } from '@infra/storage/storage.service';
 import { DomainEventBus } from '@events/domain-event-bus.service';
 import { ResumeParsedEvent } from '../../domain/events/resume-parsed.event';
 import { VALIDATION } from '@common/constants/validation';
+import { AiClient } from '@infra/ai/ai.client';
+import { AiServiceError } from '@infra/ai/ai.errors';
+import { FileType, ParseResumeResponse } from '@infra/ai/ai.types';
 
+// experiences/educations are heterogeneous: the AI service returns structured
+// objects, the heuristic fallback returns raw section lines (strings). Both are
+// JSON-serialized into the same column, so the type is intentionally loose.
 interface ParsedData {
   fullName?: string;
   email?: string;
   phone?: string;
   location?: string;
   summary?: string;
-  experiences?: string[];
-  educations?: string[];
+  experiences?: unknown[];
+  educations?: unknown[];
   skills?: string[];
 }
+
+/** Which path produced the structured data — persisted so we can tell them apart. */
+type ParsedBy = 'ai' | 'heuristic';
 
 // Lines that start a new resume section (used to bound section bodies).
 const SECTION_HEADER =
@@ -38,6 +47,7 @@ export class ResumeParserService {
     private readonly parsedResumeDataRepository: ParsedResumeDataRepository,
     private readonly storage: StorageService,
     private readonly eventBus: DomainEventBus,
+    private readonly aiClient: AiClient,
   ) {}
 
   async parseResume(
@@ -62,7 +72,7 @@ export class ResumeParserService {
       const buffer = await this.storage.download('resumes', path);
 
       const text = await this.extractText(buffer, fileType);
-      const parsed = this.extractStructuredData(text);
+      const { parsed, parsedBy } = await this.buildStructuredData(text, fileType);
 
       await this.parsedResumeDataRepository.save({
         resumeId,
@@ -75,6 +85,7 @@ export class ResumeParserService {
         educations: parsed.educations && JSON.stringify(parsed.educations),
         skills: parsed.skills && JSON.stringify(parsed.skills),
         rawText: text,
+        parsedBy,
       });
 
       await this.parsedResumeDataRepository.updateParsingStatus(
@@ -105,6 +116,44 @@ export class ResumeParserService {
       return result.value;
     }
     throw new Error(`Unsupported file type for parsing: ${fileType}`);
+  }
+
+  /**
+   * Structure the resume text via the AI service (Qwen), falling back to the
+   * regex/section heuristic when the AI service is unavailable. Only
+   * AiServiceError triggers the fallback — other errors (e.g. a bug) propagate
+   * and fail the job. The chosen path is returned as `parsedBy`.
+   */
+  private async buildStructuredData(
+    text: string,
+    fileType: string,
+  ): Promise<{ parsed: ParsedData; parsedBy: ParsedBy }> {
+    try {
+      const ai = await this.aiClient.parseResume(text, fileType as FileType);
+      return { parsed: this.fromAiResponse(ai), parsedBy: 'ai' };
+    } catch (err) {
+      if (err instanceof AiServiceError) {
+        this.logger.warn(
+          `AI resume parse unavailable (${err.code}); falling back to heuristic`,
+        );
+        return { parsed: this.extractStructuredData(text), parsedBy: 'heuristic' };
+      }
+      throw err;
+    }
+  }
+
+  /** Map the AI service's parse response onto the persisted ParsedData shape. */
+  private fromAiResponse(ai: ParseResumeResponse): ParsedData {
+    return {
+      fullName: ai.fullName ?? undefined,
+      email: ai.email ?? undefined,
+      phone: ai.phone ?? undefined,
+      location: ai.location ?? undefined,
+      summary: ai.summary ?? undefined,
+      experiences: ai.experiences.length > 0 ? ai.experiences : undefined,
+      educations: ai.educations.length > 0 ? ai.educations : undefined,
+      skills: ai.skills.length > 0 ? ai.skills : undefined,
+    };
   }
 
   private extractStructuredData(text: string): ParsedData {

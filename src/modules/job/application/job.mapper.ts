@@ -16,6 +16,10 @@ export class JobMapper {
         ? { min: salary.min, max: salary.max, currency: salary.currency }
         : undefined,
       skillIds: job.skillIds,
+      responsibilities: job.responsibilities,
+      requirements: job.requirements,
+      benefits: job.benefits,
+      bonusPct: job.bonusPct ?? null,
       createdAt: job.props.createdAt.toISOString(),
       updatedAt: job.props.updatedAt.toISOString(),
     };

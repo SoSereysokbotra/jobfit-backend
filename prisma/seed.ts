@@ -153,6 +153,27 @@ async function main() {
     console.log(`   🧹  Removed ${legacyIds.length} legacy string-id job(s).`);
   }
 
+  // Shared structured content for the demo jobs (employers author these per-job in the app).
+  const DEFAULT_RESPONSIBILITIES = [
+    'Design, build, and maintain scalable services used across the platform.',
+    'Write clean, well-tested, efficient code and take part in code reviews.',
+    'Collaborate with product managers and designers to ship new features.',
+    'Investigate and resolve performance and reliability issues in production.',
+  ];
+  const DEFAULT_REQUIREMENTS = [
+    '4+ years of relevant professional experience.',
+    'Strong fundamentals in the core stack for this role.',
+    'Excellent written and verbal communication skills.',
+    'Comfortable working in an agile, collaborative team.',
+  ];
+  const DEFAULT_BENEFITS = [
+    'Comprehensive health, dental, and vision insurance.',
+    '401(k) matching up to 5% of your base salary.',
+    '20 days PTO plus 11 paid company holidays.',
+    'Flexible, remote-friendly working hours.',
+    '$2,000 annual learning and development budget.',
+  ];
+
   for (const j of jobs) {
     const companyId = companyByName.get(j.company);
     if (!companyId) continue;
@@ -172,6 +193,10 @@ async function main() {
         location: j.location,
         minSalary: j.minSalary,
         maxSalary: j.maxSalary,
+        responsibilities: DEFAULT_RESPONSIBILITIES,
+        requirements: DEFAULT_REQUIREMENTS,
+        benefits: DEFAULT_BENEFITS,
+        bonusPct: 15,
         skills: { deleteMany: {}, create: skillLinks },
       },
       create: {
@@ -184,6 +209,10 @@ async function main() {
         location: j.location,
         minSalary: j.minSalary,
         maxSalary: j.maxSalary,
+        responsibilities: DEFAULT_RESPONSIBILITIES,
+        requirements: DEFAULT_REQUIREMENTS,
+        benefits: DEFAULT_BENEFITS,
+        bonusPct: 15,
         skills: { create: skillLinks },
       },
     });
@@ -192,13 +221,26 @@ async function main() {
   // ── Seed a demo EMPLOYER (so the employer dashboard has a real, reproducible login) ──
   // Role EMPLOYER + a verified email + an EmployerProfile linking them to Stripe. The
   // email domain (stripe.com) matches Stripe's website so verify-email can be demoed too.
-  const stripeId = companyByName.get('Stripe');
-  if (stripeId) {
+  // One employer per company (each employer only sees THEIR company's applications).
+  // Seeding several lets you test a seeker holding offers from multiple companies.
+  // One employer per company that has jobs, so every job on the board has a real
+  // person who can review applicants and send offers (no "orphan" applications).
+  const employers = [
+    { email: 'employer@stripe.com', company: 'Stripe', firstName: 'Evan', lastName: 'Employer' },
+    { email: 'employer@airbnb.com', company: 'Airbnb', firstName: 'Aisha', lastName: 'Adams' },
+    { email: 'employer@figma.com', company: 'Figma', firstName: 'Finn', lastName: 'Ford' },
+    { email: 'employer@nexusai.com', company: 'Nexus AI', firstName: 'Nadia', lastName: 'Nolan' },
+    { email: 'employer@healthhub.com', company: 'HealthHub', firstName: 'Hana', lastName: 'Hill' },
+    { email: 'employer@greengrid.com', company: 'GreenGrid', firstName: 'Gil', lastName: 'Grant' },
+  ];
+  for (const e of employers) {
+    const companyId = companyByName.get(e.company);
+    if (!companyId) continue;
     const employer = await prisma.user.upsert({
-      where: { email: 'employer@stripe.com' },
+      where: { email: e.email },
       update: { role: 'EMPLOYER', emailVerified: true },
       create: {
-        email: 'employer@stripe.com',
+        email: e.email,
         passwordHash: bcrypt.hashSync('Employer123', 10),
         role: 'EMPLOYER',
         emailVerified: true,
@@ -206,15 +248,10 @@ async function main() {
     });
     await prisma.employerProfile.upsert({
       where: { userId: employer.id },
-      update: { companyId: stripeId },
-      create: {
-        userId: employer.id,
-        companyId: stripeId,
-        firstName: 'Evan',
-        lastName: 'Employer',
-      },
+      update: { companyId },
+      create: { userId: employer.id, companyId, firstName: e.firstName, lastName: e.lastName },
     });
-    console.log('   👔  Employer login: employer@stripe.com / Employer123 (manages Stripe)');
+    console.log(`   👔  Employer login: ${e.email} / Employer123 (manages ${e.company})`);
   }
 
   // ── Seed a demo ADMIN (so the admin console has a real, reproducible login) ──

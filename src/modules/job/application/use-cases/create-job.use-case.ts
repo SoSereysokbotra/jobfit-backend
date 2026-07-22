@@ -43,6 +43,10 @@ export class CreateJobUseCase implements IUseCase<CreateJobRequest, Job> {
       location: dto.location,
       salaryRange,
       skillIds: dto.skillIds ?? [],
+      responsibilities: dto.responsibilities ?? [],
+      requirements: dto.requirements ?? [],
+      benefits: dto.benefits ?? [],
+      bonusPct: dto.bonusPct,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
