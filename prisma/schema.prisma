@@ -164,6 +164,7 @@ model User {
   applications   Application[]
   savedJobs      SavedJob[]
   recommendations Recommendation[]
+  matchLabels     MatchLabel[]
 
   // ── Admin module (Admin MVP) ───────────────────────────────────────────────
   // Admin actions this user performed / system alerts this admin acknowledged.
@@ -475,11 +476,16 @@ model Job {
   // Managed via raw SQL — Prisma can't read/write the `vector` type.
   embedding Unsupported("vector(1024)")?
 
+  // Phase B: full-text search vector (BM25) — GENERATED STORED from title+description.
+  // Read via raw SQL only.
+  searchTsv Unsupported("tsvector")?
+
   applications    Application[]
   matchScores     MatchScore[]
   skills          JobSkill[]
   savedBy         SavedJob[]
   recommendations Recommendation[]
+  matchLabels     MatchLabel[]
 
   // Dedup key for ingested jobs. NULLs are distinct in Postgres, so direct
   // employer postings (source = externalId = NULL) never collide here.
@@ -739,6 +745,45 @@ model Recommendation {
   @@unique([userId, jobId])
   @@index([userId, score])
   @@map("recommendations")
+}
+
+// ── Evaluation (RAG plan Phase A) ─────────────────────────────────────────────
+// Hand-labeled ground-truth for measuring retrieval quality (Recall@10/MRR/nDCG@10).
+// Candidate = user (the retrieval unit). Slice tags are a Phase-A stopgap: Job has
+// no category/seniority/language columns yet (Phase B adds real queryable ones).
+enum MatchLabelValue {
+  GREAT
+  OK
+  BAD
+}
+
+enum MatchLabelSource {
+  HUMAN
+  FEEDBACK
+}
+
+model MatchLabel {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobId  String
+  job    Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  label  MatchLabelValue
+  reason String?
+  source MatchLabelSource @default(HUMAN)
+
+  // Hand-labeled evaluation slices (nullable — free-text stopgap, not schema truth).
+  category  String?
+  seniority String?
+  language  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, jobId])
+  @@index([userId])
+  @@map("match_labels")
 }
 
 model Skill {

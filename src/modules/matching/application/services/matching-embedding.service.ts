@@ -12,6 +12,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import { AiClient } from '@infra/ai/ai.client';
 import { AiServiceError } from '@infra/ai/ai.errors';
+import { toExperienceTitles, toStringArray } from '../../domain/parsed-resume-json';
 
 type EmbeddableTable = 'jobs' | 'profiles';
 
@@ -210,35 +211,4 @@ export class MatchingEmbeddingService {
       experienceTitles: toExperienceTitles(parsed.experiences),
     };
   }
-}
-
-// ── JSON-column helpers (shared shape with the resume DTO) ─────────────────────
-
-function parseJson(json: string | null): unknown {
-  if (!json) return null;
-  try {
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-}
-
-function toStringArray(json: string | null): string[] {
-  const v = parseJson(json);
-  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
-}
-
-/** Experience entries may be AI objects ({title,...}) or heuristic raw strings. */
-function toExperienceTitles(json: string | null): string[] {
-  const v = parseJson(json);
-  if (!Array.isArray(v)) return [];
-  return v
-    .map((item) => {
-      if (item && typeof item === 'object') {
-        const title = (item as Record<string, unknown>).title;
-        return typeof title === 'string' ? title : '';
-      }
-      return typeof item === 'string' ? item : '';
-    })
-    .filter((t) => t.length > 0);
 }

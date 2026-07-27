@@ -102,3 +102,23 @@ export interface InterviewResponse {
   questions: InterviewQuestion[];
   feedback: string | null;
 }
+
+// ── POST /rerank (Phase B) ───────────────────────────────────────────────────
+export interface RerankDocument {
+  id: string;
+  text: string;
+}
+
+export interface RerankRequest {
+  query: string;
+  documents: RerankDocument[];
+}
+
+export interface RerankScore {
+  id: string;
+  score: number; // 0-1 relevance
+}
+
+export interface RerankResponse {
+  scores: RerankScore[];
+}

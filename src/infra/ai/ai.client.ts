@@ -13,6 +13,8 @@ import {
   InterviewRequest,
   InterviewResponse,
   ParseResumeResponse,
+  RerankDocument,
+  RerankResponse,
   ScoreResumeResponse,
 } from './ai.types';
 
@@ -95,6 +97,16 @@ export class AiClient {
       'POST',
       '/generate/interview',
       input,
+      this.config.timeoutMsGenerate,
+    );
+  }
+
+  /** Rerank a shortlist of documents by fit to the query (LLM-based). */
+  rerank(query: string, documents: RerankDocument[]): Promise<RerankResponse> {
+    return this.send<RerankResponse>(
+      'POST',
+      '/rerank',
+      { query, documents },
       this.config.timeoutMsGenerate,
     );
   }

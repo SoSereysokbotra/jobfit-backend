@@ -1,0 +1,5 @@
+// Example only — copy to match-labels.jsonl and use REAL userId/jobId values
+// (from `scripts/eval-export-worksheet.ts`). Lines with unknown ids are skipped on load.
+{"userId":"00000000-0000-0000-0000-000000000000","jobId":"11111111-1111-1111-1111-111111111111","label":"great","category":"software-eng","seniority":"senior","language":"en","reason":"Strong backend + Postgres overlap"}
+{"userId":"00000000-0000-0000-0000-000000000000","jobId":"22222222-2222-2222-2222-222222222222","label":"ok","category":"software-eng","seniority":"mid","language":"en","reason":"Adjacent stack, junior-leaning"}
+{"userId":"00000000-0000-0000-0000-000000000000","jobId":"33333333-3333-3333-3333-333333333333","label":"bad","category":"design","seniority":"senior","language":"en","reason":"Design role, not a fit"}
