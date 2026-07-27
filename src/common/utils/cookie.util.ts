@@ -2,8 +2,8 @@
 //
 // Reusable cookie options for auth cookies (access/refresh tokens). Reading of cookies
 // is enabled by cookie-parser in main.ts; SETTING cookies with these options happens in
-// the auth presentation layer later. Cookies are always httpOnly + sameSite:'strict',
-// and `secure` is turned on only in production (derived from NODE_ENV).
+// the auth presentation layer later. Cookies are always httpOnly; `sameSite` and `secure`
+// are derived from NODE_ENV (see buildAuthCookieOptions).
 
 import { CookieOptions } from 'express';
 
@@ -20,9 +20,14 @@ export function buildAuthCookieOptions(
     nodeEnv?: string,
     maxAgeMs?: number,
 ): CookieOptions {
+    // In production the frontend (Vercel) and API (Cloud Run) are different sites, so
+    // 'strict' would stop the browser storing/sending these cookies at all — refresh
+    // would silently fail and sessions would drop on reload. 'none' is required there,
+    // and it only works alongside `secure`. Locally both run on localhost (different
+    // ports are still same-site), so dev keeps the stricter setting.
     const options: CookieOptions = {
         httpOnly: true,
-        sameSite: 'strict',
+        sameSite: isProduction(nodeEnv) ? 'none' : 'strict',
         secure: isProduction(nodeEnv),
         path: '/',
     };

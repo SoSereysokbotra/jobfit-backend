@@ -12,6 +12,9 @@ substitutions:
   _REGION: asia-northeast1
   _REPO: jobfit               # Artifact Registry repo
   _SERVICE: jobfit-backend    # Cloud Run service name
+  # Browser origins allowed to call the API with credentials. Exact matches only —
+  # a wildcard is invalid once cookies are in play. Deployed frontend + local dev.
+  _CORS_ORIGIN: 'https://jobfit-frontend-six.vercel.app,http://localhost:3000'
 
 options:
   logging: CLOUD_LOGGING_ONLY
@@ -69,7 +72,14 @@ steps:
       - '--allow-unauthenticated'
       - '--port=8080'
       # TRACE_ENABLED=false until the runtime SA has roles/cloudtrace.agent.
-      - '--set-env-vars=NODE_ENV=production,LOG_FORMAT=json,LOG_LEVEL=info,METRICS_ENABLED=true,TRACE_ENABLED=false,SERVICE_NAME=${_SERVICE},SERVICE_VERSION=$BUILD_ID,GCP_PROJECT_ID=$PROJECT_ID'
-      # REDIS_URL omitted until that secret value exists (optional/fail-open). SLACK_WEBHOOK_URL wired (Phase 4 alerts).
-      # HEALTHCHECKS_PING_URL wired (external dead-man's-switch heartbeat). SUPABASE_* required at boot.
-      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,METRICS_TOKEN=METRICS_TOKEN:latest,SLACK_WEBHOOK_URL=SLACK_WEBHOOK_URL:latest,HEALTHCHECKS_PING_URL=HEALTHCHECKS_PING_URL:latest,SUPABASE_URL=SUPABASE_URL:latest,SUPABASE_SERVICE_ROLE_KEY=SUPABASE_SERVICE_ROLE_KEY:latest,SUPABASE_ANON_KEY=SUPABASE_ANON_KEY:latest,SUPABASE_JWT_SECRET=SUPABASE_JWT_SECRET:latest'
+      # Delimiter is ^|^ (not the default comma) because CORS_ORIGIN is itself a
+      # comma-separated list. It cannot be ^@^ either: EMAIL_USER/SMTP_FROM contain '@'.
+      # EMAIL_* (minus the password, which is a secret below) enables verification and
+      # password-reset mail — without it EmailService silently skips every send.
+      # SMTP_FROM must match the authenticated Gmail account, otherwise Gmail rewrites it.
+      - '--set-env-vars=^|^NODE_ENV=production|LOG_FORMAT=json|LOG_LEVEL=info|METRICS_ENABLED=true|TRACE_ENABLED=false|SERVICE_NAME=${_SERVICE}|SERVICE_VERSION=$BUILD_ID|GCP_PROJECT_ID=$PROJECT_ID|CORS_ORIGIN=${_CORS_ORIGIN}|EMAIL_HOST=smtp.gmail.com|EMAIL_PORT=587|EMAIL_USER=soviseth869@gmail.com|SMTP_FROM=JobFit Support <soviseth869@gmail.com>'
+      # REDIS_URL still omitted — the secret exists but its value is unverified, and a bad
+      # host is worse than none (Redis is optional/fail-open). SLACK_WEBHOOK_URL wired
+      # (Phase 4 alerts). HEALTHCHECKS_PING_URL wired (dead-man's-switch heartbeat).
+      # SUPABASE_* required at boot. EMAIL_PASS is the Gmail app password.
+      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,METRICS_TOKEN=METRICS_TOKEN:latest,SLACK_WEBHOOK_URL=SLACK_WEBHOOK_URL:latest,HEALTHCHECKS_PING_URL=HEALTHCHECKS_PING_URL:latest,SUPABASE_URL=SUPABASE_URL:latest,SUPABASE_SERVICE_ROLE_KEY=SUPABASE_SERVICE_ROLE_KEY:latest,SUPABASE_ANON_KEY=SUPABASE_ANON_KEY:latest,SUPABASE_JWT_SECRET=SUPABASE_JWT_SECRET:latest,EMAIL_PASS=EMAIL_PASS:latest'

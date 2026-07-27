@@ -25,8 +25,14 @@ async function bootstrap() {
   app.use(cookieParser());
 
   // CORS — credentials enabled so the browser sends/receives auth cookies.
+  // CORS_ORIGIN is a comma-separated allowlist (deployed frontend + local dev), so the
+  // Vercel app and a local frontend can both reach this instance. It must be an exact
+  // origin list rather than '*': `credentials: true` makes the browser reject a wildcard.
   app.enableCors({
-    origin: process.env.CORS_ORIGIN ?? 'http://localhost:3000',
+    origin: (process.env.CORS_ORIGIN ?? 'http://localhost:3000')
+      .split(',')
+      .map((o) => o.trim())
+      .filter(Boolean),
     credentials: true,
   });
 
