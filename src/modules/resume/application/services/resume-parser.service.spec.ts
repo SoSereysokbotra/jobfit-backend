@@ -1,6 +1,7 @@
-// Verifies the Phase 1 AI-parsing seam in ResumeParserService:
+// Verifies the AI-parsing seam in ResumeParserService:
 //  - AI service up   -> structured data from AI, parsedBy: "ai"
-//  - AiServiceError  -> graceful heuristic fallback, parsedBy: "heuristic", still SUCCESS
+//  - AiServiceError  -> the job FAILS. There is no heuristic fallback: structuring is
+//    AI-only, so an AI outage must be visible rather than silently degraded.
 // pdf-parse is mocked so no real PDF bytes are needed.
 
 jest.mock('pdf-parse', () =>
@@ -94,26 +95,23 @@ describe('ResumeParserService (AI parse + fallback)', () => {
     expect(eventBus.publish).toHaveBeenCalledTimes(1);
   });
 
-  it('falls back to the heuristic and marks parsedBy: "heuristic" on AiServiceError', async () => {
+  it('FAILS the job on AiServiceError — no heuristic fallback', async () => {
     aiClient.parseResume.mockRejectedValue(
       new AiServiceError('MODEL_TIMEOUT', 'Ollama did not respond', undefined),
     );
 
     await service.parseResume('r1', 'unused', 'PDF');
 
-    const saved = parsedRepo.save.mock.calls[0][0];
-    expect(saved.parsedBy).toBe('heuristic');
-    expect(saved.fullName).toBe('John Smith'); // from the mocked heuristic text
-    expect(JSON.parse(saved.skills)).toContain('Go');
-
-    // Fallback is not a failure: status is SUCCESS and the event still fires.
-    expect(parsedRepo.updateParsingStatus).toHaveBeenLastCalledWith('r1', 'SUCCESS');
-    expect(parsedRepo.updateParsingStatus).not.toHaveBeenCalledWith(
+    // Nothing is persisted: a partial/approximate parse is worse than none, because
+    // downstream consumers cannot tell it apart from a real one.
+    expect(parsedRepo.save).not.toHaveBeenCalled();
+    expect(parsedRepo.updateParsingStatus).toHaveBeenLastCalledWith(
       'r1',
       'FAILED',
-      expect.anything(),
+      'Ollama did not respond',
     );
-    expect(eventBus.publish).toHaveBeenCalledTimes(1);
+    // No ResumeParsedEvent — there is no parsed resume to announce.
+    expect(eventBus.publish).not.toHaveBeenCalled();
   });
 
   it('does NOT swallow non-AI errors (e.g. storage failure) as a fallback', async () => {

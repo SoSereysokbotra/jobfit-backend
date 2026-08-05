@@ -1,8 +1,12 @@
 // src/modules/resume/application/services/resume-parser.service.ts
 //
-// Downloads a resume file, extracts plain text (PDF via pdf-parse, DOCX via mammoth), pulls
-// out best-effort structured fields, persists ParsedResumeData, flips the Resume to SUCCESS,
+// Downloads a resume file, extracts plain text (PDF via pdf-parse, DOCX via mammoth),
+// structures it via the AI service, persists ParsedResumeData, flips the Resume to SUCCESS,
 // and emits ResumeParsedEvent. All failures are caught and recorded as FAILED.
+//
+// NO FALLBACK: structuring is AI-only. If the AI service fails, the parse FAILS — it does
+// not silently degrade to a regex approximation. A quiet fallback hides AI outages and
+// writes low-fidelity data that is indistinguishable downstream from a real parse.
 
 import { Injectable, Logger } from '@nestjs/common';
 import pdfParse = require('pdf-parse');
@@ -12,14 +16,12 @@ import { ParsedResumeDataRepository } from '../../infrastructure/repositories/pa
 import { StorageService } from '@infra/storage/storage.service';
 import { DomainEventBus } from '@events/domain-event-bus.service';
 import { ResumeParsedEvent } from '../../domain/events/resume-parsed.event';
-import { VALIDATION } from '@common/constants/validation';
 import { AiClient } from '@infra/ai/ai.client';
-import { AiServiceError } from '@infra/ai/ai.errors';
 import { FileType, ParseResumeResponse } from '@infra/ai/ai.types';
 
-// experiences/educations are heterogeneous: the AI service returns structured
-// objects, the heuristic fallback returns raw section lines (strings). Both are
-// JSON-serialized into the same column, so the type is intentionally loose.
+// experiences/educations are JSON-serialized into a single column. Rows written before
+// the heuristic fallback was removed may still hold raw section lines (strings), so the
+// type stays loose for backward compatibility with existing data.
 interface ParsedData {
   fullName?: string;
   email?: string;
@@ -30,13 +32,6 @@ interface ParsedData {
   educations?: unknown[];
   skills?: string[];
 }
-
-/** Which path produced the structured data — persisted so we can tell them apart. */
-type ParsedBy = 'ai' | 'heuristic';
-
-// Lines that start a new resume section (used to bound section bodies).
-const SECTION_HEADER =
-  /^(work experience|experience|employment|education|skills|projects|certifications|summary|objective|contact|awards)\b/i;
 
 @Injectable()
 export class ResumeParserService {
@@ -72,7 +67,9 @@ export class ResumeParserService {
       const buffer = await this.storage.download('resumes', path);
 
       const text = await this.extractText(buffer, fileType);
-      const { parsed, parsedBy } = await this.buildStructuredData(text, fileType);
+      // AI-only: an AiServiceError propagates to the catch below and fails the job.
+      const ai = await this.aiClient.parseResume(text, fileType as FileType);
+      const parsed = this.fromAiResponse(ai);
 
       await this.parsedResumeDataRepository.save({
         resumeId,
@@ -85,7 +82,7 @@ export class ResumeParserService {
         educations: parsed.educations && JSON.stringify(parsed.educations),
         skills: parsed.skills && JSON.stringify(parsed.skills),
         rawText: text,
-        parsedBy,
+        parsedBy: 'ai',
       });
 
       await this.parsedResumeDataRepository.updateParsingStatus(
@@ -118,30 +115,6 @@ export class ResumeParserService {
     throw new Error(`Unsupported file type for parsing: ${fileType}`);
   }
 
-  /**
-   * Structure the resume text via the AI service (Qwen), falling back to the
-   * regex/section heuristic when the AI service is unavailable. Only
-   * AiServiceError triggers the fallback — other errors (e.g. a bug) propagate
-   * and fail the job. The chosen path is returned as `parsedBy`.
-   */
-  private async buildStructuredData(
-    text: string,
-    fileType: string,
-  ): Promise<{ parsed: ParsedData; parsedBy: ParsedBy }> {
-    try {
-      const ai = await this.aiClient.parseResume(text, fileType as FileType);
-      return { parsed: this.fromAiResponse(ai), parsedBy: 'ai' };
-    } catch (err) {
-      if (err instanceof AiServiceError) {
-        this.logger.warn(
-          `AI resume parse unavailable (${err.code}); falling back to heuristic`,
-        );
-        return { parsed: this.extractStructuredData(text), parsedBy: 'heuristic' };
-      }
-      throw err;
-    }
-  }
-
   /** Map the AI service's parse response onto the persisted ParsedData shape. */
   private fromAiResponse(ai: ParseResumeResponse): ParsedData {
     return {
@@ -156,75 +129,4 @@ export class ResumeParserService {
     };
   }
 
-  private extractStructuredData(text: string): ParsedData {
-    const lines = text
-      .split('\n')
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0);
-
-    return {
-      fullName: this.extractName(lines),
-      email: this.extractEmail(text),
-      phone: this.extractPhone(text),
-      location: this.extractLocation(text),
-      summary: this.sectionBody(lines, /^(summary|objective)\b/i).join(' ') || undefined,
-      experiences: this.orUndefined(
-        this.sectionBody(lines, /^(work experience|experience|employment)\b/i),
-      ),
-      educations: this.orUndefined(this.sectionBody(lines, /^education\b/i)),
-      skills: this.orUndefined(this.extractSkills(lines)),
-    };
-  }
-
-  private extractName(lines: string[]): string | undefined {
-    // First line that looks like "Firstname Lastname" (2–4 alpha words, no digits/@).
-    return lines.find(
-      (l) =>
-        /^[A-Za-z][A-Za-z.'-]+(\s+[A-Za-z][A-Za-z.'-]+){1,3}$/.test(l) &&
-        !l.includes('@'),
-    );
-  }
-
-  private extractEmail(text: string): string | undefined {
-    const m = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
-    return m?.[0];
-  }
-
-  private extractPhone(text: string): string | undefined {
-    const m = text.match(/\+?\d[\d\s().-]{7,}\d/);
-    if (!m) return undefined;
-    const cleaned = m[0].replace(/[\s().-]/g, '');
-    return VALIDATION.PHONE_REGEX.test(cleaned) ? cleaned : undefined;
-  }
-
-  private extractLocation(text: string): string | undefined {
-    // Rough "City, ST" / "City, Country" pattern.
-    const m = text.match(/[A-Z][a-zA-Z]+,\s*[A-Z][a-zA-Z]{1,}/);
-    return m?.[0];
-  }
-
-  private extractSkills(lines: string[]): string[] {
-    const body = this.sectionBody(lines, /^skills\b/i);
-    return body
-      .join(',')
-      .split(/[,;•|]/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-  }
-
-  /** Lines between a section header and the next known section header. */
-  private sectionBody(lines: string[], startRe: RegExp): string[] {
-    const start = lines.findIndex((l) => startRe.test(l));
-    if (start === -1) return [];
-    const body: string[] = [];
-    for (let i = start + 1; i < lines.length; i++) {
-      if (SECTION_HEADER.test(lines[i])) break;
-      body.push(lines[i]);
-    }
-    return body;
-  }
-
-  private orUndefined(arr: string[]): string[] | undefined {
-    return arr.length > 0 ? arr : undefined;
-  }
 }
