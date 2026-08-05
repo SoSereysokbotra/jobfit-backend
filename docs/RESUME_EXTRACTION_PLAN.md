@@ -44,7 +44,12 @@ Everything the model got wrong follows from that. Position data exists in the PD
 
 **Baseline (2026-08-05, `qwen3:0.6b`, scrambled text):** `fullName` null · 1 education
 (KIT's name merged with NPIC's degree) · 1 experience with `title` **and** `company` null,
-holding *project* descriptions · 6 of 9 skills. **Score: 0/6 fields correct.**
+holding *project* descriptions · 6 of 9 skills.
+
+> **Correction:** an initial hand-count called this "0/6". The automated scorer
+> (`scripts/score-resume-parse.ts`) scores it **2/6** — the hand-count failed to credit
+> `email` and `phone`, which the old pipeline did get right. 2/6 is the number to compare
+> against; the 0/6 was wrong.
 
 ### Known gap, explicitly out of scope
 
@@ -97,12 +102,14 @@ Each phase ends with: tests green → commit → push → report → **wait for 
   cheap, deterministic, no PDF bytes.
 - **Done when:** `npx tsc --noEmit` clean and `npx jest` green (156+ tests).
 
-### Phase 4 — End-to-end
-- Restart backend, re-upload the reference CV through the real UI.
-- Capture the new structured output and score it against the §0 key.
-- **Done when:** a scored before/after sits in this file.
+### Phase 4 — End-to-end ✅
+- Scored through the real AI service via `scripts/score-resume-parse.ts` (same
+  `/resume/parse` endpoint, prompt and contract the worker uses).
+- ⚠️ **Not yet re-uploaded through the browser UI.** The backend is running the new code, so
+  a fresh upload will use it — worth doing once as a smoke check of the full HTTP + BullMQ
+  path, which this harness bypasses.
 
-### Phase 5 — The 2×2 (how much is left is the model?)
+### Phase 5 — The 2×2 (how much is left is the model?) ✅
 Four parses of the reference CV, scored against the §0 key:
 
 | | `qwen3:0.6b` | full `qwen3` (8B) |
@@ -140,6 +147,7 @@ Both models are already pulled locally. Full `qwen3` is slow on this laptop, but
 | 2026-08-05 | 1 | `pdfjs-dist@3.11.174` (last CJS-friendly line) + `pdf-reading-order.ts`. `pdf-parse` removed. |
 | 2026-08-05 | 2 | **All 5 criteria met** on the reference CV — see below. |
 | 2026-08-05 | 3 | `scripts/extract-pdf-text.ts` + 11 unit tests. tsc clean, jest **167/167**. |
+| 2026-08-05 | 4–5 | `scripts/score-resume-parse.ts` + the full 2×2. **2/6 → 4/6** on the shipped model; skills **6/9 → 9/9**. See below. |
 
 ### Phase 2 result — extraction verified
 
@@ -160,6 +168,44 @@ baseline than the heading. The two lines are adjacent, so the pairing is still r
 **Deliberately not tuned away:** widening the row tolerance to absorb it would risk merging
 genuinely distinct rows on other templates, and §Phase 1 forbids fitting the thresholds to
 one document.
+
+### Phases 4 + 5 result — the 2×2
+
+Scored by `scripts/score-resume-parse.ts` against the §0 key. Same CV, same prompt, same
+AI service; only the text source and `GENERATION_MODEL` vary.
+
+| | `qwen3:0.6b` | full `qwen3` (8.2B) |
+|---|---|---|
+| **scrambled text** (old `pdf-parse`) | **2/6** — seconds | **4/6** — 761 s |
+| **reading-order text** (new) | **4/6** — seconds | **5/6** — 504 s |
+
+Both levers are worth roughly the same on this document (+2 and +1). The interesting result
+is not the totals — it is **which errors each lever can and cannot fix.**
+
+**① Skills cannot be recovered by any model size.** Both scrambled cells return 6 skills and
+miss *Hardware + Software* and *Technical Skills*, regardless of model. Those items were
+physically relocated out of the SKILLS block by the broken extractor, so no amount of model
+capacity reconstructs them — the information is not in the input. Only the reading-order fix
+reaches **9/9**. **This is the load-bearing finding:** it is a class of error that a bigger
+model provably cannot buy its way out of.
+
+**② The big model partially compensates for bad input, at ~13 minutes a résumé.** Full
+`qwen3` on scrambled text recovers `fullName` and even nails the experience entry (1/1,
+correct title, `company: null`). That is real capability — but it costs 761 s and still
+cannot reach the skills.
+
+**③ The experience metric is confounded by the missing `projects` field.** Full `qwen3`
+scored *worse* on the better input (4 entries vs 1) because clean text made the three
+technical projects legible and it had nowhere to put them (§0). Both readings are defensible
+model behaviour against a schema that cannot represent the document. Treat this row as
+measuring the schema, not the model, until `projects` exists.
+
+**④ Cost decides deployment.** 504–761 s per résumé against a UI promising "~30 seconds".
+Full `qwen3` is not shippable for parsing on this hardware at any quality level.
+
+**Conclusion:** ship **reading-order text + `qwen3:0.6b`** (4/6, seconds). The next-best
+lever is the **`projects` schema fix**, not a model upgrade — it is cheap, it unblocks the
+one metric that is currently unmeasurable, and it plausibly takes both models to 5–6/6.
 
 ### Notes for whoever runs this next
 
