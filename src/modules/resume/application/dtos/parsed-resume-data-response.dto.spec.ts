@@ -11,10 +11,12 @@ const base: PrismaParsedResumeData = {
   summary: null,
   experiences: null,
   educations: null,
+  projects: null,
   skills: null,
   certifications: null,
   rawText: null,
   parsedBy: null,
+  promptVersion: null,
   createdAt: new Date(),
   updatedAt: new Date(),
 } as PrismaParsedResumeData;
@@ -69,14 +71,55 @@ describe('ParsedResumeDataResponseDto', () => {
       skills: 'not json',
       experiences: null,
       educations: '{bad',
+      projects: '{also bad',
       certifications: null,
     });
 
     expect(dto.skills).toEqual([]);
     expect(dto.experiences).toEqual([]);
     expect(dto.educations).toEqual([]);
+    expect(dto.projects).toEqual([]);
     expect(dto.certifications).toEqual([]);
     expect(dto.fullName).toBe('Jane Doe');
     expect(dto.parsedBy).toBeUndefined();
+  });
+
+  it('maps projects with their technologies, separately from experiences', () => {
+    const dto = new ParsedResumeDataResponseDto({
+      ...base,
+      parsedBy: 'ai',
+      promptVersion: 'v2',
+      experiences: JSON.stringify([
+        { company: null, title: 'Electrical Engineering Intern', startDate: '2023-11', endDate: '2023-12' },
+      ]),
+      projects: JSON.stringify([
+        {
+          name: 'Ball Balancing System (PID Control)',
+          description: 'Closed-loop system maintaining ball position.',
+          startDate: '2023',
+          endDate: '2024',
+          technologies: ['Arduino', 'PID Control', 'servo motor'],
+        },
+      ]),
+    });
+
+    // The one real job stays put; the project does not inflate the employment history.
+    expect(dto.experiences).toHaveLength(1);
+    expect(dto.projects).toEqual([
+      {
+        name: 'Ball Balancing System (PID Control)',
+        description: 'Closed-loop system maintaining ball position.',
+        dates: '2023 — 2024',
+        technologies: ['Arduino', 'PID Control', 'servo motor'],
+      },
+    ]);
+    expect(dto.promptVersion).toBe('v2');
+  });
+
+  it('defaults projects to an empty array for legacy rows', () => {
+    // Rows written before the projects column existed must still deserialise.
+    const dto = new ParsedResumeDataResponseDto({ ...base, projects: null });
+    expect(dto.projects).toEqual([]);
+    expect(dto.promptVersion).toBeUndefined();
   });
 });

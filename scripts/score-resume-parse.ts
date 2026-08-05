@@ -36,6 +36,10 @@ const TRUTH = {
   ],
   experienceTitle: 'Electrical Engineering Intern',
   experienceCount: 1,
+  // TECHNICAL PROJECTS. These carry the CV's only real technical signal, so a parse
+  // that drops them is useless for matching even if every other field is right.
+  projectCount: 3,
+  projectTechnologies: ['Arduino'],
   skills: [
     'Effective Time Management',
     'Creative Problem-Solving',
@@ -56,6 +60,8 @@ interface ParseResponse {
   skills?: string[];
   experiences?: { company?: string | null; title?: string | null; startDate?: string | null }[];
   educations?: { institution?: string | null; degree?: string | null }[];
+  projects?: { name?: string | null; technologies?: string[] }[];
+  promptVersion?: string;
 }
 
 interface PdfJsModule {
@@ -157,7 +163,7 @@ const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9+]/g, '');
 function score(p: ParseResponse): { lines: string[]; got: number; total: number } {
   const lines: string[] = [];
   let got = 0;
-  const total = 6;
+  const total = 7;
   const mark = (ok: boolean, label: string, detail: string) => {
     if (ok) got++;
     lines.push(`  ${ok ? 'PASS' : 'FAIL'}  ${label.padEnd(14)} ${detail}`);
@@ -206,6 +212,18 @@ function score(p: ParseResponse): { lines: string[]; got: number; total: number 
       (foundSkills.length < 9
         ? ` — missing: ${TRUTH.skills.filter((s) => !foundSkills.includes(s)).join(', ')}`
         : ''),
+  );
+
+  const projects = p.projects ?? [];
+  const allTech = projects.flatMap((pr) => pr.technologies ?? []);
+  const techOk = TRUTH.projectTechnologies.every((t) =>
+    allTech.some((a) => norm(a).includes(norm(t))),
+  );
+  mark(
+    projects.length === TRUTH.projectCount && techOk,
+    'projects',
+    `${projects.length}/3 entries, ${allTech.length} technologies` +
+      (allTech.length ? ` [${allTech.slice(0, 8).join(', ')}]` : ''),
   );
 
   return { lines, got, total };

@@ -21,6 +21,13 @@ export interface EducationView {
   dates?: string;
 }
 
+export interface ProjectView {
+  name: string;
+  description?: string;
+  dates?: string;
+  technologies: string[];
+}
+
 export class ParsedResumeDataResponseDto {
   @ApiPropertyOptional()
   fullName?: string;
@@ -46,6 +53,13 @@ export class ParsedResumeDataResponseDto {
   @ApiProperty()
   educations: EducationView[];
 
+  @ApiProperty({
+    description:
+      'Personal/academic/technical work. Kept separate from experiences: on student ' +
+      'CVs these carry most of the technical signal.',
+  })
+  projects: ProjectView[];
+
   @ApiProperty({ type: [String] })
   certifications: string[];
 
@@ -54,6 +68,11 @@ export class ParsedResumeDataResponseDto {
     description: 'Which pipeline produced the data.',
   })
   parsedBy?: string;
+
+  @ApiPropertyOptional({
+    description: 'Which resume_parse_<v>.txt prompt produced this parse.',
+  })
+  promptVersion?: string;
 
   constructor(p: PrismaParsedResumeData) {
     this.fullName = p.fullName ?? undefined;
@@ -64,8 +83,10 @@ export class ParsedResumeDataResponseDto {
     this.skills = toStringArray(p.skills);
     this.experiences = toExperiences(p.experiences);
     this.educations = toEducations(p.educations);
+    this.projects = toProjects(p.projects);
     this.certifications = toStringArray(p.certifications);
     this.parsedBy = p.parsedBy ?? undefined;
+    this.promptVersion = p.promptVersion ?? undefined;
   }
 }
 
@@ -108,6 +129,25 @@ function toExperiences(json: string | null): ExperienceView[] {
     }
     // Heuristic fallback stored a raw section line.
     return { company: '', title: typeof item === 'string' ? item : '' };
+  });
+}
+
+function toProjects(json: string | null): ProjectView[] {
+  const v = parseJson(json);
+  if (!Array.isArray(v)) return [];
+  return v.map((item) => {
+    if (item && typeof item === 'object') {
+      const o = item as Record<string, unknown>;
+      return {
+        name: typeof o.name === 'string' ? o.name : '',
+        description: typeof o.description === 'string' ? o.description : undefined,
+        dates: formatDates(o.startDate, o.endDate),
+        technologies: Array.isArray(o.technologies)
+          ? o.technologies.filter((t): t is string => typeof t === 'string')
+          : [],
+      };
+    }
+    return { name: typeof item === 'string' ? item : '', technologies: [] };
   });
 }
 

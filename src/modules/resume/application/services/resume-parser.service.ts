@@ -47,7 +47,9 @@ interface ParsedData {
   summary?: string;
   experiences?: unknown[];
   educations?: unknown[];
+  projects?: unknown[];
   skills?: string[];
+  promptVersion?: string;
 }
 
 @Injectable()
@@ -97,9 +99,11 @@ export class ResumeParserService {
         summary: parsed.summary,
         experiences: parsed.experiences && JSON.stringify(parsed.experiences),
         educations: parsed.educations && JSON.stringify(parsed.educations),
+        projects: parsed.projects && JSON.stringify(parsed.projects),
         skills: parsed.skills && JSON.stringify(parsed.skills),
         rawText: text,
         parsedBy: 'ai',
+        promptVersion: parsed.promptVersion,
       });
 
       await this.parsedResumeDataRepository.updateParsingStatus(
@@ -169,7 +173,10 @@ export class ResumeParserService {
       summary: ai.summary ?? undefined,
       experiences: ai.experiences.length > 0 ? ai.experiences : undefined,
       educations: ai.educations.length > 0 ? ai.educations : undefined,
+      // Optional on the wire so an older AI service (no `projects`) still works.
+      projects: ai.projects?.length ? ai.projects : undefined,
       skills: ai.skills.length > 0 ? ai.skills : undefined,
+      promptVersion: ai.promptVersion,
     };
   }
 

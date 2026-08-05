@@ -564,6 +564,10 @@ model ParsedResumeData {
   summary        String?
   experiences    String? // JSON string
   educations     String? // JSON string
+  // JSON string. Personal/academic/technical work, kept separate from `experiences`:
+  // on student CVs the projects hold nearly all the technical signal, and with nowhere
+  // to put them the parser folded them into experiences as jobs that were never held.
+  projects       String? // JSON string
   skills         String? // JSON string
   certifications String? // JSON string
   rawText        String?
@@ -571,6 +575,10 @@ model ParsedResumeData {
   // "ai" when the AI service produced the structured data, "heuristic" when the
   // regex/section fallback did (AI service unavailable). Null for legacy rows.
   parsedBy String?
+
+  // Which app/prompts/resume_parse_<v>.txt produced this row. Null for rows written
+  // before prompt versioning, so a stored parse can be traced back to its prompt.
+  promptVersion String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

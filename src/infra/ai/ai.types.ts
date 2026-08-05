@@ -35,6 +35,22 @@ export interface ParsedEducation {
   graduationYear: number | null;
 }
 
+/**
+ * Personal/academic/technical work, distinct from employment.
+ *
+ * On student CVs the projects carry nearly all the technical signal while the SKILLS
+ * section holds only soft skills. Before this existed the model folded projects into
+ * `experiences`, inventing jobs that were never held.
+ */
+export interface ParsedProject {
+  name: string | null;
+  description: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  /** Only technologies named in the CV text — extraction, not inference. */
+  technologies: string[];
+}
+
 export interface ParseResumeResponse {
   fullName: string | null;
   email: string | null;
@@ -44,6 +60,9 @@ export interface ParseResumeResponse {
   skills: string[];
   experiences: ParsedExperience[];
   educations: ParsedEducation[];
+  /** Optional so a response from an older AI service still deserialises. */
+  projects?: ParsedProject[];
+  promptVersion?: string;
 }
 
 // ── POST /resume/score ───────────────────────────────────────────────────────
