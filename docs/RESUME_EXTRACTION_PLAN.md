@@ -66,7 +66,7 @@ Each phase ends with: tests green → commit → push → report → **wait for 
   consumers cannot distinguish from a real parse.
 - **Done when:** `npx tsc --noEmit` clean, `npx jest` green.
 
-### Phase 1 — Reading-order PDF extractor
+### Phase 1 — Reading-order PDF extractor ✅
 - Add `pdfjs-dist`. Replace the PDF branch of `ResumeParserService.extractText()`.
 - Algorithm: for each page take `textContent.items[]` (each carries `transform[4]`=x,
   `transform[5]`=y) → group into visual rows by `y` within a tolerance → sort rows top→bottom
@@ -80,7 +80,7 @@ Each phase ends with: tests green → commit → push → report → **wait for 
   thresholds to make one CV look right.
 - **Done when:** the extractor runs on the reference CV and returns text.
 
-### Phase 2 — Verify extraction (no model involved)
+### Phase 2 — Verify extraction (no model involved) ✅
 - Re-extract the reference CV and diff the new text against the page's true reading order.
 - **Done when** all five defects listed in §0 are gone from the *text*:
   1. job title precedes its bullets
@@ -91,7 +91,7 @@ Each phase ends with: tests green → commit → push → report → **wait for 
 - This phase proves the fix **without** the model as a confound. If the text is still wrong,
   no amount of model work will help.
 
-### Phase 3 — Tests and typecheck
+### Phase 3 — Tests and typecheck ✅
 - Update `resume-parser.service.spec.ts` (it currently mocks `pdf-parse`).
 - Add a unit test for the row-grouping/sorting helper using synthetic positioned items —
   cheap, deterministic, no PDF bytes.
@@ -137,3 +137,38 @@ Both models are already pulled locally. Full `qwen3` is slow on this laptop, but
 | Date | Phase | Result |
 |---|---|---|
 | 2026-08-05 | 0 | Baseline recorded (0/6). Heuristic fallback removed; parser is AI-only. tsc clean, jest 156/156. |
+| 2026-08-05 | 1 | `pdfjs-dist@3.11.174` (last CJS-friendly line) + `pdf-reading-order.ts`. `pdf-parse` removed. |
+| 2026-08-05 | 2 | **All 5 criteria met** on the reference CV — see below. |
+| 2026-08-05 | 3 | `scripts/extract-pdf-text.ts` + 11 unit tests. tsc clean, jest **167/167**. |
+
+### Phase 2 result — extraction verified
+
+`npx ts-node -r tsconfig-paths/register scripts/extract-pdf-text.ts <cv.pdf>`
+turns the 53 scrambled lines into 39 lines in true reading order:
+
+| # | Criterion | Before | After |
+|---|---|---|---|
+| 1 | Job title precedes its bullets | title 4 lines below | ✅ line 18, bullets 19–22 |
+| 2 | Education dates sit with their degree | pooled at 43–45 | ✅ lines 7, 10, 14 |
+| 3 | All 9 skills present and contiguous | 6, one column stranded | ✅ lines 33–35, 3×3 grid |
+| 4 | All 3 educations under `EDUCATION` | 1 | ✅ lines 7–16 |
+| 5 | Name above e-mail | e-mail first | ✅ lines 1–2 |
+
+**Known remaining imperfection:** the *Ball Balancing System* date `(2023 – 2024)` still
+lands one line above its title (lines 28–29) — that date is typeset on a slightly higher
+baseline than the heading. The two lines are adjacent, so the pairing is still recoverable.
+**Deliberately not tuned away:** widening the row tolerance to absorb it would risk merging
+genuinely distinct rows on other templates, and §Phase 1 forbids fitting the thresholds to
+one document.
+
+### Notes for whoever runs this next
+
+- **This repo uses `pnpm`, not `npm`** (`pnpm-lock.yaml` + `pnpm-workspace.yaml`, and a
+  symlinked `node_modules`). `npm install` crashes with
+  `Cannot read properties of null (reading 'matches')` — that is npm's arborist choking on
+  pnpm's symlink layout, not a broken package. Use `pnpm add`.
+- **`pdfjs-dist` is pinned to `3.11.174`** on purpose. v4+ is ESM-only and this project is
+  `module: commonjs`, which would force `eval`-based dynamic import. v3 ships a real CJS
+  build at `pdfjs-dist/legacy/build/pdf.js`.
+- `canvas` is an optional pdfjs peer whose native build is skipped. It is only needed for
+  rendering pages to images; text extraction does not use it.

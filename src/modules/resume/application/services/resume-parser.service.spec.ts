@@ -2,17 +2,39 @@
 //  - AI service up   -> structured data from AI, parsedBy: "ai"
 //  - AiServiceError  -> the job FAILS. There is no heuristic fallback: structuring is
 //    AI-only, so an AI outage must be visible rather than silently degraded.
-// pdf-parse is mocked so no real PDF bytes are needed.
+// pdf.js is mocked so no real PDF bytes are needed.
 
-jest.mock('pdf-parse', () =>
-  jest.fn(async () => ({
-    text: [
-      'John Smith',
-      'john.smith@example.com',
-      'Skills',
-      'Go, Kubernetes',
-    ].join('\n'),
-  })),
+// pdf.js is mocked with positioned text items — the same shape the real library
+// returns — so the service's reading-order path runs without real PDF bytes.
+// One item per visual row, descending y (PDF origin is bottom-left).
+const textItem = (str: string, y: number) => ({
+  str,
+  transform: [10, 0, 0, 10, 50, y],
+  width: str.length * 5,
+  height: 10,
+});
+
+jest.mock(
+  'pdfjs-dist/legacy/build/pdf.js',
+  () => ({
+    getDocument: () => ({
+      promise: Promise.resolve({
+        numPages: 1,
+        getPage: async () => ({
+          getTextContent: async () => ({
+            items: [
+              textItem('John Smith', 700),
+              textItem('john.smith@example.com', 685),
+              textItem('Skills', 670),
+              textItem('Go, Kubernetes', 655),
+            ],
+          }),
+        }),
+        destroy: async () => undefined,
+      }),
+    }),
+  }),
+  { virtual: true },
 );
 
 import { ResumeParserService } from './resume-parser.service';

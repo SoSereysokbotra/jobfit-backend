@@ -1,15 +1,14 @@
 // src/modules/resume/application/services/resume-parser.service.ts
 //
-// Downloads a resume file, extracts plain text (PDF via pdf-parse, DOCX via mammoth),
-// structures it via the AI service, persists ParsedResumeData, flips the Resume to SUCCESS,
-// and emits ResumeParsedEvent. All failures are caught and recorded as FAILED.
+// Downloads a resume file, extracts plain text (PDF via pdf.js in reading order, DOCX via
+// mammoth), structures it via the AI service, persists ParsedResumeData, flips the Resume to
+// SUCCESS, and emits ResumeParsedEvent. All failures are caught and recorded as FAILED.
 //
 // NO FALLBACK: structuring is AI-only. If the AI service fails, the parse FAILS — it does
 // not silently degrade to a regex approximation. A quiet fallback hides AI outages and
 // writes low-fidelity data that is indistinguishable downstream from a real parse.
 
 import { Injectable, Logger } from '@nestjs/common';
-import pdfParse = require('pdf-parse');
 import * as mammoth from 'mammoth';
 import { ResumeRepository } from '../../infrastructure/repositories/resume.repository';
 import { ParsedResumeDataRepository } from '../../infrastructure/repositories/parsed-resume-data.repository';
@@ -18,6 +17,24 @@ import { DomainEventBus } from '@events/domain-event-bus.service';
 import { ResumeParsedEvent } from '../../domain/events/resume-parsed.event';
 import { AiClient } from '@infra/ai/ai.client';
 import { FileType, ParseResumeResponse } from '@infra/ai/ai.types';
+import { PositionedTextItem, toReadingOrder } from './pdf-reading-order';
+
+// pdf.js v3's CommonJS legacy build. Required lazily (and typed loosely) because it is a
+// large browser-oriented bundle with no first-class CJS types; only getDocument is used.
+interface PdfJsModule {
+  getDocument(src: {
+    data: Uint8Array;
+    useSystemFonts?: boolean;
+    isEvalSupported?: boolean;
+  }): { promise: Promise<PdfDocument> };
+}
+interface PdfDocument {
+  numPages: number;
+  getPage(n: number): Promise<{
+    getTextContent(): Promise<{ items: PositionedTextItem[] }>;
+  }>;
+  destroy(): Promise<void>;
+}
 
 // experiences/educations are JSON-serialized into a single column. Rows written before
 // the heuristic fallback was removed may still hold raw section lines (strings), so the
@@ -105,14 +122,41 @@ export class ResumeParserService {
 
   private async extractText(buffer: Buffer, fileType: string): Promise<string> {
     if (fileType === 'PDF') {
-      const data = await pdfParse(buffer);
-      return data.text;
+      return this.extractPdfText(buffer);
     }
     if (fileType === 'DOCX') {
       const result = await mammoth.extractRawText({ buffer });
       return result.value;
     }
     throw new Error(`Unsupported file type for parsing: ${fileType}`);
+  }
+
+  /**
+   * Extract PDF text in reading order (see pdf-reading-order.ts for why that is not
+   * what a plain text dump gives you).
+   */
+  private async extractPdfText(buffer: Buffer): Promise<string> {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const pdfjs = require('pdfjs-dist/legacy/build/pdf.js') as PdfJsModule;
+
+    const doc = await pdfjs.getDocument({
+      data: new Uint8Array(buffer),
+      useSystemFonts: true,
+      // Resumes are untrusted input; never let embedded content evaluate.
+      isEvalSupported: false,
+    }).promise;
+
+    try {
+      const pages: string[] = [];
+      for (let n = 1; n <= doc.numPages; n++) {
+        const page = await doc.getPage(n);
+        const content = await page.getTextContent();
+        pages.push(toReadingOrder(content.items));
+      }
+      return pages.join('\n');
+    } finally {
+      await doc.destroy();
+    }
   }
 
   /** Map the AI service's parse response onto the persisted ParsedData shape. */
