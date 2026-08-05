@@ -126,16 +126,25 @@ Both models are already pulled locally. Full `qwen3` is slow on this laptop, but
 
 ---
 
-## Follow-ups (not in this plan)
+## Follow-ups
 
-- **Fake confidence badge.** The frontend shows `parsedBy === "ai" ? 92 : 75` — a hardcoded
-  constant, not a measured confidence. It read "92% confidence" over a parse with 0/6 fields
-  correct. Since the parser is now AI-only it is permanently 92%. Show `parsedBy` instead.
-- **`projects` field** — see §0.
+- ~~**Fake confidence badge.**~~ ✅ Done in Phase 6. Was `parsedBy === "ai" ? 92 : 75`, a
+  hardcoded constant that read "92% confidence" over a 2/6 parse. Now shows
+  "AI-parsed" / "Basic parse".
+- ~~**`projects` field**~~ ✅ Done in Phase 6.
+- **Hallucinated `company`** — the open defect. Full `qwen3` invents
+  "leading publicly listed engineering and construction contractor" as an employer name from
+  a sentence that only *describes* one. `null` is correct. Same class as the Phase C
+  `/match/reason` faithfulness failures; worth a v3 prompt rule ("a company name is a proper
+  noun; if the text only describes the employer, return null") **measured, not assumed**.
+- **Feed projects into matching.** The technical signal now *exists* in the parse, but
+  nothing downstream reads it yet — `Profile` embeddings and the scorers still see skills
+  only. This is where the parse fix converts into match quality, and it is untested.
 - **Scorer fallback.** `resume-scorer.service.ts` still degrades ATS/quality scoring to a
-  heuristic on `AiServiceError`. Same silent-degradation problem, not yet addressed.
-- **Skills from projects.** Even with perfect extraction this CV yields only soft skills;
-  the technical signal lives in PROJECTS.
+  heuristic on `AiServiceError`. Same silent-degradation problem the parser shed in Phase 0.
+- **n = 1 CV.** Every number in this document comes from a single résumé. It is enough to
+  prove the extractor bug and the schema gap, and **not** enough to claim a general quality
+  level. Score a handful more CVs before trusting these figures as representative.
 
 ---
 
@@ -148,6 +157,7 @@ Both models are already pulled locally. Full `qwen3` is slow on this laptop, but
 | 2026-08-05 | 2 | **All 5 criteria met** on the reference CV — see below. |
 | 2026-08-05 | 3 | `scripts/extract-pdf-text.ts` + 11 unit tests. tsc clean, jest **167/167**. |
 | 2026-08-05 | 4–5 | `scripts/score-resume-parse.ts` + the full 2×2. **2/6 → 4/6** on the shipped model; skills **6/9 → 9/9**. See below. |
+| 2026-08-05 | 6 | `projects` added across all three repos + prompt v2. Full `qwen3` **6/7**; experience entries **4 → 1**; projects **3/3** with technologies. |
 
 ### Phase 2 result — extraction verified
 
@@ -206,6 +216,47 @@ Full `qwen3` is not shippable for parsing on this hardware at any quality level.
 **Conclusion:** ship **reading-order text + `qwen3:0.6b`** (4/6, seconds). The next-best
 lever is the **`projects` schema fix**, not a model upgrade — it is cheap, it unblocks the
 one metric that is currently unmeasurable, and it plausibly takes both models to 5–6/6.
+
+### Phase 6 — the `projects` schema fix ✅
+
+`ParseResponse` gained `projects[{name, description, startDate, endDate, technologies}]`,
+persisted in a new nullable column and rendered in the UI. The parse prompt is now
+versioned: `resume_parse_v1.txt` is the old one **unchanged** (so the measurements above
+stay reproducible) and **v2** is the default, adding projects plus explicit rules that a
+project is not a job, a job is not a project, and *being a student is not employment*.
+
+Scored on a **7-criterion** scale — the 6 above plus "3 projects with their technologies".
+Not directly comparable to the 6-criterion totals; compare per-criterion.
+
+| Config | Score | Time |
+|---|---|---|
+| reading-order + `qwen3:0.6b` + v2 | **4/7** | 16 s |
+| reading-order + full `qwen3` + v2 | **6/7** | 312 s |
+
+**The prediction held.** Full `qwen3` went from **4 experience entries → 1** (the correct
+count, correct title) and now returns **3/3 projects with `[Arduino, sensors, servo motor]`**.
+The technical signal that used to be destroyed outright now reaches the parsed profile.
+`qwen3:0.6b` gets 2/3 projects with `[Arduino, PID Control, servo motor]` — imperfect, but
+what was structurally impossible is now merely incomplete.
+
+**Honest accounting — one defect was traded for another, not eliminated.** On the original
+6 criteria neither model's score moved (0.6b 4/6, full `qwen3` 5/6). What changed is *which*
+experience defect remains:
+
+| | experience defect, v1 | experience defect, v2 |
+|---|---|---|
+| full `qwen3` | 4 entries for a 1-job CV, `company: null` | 1 entry, correct title, but `company` **hallucinated** as "leading publicly listed engineering and construction contractor" |
+
+The CV *describes* the employer without naming it, so `null` is the only correct answer.
+Giving projects somewhere to live fixed the count and exposed a separate faithfulness bug
+that the count problem had been masking. **Do not read 6/7 as "one more prompt away from
+perfect."** The remaining failure is a model inventing a proper noun out of a description —
+the same class of defect Phase C found in `/match/reason`.
+
+**Cost:** 312 s for full `qwen3` (vs 504 s and 761 s earlier — run-to-run variance on this
+laptop is large, which is itself a reason not to trust single-run latency figures). Still
+not shippable. **`qwen3:0.6b` + reading-order + v2 returns in ~16 s and is the shipped
+configuration.**
 
 ### Notes for whoever runs this next
 
