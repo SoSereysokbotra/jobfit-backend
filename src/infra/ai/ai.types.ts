@@ -122,3 +122,35 @@ export interface RerankScore {
 export interface RerankResponse {
   scores: RerankScore[];
 }
+
+// ── POST /match/reason (Phase C) ─────────────────────────────────────────────
+export interface MatchReasonRequest {
+  candidateSummary: string;
+  jobTitle: string;
+  jobDescription: string;
+  /** Selects app/prompts/match_reason_<v>.txt on the AI service. Default 'v1'. */
+  promptVersion?: string;
+}
+
+export interface MatchedRequirement {
+  requirement: string;
+  /** Should be a verbatim quote from the CV — the faithfulness metric checks it. */
+  evidenceFromCv: string;
+}
+
+export interface MatchGap {
+  requirement: string;
+  note: string;
+}
+
+export type MatchVerdict = 'strong' | 'possible' | 'weak';
+
+export interface MatchReasonResponse {
+  fitScore: number; // 0-1
+  matchedRequirements: MatchedRequirement[];
+  gaps: MatchGap[];
+  verdict: MatchVerdict;
+  promptVersion: string;
+  /** True when the AI service's deterministic fallback produced this (not model judgement). */
+  degraded: boolean;
+}

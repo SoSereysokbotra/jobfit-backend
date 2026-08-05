@@ -12,6 +12,8 @@ import {
   FileType,
   InterviewRequest,
   InterviewResponse,
+  MatchReasonRequest,
+  MatchReasonResponse,
   ParseResumeResponse,
   RerankDocument,
   RerankResponse,
@@ -107,6 +109,22 @@ export class AiClient {
       'POST',
       '/rerank',
       { query, documents },
+      this.config.timeoutMsGenerate,
+    );
+  }
+
+  /**
+   * Structured "why does this candidate fit this job" reasoning (Phase C).
+   *
+   * Always returns a valid shape: the service falls back to a deterministic
+   * answer with `degraded: true` rather than failing, so check that flag before
+   * treating the output as model judgement.
+   */
+  matchReason(input: MatchReasonRequest): Promise<MatchReasonResponse> {
+    return this.send<MatchReasonResponse>(
+      'POST',
+      '/match/reason',
+      input,
       this.config.timeoutMsGenerate,
     );
   }

@@ -42,9 +42,9 @@ Measure retrieval and generation *separately*. Never ship a match number you can
 | Stage | Metric | Status |
 |---|---|---|
 | Retrieval | Recall@10 / MRR@10 / nDCG@10, sliced | ✅ **done** |
-| Generation | Faithfulness (groundedness) | ❌ **Phase C — NEXT** |
-| Generation | fitScore ↔ human-label correlation (calibration) | ❌ **Phase C — NEXT** |
-| Generation | Answer relevance | ❌ Phase C |
+| Generation | Faithfulness (groundedness) | ✅ **done** — v1 baseline **5.9%** |
+| Generation | fitScore ↔ human-label correlation (calibration) | ✅ **done** — v1 baseline **ρ = 0.137** |
+| Generation | Answer relevance | 🟡 partial — requirement groundedness (87.7%); LLM-judge relevance deferred to C4 |
 | Serving | p50/p99 latency; cost/1k; cache hit | ❌ Phase D |
 | Loop | metric moved by 1 feedback iteration | 🟡 partial (moved MRR via reranker) |
 
@@ -133,6 +133,22 @@ Plan §7/§8/§10 step 6–7. Do it in slices, each ending in a measured number.
 
 **Slice C3 — iterate, versioned.** Log a `prompt_version` with outputs; change the prompt, re-measure,
 prove the number moved. (This is the flywheel discipline.)
+
+### Phase C status (2026-08-05)
+- **C1 done** — `POST /match/reason` on the AI service (versioned prompts, retry-once,
+  deterministic `degraded` fallback that claims no evidence) + `aiClient.matchReason()`.
+- **C2 done** — `evaluation/generation-eval.service.ts` + `scripts/eval-generation.ts`.
+  **First baseline: ρ = 0.137, faithfulness 5.9%** on 150 pairs — see
+  `eval/reports/BASELINE-GENERATION-2026-08-05.md` for the full read and caveats.
+  **Conclusion: v1 generation is not shippable** (the model called 88 of 111 BAD jobs "strong").
+- **C3 in progress** — prompt v2 re-measure.
+- **C4 (new, from what C2 exposed)** — faithfulness is verbatim-only: it proves a quote is
+  in the CV, not that it *supports* the requirement it was attached to (a real quote about
+  AWS ECS passed against a Kubernetes requirement). Closing that needs an LLM-judge — this
+  is where **Ragas** belongs.
+- **Open question for Phase D:** if calibration stays ≈0.14 across prompt versions, the
+  blocker is model capacity, not prompting → run the comparison on the GPU box with full
+  qwen3 before investing further in prompts.
 
 **Then Phase D** (later): vLLM serving, Redis caching (there's a Redis-in-prod gap), cost/latency table,
 wire user thumbs-up/down → `match_labels` (source=FEEDBACK). Also: add real queryable `seniority` +

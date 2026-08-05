@@ -4,6 +4,7 @@ import { MatchExternalJobUseCase } from './application/use-cases/match-external-
 import { RecomputeUserMatchesUseCase } from './application/use-cases/recompute-user-matches.use-case';
 import { MatchingEmbeddingService } from './application/services/matching-embedding.service';
 import { RecommendationsQueryService } from './application/services/recommendations-query.service';
+import { GenerationEvalService } from './evaluation/generation-eval.service';
 import { RetrievalEvalService } from './evaluation/retrieval-eval.service';
 import { MatchingController } from './presentation/controllers/matching.controller';
 import { JobPublishedListener } from './listeners/job-published.listener';
@@ -19,6 +20,7 @@ import { UserProfileUpdatedListener } from './listeners/user-profile-updated.lis
     RecomputeUserMatchesUseCase,
     RecommendationsQueryService,
     RetrievalEvalService,
+    GenerationEvalService,
     JobPublishedListener,
     UserProfileUpdatedListener,
   ],
