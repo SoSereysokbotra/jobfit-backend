@@ -67,9 +67,56 @@ that a prompt cannot fix — see the next-step note below.
 - Latency is a laptop/qwen3:0.6b figure at concurrency 4, inflated by the retry path.
   Indicative only — not a Phase D serving number.
 
+## C3 — v1 vs v2 (re-measured on the same 150 pairs)
+
+Raw run: `generation-v2-2026-08-05T01-28-53-820Z.md`. v2 delimits the CV and JOB sections
+explicitly and adds an off-domain wrong/right example.
+
+| Metric | v1 | v2 | |
+|---|---|---|---|
+| Spearman ρ (pooled) | 0.137 | **−0.065** | ⬇ regressed below zero |
+| Spearman ρ (per candidate) | 0.148 | −0.071 | ⬇ |
+| Faithfulness (micro) | 5.9% | **16.9%** | ⬆ but confounded — see below |
+| Evidence quotes claimed | 808 (148 pairs) | 166 (67 pairs) | 5× fewer claims |
+| Requirement groundedness | 87.7% | 89.2% | flat |
+| Errors / degraded | 0 / 0 | 1 / 0 | |
+
+| mean fitScore | BAD | OK | GREAT |
+|---|---|---|---|
+| v1 | 0.734 | 0.922 | 0.815 |
+| v2 | **0.199** | 0.146 | **0.150** |
+
+### Verdict: keep v2 as the default prompt version, but neither version is usable
+
+- **Calibration got worse, not better.** ρ went 0.137 → −0.065. v2 now scores BAD-graded
+  jobs (0.199) *higher* than GREAT (0.150) — the ordering is mildly inverted. The delimiter
+  fix addressed which document gets quoted; it had no reason to help discrimination, and
+  it didn't.
+- **The faithfulness gain is largely "say less".** 82 of 150 pairs produced **zero** matched
+  requirements under v2 (vs 2 under v1). Per-claim accuracy rose while the model mostly
+  stopped making claims. 16.9% of 166 claims is not 3× better than 5.9% of 808 — it is a
+  different, more evasive behaviour.
+- **My own prompt example leaked, 28 times.** The v2 wrong/right example was moved to an
+  unrelated domain (pastry chef) precisely to make copying obvious. The model copied it
+  anyway: `Ran the morning bake at a 200-cover hotel kitchen for three years` appears as
+  claimed CV evidence in 28 of 138 ungrounded quotes — **20% of v2's faithfulness failures
+  are the prompt's fault, not the model's.**
+- **A new evasion appeared:** 5 quotes are the literal string `No evidence provided`. The
+  model satisfies "no quote means it is a gap" by writing a placeholder into the evidence
+  field instead of moving the item to `gaps`.
+
+v2 is kept as default on the strength of the faithfulness and verdict-distribution movement
+(BAD→`weak` went 19/111 → 76/110), but **`/match/reason` must not be wired into any
+user-facing path at either version.**
+
 ## Next
 
-- **C3:** re-measure with prompt v2 and keep it only if faithfulness actually moves.
-- If calibration stays ≈0.14 across prompt versions, the conclusion is that **qwen3:0.6b
-  cannot produce a user-facing fitScore at all**, which makes it a model-size question for
-  the GPU box rather than a prompting question.
+1. **v3 (cheap, clearly indicated):** delete the verbatim few-shot example — this model
+   copies examples regardless of domain — and reject `No evidence provided`-style
+   placeholders at the schema level rather than by instruction. Expect faithfulness to rise
+   on the same claim volume; expect calibration to stay broken.
+2. **The real blocker is model capacity, not prompting.** Two prompt versions moved
+   calibration from 0.137 to −0.065 — i.e. randomly, around zero. The next honest
+   experiment is the **same harness against full qwen3 on the GPU box**, not a v4 prompt.
+   `qwen3:0.6b` should be treated as unable to produce a user-facing fitScore.
+3. **C4 (LLM-judge / Ragas)** remains needed for the verbatim-faithfulness blind spot.

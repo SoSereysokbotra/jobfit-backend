@@ -141,14 +141,21 @@ prove the number moved. (This is the flywheel discipline.)
   **First baseline: ρ = 0.137, faithfulness 5.9%** on 150 pairs — see
   `eval/reports/BASELINE-GENERATION-2026-08-05.md` for the full read and caveats.
   **Conclusion: v1 generation is not shippable** (the model called 88 of 111 BAD jobs "strong").
-- **C3 in progress** — prompt v2 re-measure.
+- **C3 done** — prompt v2 re-measured on the same 150 pairs: faithfulness **5.9% → 16.9%**,
+  but calibration **0.137 → −0.065** (mildly inverted). v2 is the default (best measured),
+  yet **neither version may go in a user-facing path**. Two confounds recorded in the
+  baseline doc: v2 produced zero matched requirements on 82/150 pairs ("say less" inflates
+  per-claim accuracy), and 28 of its 138 ungrounded quotes are the prompt's own few-shot
+  example copied verbatim — this model copies examples even from an unrelated domain.
 - **C4 (new, from what C2 exposed)** — faithfulness is verbatim-only: it proves a quote is
   in the CV, not that it *supports* the requirement it was attached to (a real quote about
   AWS ECS passed against a Kubernetes requirement). Closing that needs an LLM-judge — this
   is where **Ragas** belongs.
-- **Open question for Phase D:** if calibration stays ≈0.14 across prompt versions, the
-  blocker is model capacity, not prompting → run the comparison on the GPU box with full
-  qwen3 before investing further in prompts.
+- **Answered by C3 — the blocker is model capacity, not prompting.** Calibration moved
+  0.137 → −0.065 across two prompt versions, i.e. randomly around zero. Do NOT write a v4
+  prompt first: run this same harness against **full qwen3 on the GPU box** and compare.
+  A cheap v3 (drop the literal few-shot example; reject `No evidence provided` placeholders
+  at the schema level) is worth one run, but it will not fix calibration.
 
 **Then Phase D** (later): vLLM serving, Redis caching (there's a Redis-in-prod gap), cost/latency table,
 wire user thumbs-up/down → `match_labels` (source=FEEDBACK). Also: add real queryable `seniority` +
