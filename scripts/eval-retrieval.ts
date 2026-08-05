@@ -18,6 +18,8 @@ import {
 const K = Number(process.argv[2] ?? 10);
 // Pass "rerank" as the 2nd arg to measure the LLM reranker (needs the AI service up).
 const RERANK = process.argv.slice(2).includes('rerank');
+// Pass "filter" to enable the (opt-in, off-by-default) metadata pre-filter.
+const FILTER = process.argv.slice(2).includes('filter');
 
 async function main(): Promise<void> {
   const app = await NestFactory.createApplicationContext(AppModule, { logger: ['error'] });
@@ -40,7 +42,10 @@ async function main(): Promise<void> {
       process.exit(1);
     }
 
-    const report = await service.evaluate(labels, K, { rerank: RERANK });
+    const report = await service.evaluate(labels, K, {
+      rerank: RERANK,
+      filter: FILTER,
+    });
     const md = formatReportMarkdown(report);
     console.log(md);
 

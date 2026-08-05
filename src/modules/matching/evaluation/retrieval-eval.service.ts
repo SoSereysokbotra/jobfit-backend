@@ -51,7 +51,7 @@ export class RetrievalEvalService {
   async evaluate(
     labels: EvalLabel[],
     k = 10,
-    opts: { rerank?: boolean } = {},
+    opts: { rerank?: boolean; filter?: boolean } = {},
   ): Promise<EvalReport> {
     const byUser = new Map<string, EvalLabel[]>();
     for (const l of labels) {
@@ -65,6 +65,7 @@ export class RetrievalEvalService {
     for (const userId of byUser.keys()) {
       const rows = await this.recompute.retrieveRankedJobs(userId, k, {
         rerank: opts.rerank,
+        filter: opts.filter,
       });
       retrieved.set(userId, rows.map((r) => r.id));
     }
@@ -74,7 +75,8 @@ export class RetrievalEvalService {
 
     return {
       generatedAt: new Date().toISOString(),
-      retriever: opts.rerank ? 'hybrid+rerank' : 'hybrid',
+      retriever:
+        'hybrid' + (opts.filter ? '+filter' : '') + (opts.rerank ? '+rerank' : ''),
       k,
       candidates: overall.n,
       labels: labels.length,
