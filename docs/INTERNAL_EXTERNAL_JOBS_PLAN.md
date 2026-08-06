@@ -83,11 +83,20 @@ Each phase ends: tests green → commit → push → report → **wait for accep
   the client can render the right action without a second request.
 - **Done when:** tsc + jest green and the fields appear in the job endpoints.
 
-### Phase 4 — Frontend
-- Job card / detail renders **"Apply Externally ↗"** (opens `externalUrl` in a new tab) for
-  EXTERNAL, **"Apply Now"** for INTERNAL.
-- Label the origin honestly — e.g. "via TheMuse" — so the user knows they are leaving.
-- **Done when:** both paths are visible in the running app.
+### Phase 4 — Frontend ✅
+- `ApplyButton` became the single place that decides how a job is applied to: **"Apply Now"**
+  for INTERNAL, **"Apply Externally ↗"** for EXTERNAL (new tab, `noopener,noreferrer`).
+- The origin is stated plainly — "Posted on themuse.com. You'll finish your application
+  there, so we can't track it here." The hostname is derived from `externalUrl` rather than
+  adding another backend field.
+- **`External` badge on the job card**, so leaving JobFits is not a surprise on click.
+- ⚠️ **Three apply surfaces existed, not one.** The job detail page used `ApplyButton`, but
+  the **jobs list** and **recommendations list** each called `submitApplication.mutate`
+  directly. Fixing only the button would have left two paths firing a request the server now
+  rejects — the user would get a red error where a redirect was correct. The branch lives in
+  `features/application/lib/external-apply.ts` so the three cannot drift apart.
+- A missing `externalUrl` on an EXTERNAL job is surfaced as a data gap, never silently
+  swallowed and never fallen back to an in-app apply.
 
 ---
 
@@ -115,3 +124,18 @@ on for internal jobs is the best-evidenced AI improvement available and needs no
 | Date | Phase | Result |
 |---|---|---|
 | 2026-08-06 | — | Plan written. Baseline: 43 external / 8 internal published jobs, 1 application. |
+| 2026-08-06 | 1–3 | `Job.sourceType` + backfill (43 EXTERNAL / 9 INTERNAL verified), server-side refusal with `externalUrl`, exposed on job DTOs. tsc clean, jest 174/174. |
+| 2026-08-06 | 4 | Apply UI split across all **three** surfaces (detail, jobs list, recommendations) + `External` card badge. tsc clean. |
+
+### Data note for the AI phases
+
+Gap analysis needs `Job.requirements`. Measured 2026-08-06:
+
+| | jobs | have `requirements` |
+|---|---|---|
+| INTERNAL | 9 | **7** |
+| EXTERNAL | 43 | **0** |
+
+That is workable — gap analysis only applies to jobs you can apply to, and 7 of the 8
+published internal jobs qualify. But **7 jobs is a demo, not an evaluation.** It can be shown
+working; no quality number may be claimed from it.
