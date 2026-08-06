@@ -243,7 +243,11 @@ async function main(): Promise<void> {
   const startedAt = Date.now();
   const parsed = await postJson<ParseResponse>(
     `${aiUrl}/resume/parse`,
-    { text, fileType: 'PDF' },
+    {
+      text,
+      fileType: 'PDF',
+      ...(arg('v') ? { promptVersion: arg('v') } : {}),
+    },
     { 'X-AI-Service-Key': process.env.AI_SERVICE_KEY ?? 'change-me' },
   );
   const elapsedSec = ((Date.now() - startedAt) / 1000).toFixed(1);
@@ -253,9 +257,21 @@ async function main(): Promise<void> {
   }
 
   const { lines, got, total } = score(parsed);
-  console.log(`\n=== ${mode} text | ${aiUrl} | ${elapsedSec}s ===`);
+  console.log(
+    `\n=== ${mode} text | ${aiUrl} | prompt=${parsed.promptVersion ?? '?'} | ${elapsedSec}s ===`,
+  );
   console.log(`  input: ${text.split('\n').length} lines, ${text.length} chars`);
   console.log(lines.join('\n'));
+
+  // Hallucination detail: the aggregate score hides WHICH invention happened, and the
+  // v2->v3 question is specifically about invented employers and widened dates.
+  const exps = parsed.experiences ?? [];
+  console.log('  --- hallucination detail ---');
+  exps.forEach((e, i) => {
+    console.log(
+      `  exp[${i}] title=${JSON.stringify(e.title)} company=${JSON.stringify(e.company)} start=${JSON.stringify(e.startDate)}`,
+    );
+  });
   console.log(`  SCORE: ${got}/${total}\n`);
 }
 

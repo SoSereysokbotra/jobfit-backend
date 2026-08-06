@@ -28,7 +28,13 @@ describe('ParsedResumeDataResponseDto', () => {
       parsedBy: 'ai',
       skills: JSON.stringify(['TypeScript', 'NestJS']),
       experiences: JSON.stringify([
-        { company: 'Acme', title: 'Backend Dev', startDate: '2021-01', endDate: null },
+        {
+          company: 'Acme',
+          title: 'Backend Dev',
+          startDate: '2021-01',
+          endDate: null,
+          highlights: ['Cut production costs by 10%'],
+        },
         { company: 'Globex', title: 'Engineer', startDate: '2019-01', endDate: '2020-12' },
       ]),
       educations: JSON.stringify([
@@ -39,8 +45,14 @@ describe('ParsedResumeDataResponseDto', () => {
 
     expect(dto.skills).toEqual(['TypeScript', 'NestJS']);
     expect(dto.experiences).toEqual([
-      { company: 'Acme', title: 'Backend Dev', dates: '2021-01 — Present' },
-      { company: 'Globex', title: 'Engineer', dates: '2019-01 — 2020-12' },
+      {
+        company: 'Acme',
+        title: 'Backend Dev',
+        dates: '2021-01 — Present',
+        // The achievements a CV is judged on must survive to the client.
+        highlights: ['Cut production costs by 10%'],
+      },
+      { company: 'Globex', title: 'Engineer', dates: '2019-01 — 2020-12', highlights: [] },
     ]);
     expect(dto.educations).toEqual([
       { institution: 'RUPP', degree: 'BSc CS', dates: '2020' },
@@ -59,7 +71,7 @@ describe('ParsedResumeDataResponseDto', () => {
     });
 
     expect(dto.experiences).toEqual([
-      { company: '', title: 'Acme Corp - Senior Dev (2021-Present)' },
+      { company: '', title: 'Acme Corp - Senior Dev (2021-Present)', highlights: [] },
     ]);
     expect(dto.educations).toEqual([{ institution: 'RUPP, BSc CS, 2020', degree: '' }]);
     expect(dto.skills).toEqual(['Go', 'Kubernetes']);

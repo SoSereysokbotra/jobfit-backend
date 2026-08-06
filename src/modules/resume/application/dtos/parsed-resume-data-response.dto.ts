@@ -13,6 +13,12 @@ export interface ExperienceView {
   company: string;
   title: string;
   dates?: string;
+  /**
+   * The role's bullet points. Previously parsed and then dropped here, so the
+   * concrete achievements a CV is actually judged on ("reduced production costs by
+   * 10%") never reached the client and the UI looked over-summarised.
+   */
+  highlights: string[];
 }
 
 export interface EducationView {
@@ -125,10 +131,13 @@ function toExperiences(json: string | null): ExperienceView[] {
         company: typeof o.company === 'string' ? o.company : '',
         title: typeof o.title === 'string' ? o.title : '',
         dates: formatDates(o.startDate, o.endDate),
+        highlights: Array.isArray(o.highlights)
+          ? o.highlights.filter((h): h is string => typeof h === 'string')
+          : [],
       };
     }
     // Heuristic fallback stored a raw section line.
-    return { company: '', title: typeof item === 'string' ? item : '' };
+    return { company: '', title: typeof item === 'string' ? item : '', highlights: [] };
   });
 }
 
