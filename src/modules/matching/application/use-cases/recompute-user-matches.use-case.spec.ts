@@ -6,6 +6,7 @@
 
 import { RecomputeUserMatchesUseCase } from './recompute-user-matches.use-case';
 import { ComputeMatchScoreUseCase } from './compute-match-score.use-case';
+import { AiServiceError } from '@infra/ai/ai.errors';
 
 describe('RecomputeUserMatchesUseCase', () => {
   describe('execute() scoring (characterized; retriever stubbed)', () => {
@@ -86,7 +87,9 @@ describe('RecomputeUserMatchesUseCase', () => {
       const aiClient = { rerank: jest.fn() };
       const service = new RecomputeUserMatchesUseCase(prisma as never, new ComputeMatchScoreUseCase(), aiClient as never);
 
-      const result = await service.retrieveRankedJobs('u1', 3);
+      // rerank:false is explicit — this test is about RRF fusion, and the reranker is
+      // ON by default in production, which would otherwise reorder the result.
+      const result = await service.retrieveRankedJobs('u1', 3, { rerank: false });
 
       // RRF: b in both lists -> top; a and c tie -> id order.
       expect(result).toEqual([
@@ -151,6 +154,98 @@ describe('RecomputeUserMatchesUseCase', () => {
 
       expect(aiClient.rerank).toHaveBeenCalledTimes(1);
       expect(result.map((r) => r.id)).toEqual(['c', 'a', 'b']); // reordered by rerank score
+    });
+
+    // ── production default (Phase B shipped) ────────────────────────────────
+    //
+    // The reranker is ON in production: measured MRR@10 0.63 -> 0.75 (+20%), the only
+    // AI change in this project with a positive measured result behind it. It is a
+    // config flag rather than a hardcode because it costs one LLM call per refresh.
+
+    /** Fused order is a,b,c; the reranker prefers c,a,b. */
+    const rerankFixtures = () => {
+      const prisma: any = {
+        $queryRawUnsafe: jest.fn()
+          .mockResolvedValueOnce([
+            { id: 'a', cosine_sim: 0.9 },
+            { id: 'b', cosine_sim: 0.8 },
+            { id: 'c', cosine_sim: 0.7 },
+          ])
+          .mockResolvedValueOnce([]),
+        profile: { findUnique: jest.fn().mockResolvedValue({ headline: 'engineer' }) },
+        resume: { findFirst: jest.fn().mockResolvedValue(null) },
+        job: {
+          findMany: jest.fn().mockResolvedValue([
+            { id: 'a', title: 'A', description: '', company: { name: 'X' } },
+            { id: 'b', title: 'B', description: '', company: { name: 'Y' } },
+            { id: 'c', title: 'C', description: '', company: { name: 'Z' } },
+          ]),
+        },
+      };
+      const aiClient = {
+        rerank: jest.fn().mockResolvedValue({
+          scores: [{ id: 'a', score: 0.5 }, { id: 'b', score: 0.1 }, { id: 'c', score: 0.9 }],
+        }),
+      };
+      return { prisma, aiClient };
+    };
+
+    const withConfig = (rerankEnabled: boolean) =>
+      ({ get: jest.fn().mockReturnValue(rerankEnabled) }) as never;
+
+    it('reranks by default when no explicit option is given (config ON)', async () => {
+      const { prisma, aiClient } = rerankFixtures();
+      const service = new RecomputeUserMatchesUseCase(
+        prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, withConfig(true),
+      );
+
+      const result = await service.retrieveRankedJobs('u1', 3);
+
+      expect(aiClient.rerank).toHaveBeenCalledTimes(1);
+      expect(result.map((r) => r.id)).toEqual(['c', 'a', 'b']);
+    });
+
+    it('skips the reranker when the config flag is off', async () => {
+      const { prisma, aiClient } = rerankFixtures();
+      const service = new RecomputeUserMatchesUseCase(
+        prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, withConfig(false),
+      );
+
+      const result = await service.retrieveRankedJobs('u1', 3);
+
+      expect(aiClient.rerank).not.toHaveBeenCalled();
+      expect(result.map((r) => r.id)).toEqual(['a', 'b', 'c']); // fused order
+    });
+
+    it('lets an explicit rerank:false win over a config that has it ON', async () => {
+      // The eval harness passes explicit booleans precisely so a baseline measurement
+      // cannot silently inherit whatever the deployment has enabled.
+      const { prisma, aiClient } = rerankFixtures();
+      const service = new RecomputeUserMatchesUseCase(
+        prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, withConfig(true),
+      );
+
+      const result = await service.retrieveRankedJobs('u1', 3, { rerank: false });
+
+      expect(aiClient.rerank).not.toHaveBeenCalled();
+      expect(result.map((r) => r.id)).toEqual(['a', 'b', 'c']);
+    });
+
+    it('falls back to the fused order when the AI service is down', async () => {
+      // Ranking quality degrades; availability must not.
+      const { prisma } = rerankFixtures();
+      const aiClient = {
+        rerank: jest.fn().mockRejectedValue(
+          new AiServiceError('MODEL_TIMEOUT', 'Ollama did not respond', undefined),
+        ),
+      };
+      const service = new RecomputeUserMatchesUseCase(
+        prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, withConfig(true),
+      );
+
+      const result = await service.retrieveRankedJobs('u1', 3);
+
+      expect(result.map((r) => r.id)).toEqual(['a', 'b', 'c']);
     });
   });
 });

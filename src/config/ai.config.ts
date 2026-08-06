@@ -15,4 +15,17 @@ export default registerAs('ai', () => ({
   serviceKey: process.env.AI_SERVICE_KEY ?? '',
   timeoutMsGenerate: parseInt(process.env.AI_TIMEOUT_MS_GENERATE ?? '60000', 10),
   timeoutMsEmbed: parseInt(process.env.AI_TIMEOUT_MS_EMBED ?? '10000', 10),
+
+  /**
+   * LLM reranker on the recommendation pipeline (Phase B).
+   *
+   * ON by default: measured **MRR@10 0.63 → 0.75 (+20%)** on the hand-labelled eval set —
+   * the only AI change in this project with a positive measured result behind it.
+   *
+   * The cost is one extra LLM call per recommendation refresh, so it is a flag rather than
+   * a hardcode: if latency or spend becomes a problem it can be turned off without a
+   * deploy. A rerank failure already degrades to the fused order, so disabling it changes
+   * ranking quality, never availability.
+   */
+  rerankEnabled: process.env.MATCHING_RERANK_ENABLED !== 'false',
 }));

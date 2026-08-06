@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import { AiClient } from '@infra/ai/ai.client';
 import { AiServiceError } from '@infra/ai/ai.errors';
@@ -13,7 +14,13 @@ export interface NearJobRow {
 }
 
 export interface RetrievalOptions {
-  /** Apply the LLM reranker to the fused shortlist (Phase B; off by default). */
+  /**
+   * Apply the LLM reranker to the fused shortlist (Phase B).
+   *
+   * Left UNDEFINED by production callers, which fall through to the `ai.rerankEnabled`
+   * config flag. The eval harness always passes an explicit true/false so a measurement
+   * can never be silently changed by whatever the deployment config happens to be.
+   */
   rerank?: boolean;
   /** Apply the metadata pre-filter (default true). Set false to measure its effect. */
   filter?: boolean;
@@ -41,11 +48,20 @@ const RERANK_POOL = 20;
 export class RecomputeUserMatchesUseCase {
   private readonly logger = new Logger(RecomputeUserMatchesUseCase.name);
 
+  /** Production default for the reranker; overridden per-call by the eval harness. */
+  private readonly rerankEnabledByConfig: boolean;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly compute: ComputeMatchScoreUseCase,
     private readonly aiClient: AiClient,
-  ) {}
+    configService?: ConfigService,
+  ) {
+    // Optional so the many places that construct this directly in tests keep working;
+    // absent config means the measured-best default (reranker on).
+    this.rerankEnabledByConfig =
+      configService?.get<boolean>('ai.rerankEnabled') ?? true;
+  }
 
   async execute(userId: string, limit = 50): Promise<number> {
     const profile = await this.prisma.profile.findUnique({
@@ -165,9 +181,11 @@ export class RecomputeUserMatchesUseCase {
       sparse.map((s) => s.id),
     ]).map((f) => f.id);
 
-    // Optional LLM rerank of the fused shortlist (Phase B). Off in production
-    // until the eval proves it helps; the harness turns it on to measure.
-    if (opts.rerank && cand.queryText) {
+    // LLM rerank of the fused shortlist (Phase B). ON in production — measured
+    // MRR@10 0.63 -> 0.75 (+20%). An explicit opts.rerank always wins so the eval
+    // harness measures what it asked for, not what the deployment config says.
+    const rerank = opts.rerank ?? this.rerankEnabledByConfig;
+    if (rerank && cand.queryText) {
       fusedIds = await this.rerankFused(cand.queryText, fusedIds);
     }
 

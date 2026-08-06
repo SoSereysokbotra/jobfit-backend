@@ -61,11 +61,16 @@ export class RetrievalEvalService {
     }
 
     // Retrieve once per candidate — the exact production query (+ optional rerank).
+    //
+    // rerank/filter are coerced to explicit booleans, never left undefined: production
+    // resolves an undefined `rerank` from config, so passing it through would make an
+    // "hybrid baseline" run silently inherit whatever the deployment happens to have
+    // enabled. A measurement must state what it measured.
     const retrieved = new Map<string, string[]>();
     for (const userId of byUser.keys()) {
       const rows = await this.recompute.retrieveRankedJobs(userId, k, {
-        rerank: opts.rerank,
-        filter: opts.filter,
+        rerank: opts.rerank === true,
+        filter: opts.filter === true,
       });
       retrieved.set(userId, rows.map((r) => r.id));
     }
