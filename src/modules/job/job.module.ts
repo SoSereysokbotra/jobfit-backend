@@ -6,6 +6,7 @@ import { PublishJobUseCase } from './application/use-cases/publish-job.use-case'
 import { CloseJobUseCase } from './application/use-cases/close-job.use-case';
 import { SearchJobsUseCase } from './application/use-cases/search-jobs.use-case';
 import { JobService } from './application/job.service';
+import { JobRequirementsExtractionService } from './application/services/job-requirements-extraction.service';
 import { JobController } from './presentation/controllers/job.controller';
 import { ApplicationSubmittedListener } from './listeners/application-submitted.listener';
 
@@ -29,9 +30,12 @@ import { ApplicationSubmittedListener } from './listeners/application-submitted.
     // Service (thin orchestrator)
     JobService,
 
+    // Fills extractedRequirements from free-text descriptions via the AI service.
+    JobRequirementsExtractionService,
+
     // Event listeners
     ApplicationSubmittedListener,
   ],
-  exports: [JOB_REPOSITORY, JobService],
+  exports: [JOB_REPOSITORY, JobService, JobRequirementsExtractionService],
 })
 export class JobModule {}

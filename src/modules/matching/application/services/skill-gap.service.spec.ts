@@ -8,11 +8,15 @@
 import { SkillGapService } from './skill-gap.service';
 
 describe('SkillGapService', () => {
-  const build = (requirements: string[] | null, skills: string[] | null) => {
+  const build = (
+    requirements: string[] | null,
+    skills: string[] | null,
+    extractedRequirements: string[] = [],
+  ) => {
     const prisma: any = {
       job: {
         findUnique: jest.fn().mockResolvedValue(
-          requirements === null ? null : { requirements },
+          requirements === null ? null : { requirements, extractedRequirements },
         ),
       },
       resume: {
@@ -126,6 +130,37 @@ describe('SkillGapService', () => {
     expect((await service.analyse('u1', 'missing')).status).toBe(
       'JOB_HAS_NO_REQUIREMENTS',
     );
+  });
+
+  // ── AI-extracted fallback ──────────────────────────────────────────────────
+
+  it('falls back to AI-extracted requirements when the employer wrote none', async () => {
+    const service = build([], ['Docker'], ['Docker experience', 'Kubernetes experience']);
+
+    const result = await service.analyse('u1', 'j1');
+
+    expect(result.status).toBe('OK');
+    expect(result.requirementsSource).toBe('AI_EXTRACTED');
+    expect(result.missing).toEqual(['Kubernetes experience']);
+  });
+
+  it('prefers employer-authored requirements over AI-extracted ones', async () => {
+    // A human's words are authoritative; a model's reading must never replace them.
+    const service = build(['Rust experience'], ['Docker'], ['Docker experience']);
+
+    const result = await service.analyse('u1', 'j1');
+
+    expect(result.requirementsSource).toBe('EMPLOYER');
+    expect(result.requirements.map((r) => r.text)).toEqual(['Rust experience']);
+  });
+
+  it('reports NONE when neither source has requirements', async () => {
+    const service = build([], ['Docker'], []);
+
+    const result = await service.analyse('u1', 'j1');
+
+    expect(result.status).toBe('JOB_HAS_NO_REQUIREMENTS');
+    expect(result.requirementsSource).toBe('NONE');
   });
 
   it('ignores blank requirement entries', async () => {

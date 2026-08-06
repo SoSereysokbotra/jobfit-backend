@@ -122,6 +122,26 @@ export interface InterviewResponse {
   feedback: string | null;
 }
 
+// ── POST /job/requirements ───────────────────────────────────────────────────
+export interface JobRequirementsRequest {
+  jobTitle: string;
+  jobDescription: string;
+  promptVersion?: string;
+}
+
+export interface JobRequirementsResponse {
+  /** Grounded requirements only — invented ones are dropped by the AI service. */
+  requirements: string[];
+  promptVersion: string;
+  /**
+   * Grounded share of the model's RAW output, before filtering. Reports model quality,
+   * not filter quality: a falling value means extraction is drifting into invention.
+   */
+  groundedness: number;
+  /** How many invented requirements the AI service removed. */
+  droppedUngrounded: number;
+}
+
 // ── POST /rerank (Phase B) ───────────────────────────────────────────────────
 export interface RerankDocument {
   id: string;

@@ -12,6 +12,8 @@ import {
   FileType,
   InterviewRequest,
   InterviewResponse,
+  JobRequirementsRequest,
+  JobRequirementsResponse,
   MatchReasonRequest,
   MatchReasonResponse,
   ParseResumeResponse,
@@ -98,6 +100,24 @@ export class AiClient {
     return this.send<InterviewResponse>(
       'POST',
       '/generate/interview',
+      input,
+      this.config.timeoutMsGenerate,
+    );
+  }
+
+  /**
+   * Extract the checkable hiring requirements from a job description.
+   *
+   * The returned list is already filtered to grounded requirements — the AI service drops
+   * anything built from words the posting never used. Check `groundedness` to see how much
+   * of the raw model output was invented before that filtering.
+   */
+  extractJobRequirements(
+    input: JobRequirementsRequest,
+  ): Promise<JobRequirementsResponse> {
+    return this.send<JobRequirementsResponse>(
+      'POST',
+      '/job/requirements',
       input,
       this.config.timeoutMsGenerate,
     );

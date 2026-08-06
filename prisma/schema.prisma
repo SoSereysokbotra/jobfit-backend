@@ -461,6 +461,16 @@ model Job {
   // Structured posting content (employer-authored). Empty arrays when unset.
   responsibilities String[] @default([])
   requirements     String[] @default([])
+
+  // Requirements read OUT of `description` by the AI service, for postings that carry no
+  // employer-authored `requirements` (43 of 52 ingested jobs). Cached rather than derived
+  // per request: extraction is an LLM call (~7s), far too slow to sit in a page load.
+  // Never overwrites `requirements` — employer-authored text stays authoritative.
+  extractedRequirements   String[]  @default([])
+  requirementsExtractedAt DateTime?
+  // Grounded share of the model's raw output at extraction time. Persisted so a batch that
+  // silently started inventing is visible afterwards instead of being invisible.
+  requirementsGroundedness Float?
   benefits         String[] @default([])
   bonusPct         Int? // target annual bonus, % of base
 

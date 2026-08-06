@@ -28,6 +28,15 @@ export class SkillGapDto {
   })
   status: string;
 
+  @ApiProperty({
+    enum: ['EMPLOYER', 'AI_EXTRACTED', 'NONE'],
+    description:
+      'Whether the requirements are the employer’s own words or the AI service’s reading ' +
+      'of the posting. The client MUST surface this: AI-extracted requirements are useful ' +
+      'but not authoritative, and showing them as the employer’s overstates what is known.',
+  })
+  requirementsSource: string;
+
   @ApiProperty({ type: [RequirementMatchDto] })
   requirements: RequirementMatchDto[];
 

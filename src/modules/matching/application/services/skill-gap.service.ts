@@ -31,8 +31,17 @@ export interface RequirementMatch {
   matchedSkills: string[];
 }
 
+/**
+ * Where the requirements came from. The user is entitled to know whether they are the
+ * employer's own words or a model's reading of the posting — the second is useful but not
+ * authoritative, and presenting them identically would overstate what we know.
+ */
+export type RequirementsSource = 'EMPLOYER' | 'AI_EXTRACTED' | 'NONE';
+
 export interface SkillGapResult {
   status: SkillGapStatus;
+  /** Whether these requirements were written by the employer or read out by the model. */
+  requirementsSource: RequirementsSource;
   requirements: RequirementMatch[];
   /** Requirements with no supporting skill — what the user should act on. */
   missing: string[];
@@ -58,14 +67,19 @@ export class SkillGapService {
     const [job, parsed] = await Promise.all([
       this.prisma.job.findUnique({
         where: { id: jobId },
-        select: { requirements: true },
+        select: { requirements: true, extractedRequirements: true },
       }),
       this.latestParsedResume(userId),
     ]);
 
-    const requirements = (job?.requirements ?? []).filter(
-      (r) => typeof r === 'string' && r.trim().length > 0,
-    );
+    // Employer-authored requirements always win. The AI-extracted list is a fallback for
+    // ingested postings that carry none, never a replacement for a human's words.
+    const employer = clean(job?.requirements);
+    const extracted = clean(job?.extractedRequirements);
+    const requirements = employer.length > 0 ? employer : extracted;
+    const requirementsSource: RequirementsSource =
+      employer.length > 0 ? 'EMPLOYER' : extracted.length > 0 ? 'AI_EXTRACTED' : 'NONE';
+
     const skills = parsed.filter((s) => s.trim().length >= MIN_SKILL_LENGTH);
 
     // Distinguish the two empty cases. "No gaps" because the job listed no requirements is
@@ -74,6 +88,7 @@ export class SkillGapService {
     if (requirements.length === 0) {
       return {
         status: 'JOB_HAS_NO_REQUIREMENTS',
+        requirementsSource,
         requirements: [],
         missing: [],
         matchedCount: 0,
@@ -83,6 +98,7 @@ export class SkillGapService {
     if (skills.length === 0) {
       return {
         status: 'NO_PARSED_RESUME',
+        requirementsSource,
         requirements: requirements.map((text) => ({ text, matchedSkills: [] })),
         missing: requirements,
         matchedCount: 0,
@@ -97,6 +113,7 @@ export class SkillGapService {
 
     return {
       status: 'OK',
+      requirementsSource,
       requirements: matches,
       missing: matches.filter((m) => m.matchedSkills.length === 0).map((m) => m.text),
       matchedCount: matches.filter((m) => m.matchedSkills.length > 0).length,
@@ -113,6 +130,11 @@ export class SkillGapService {
     });
     return toStringArray(resume?.parsedData?.skills ?? null);
   }
+}
+
+/** Non-empty, trimmed strings only. */
+function clean(values: string[] | undefined): string[] {
+  return (values ?? []).filter((r) => typeof r === 'string' && r.trim().length > 0);
 }
 
 /**
