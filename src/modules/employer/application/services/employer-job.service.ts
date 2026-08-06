@@ -102,6 +102,10 @@ function toJobResponse(row: JobWithSkills): JobResponseDto {
     requirements: row.requirements ?? [],
     benefits: row.benefits ?? [],
     bonusPct: row.bonusPct ?? null,
+    // Read from the row rather than hardcoded INTERNAL: an employer-posted job is
+    // internal today, but the column is the single source of truth for that rule.
+    sourceType: row.sourceType,
+    externalUrl: row.externalUrl ?? undefined,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

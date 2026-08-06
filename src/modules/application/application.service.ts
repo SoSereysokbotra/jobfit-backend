@@ -48,6 +48,18 @@ export class ApplicationService {
     const job = await this.jobRepository.findById(dto.jobId);
     if (!job) throw new NotFoundException('Job not found');
 
+    // EXTERNAL jobs are ingested from another site: no employer exists in JobFits to
+    // receive this, so accepting it would tell the user they applied when they did not.
+    // Refuse, and hand back the real posting URL so the client can send them there.
+    if (!job.isApplicableInApp) {
+      throw new BadRequestException({
+        message:
+          'This job is hosted on another site. Apply on the original posting instead.',
+        externalUrl: job.externalUrl ?? null,
+        sourceType: job.sourceType,
+      });
+    }
+
     const existing = await this.applicationRepository.findByUserAndJob(
       userId,
       dto.jobId,

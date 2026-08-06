@@ -20,6 +20,10 @@ export class JobMapper {
       requirements: job.requirements,
       benefits: job.benefits,
       bonusPct: job.bonusPct ?? null,
+      // Lets the client render "Apply Now" vs "Apply Externally" without a second
+      // request, and without re-deriving the rule the server enforces.
+      sourceType: job.sourceType,
+      externalUrl: job.externalUrl,
       createdAt: job.props.createdAt.toISOString(),
       updatedAt: job.props.updatedAt.toISOString(),
     };

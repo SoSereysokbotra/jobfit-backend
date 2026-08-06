@@ -7,6 +7,9 @@ import { JobPublishedEvent } from "../events/job-published.event";
 import { JobClosedEvent } from "../events/job-closed.event";
 import { JobUpdatedEvent } from "../events/job-updated.event";
 
+/** Can this job be applied to inside JobFits, or only on the site it came from? */
+export type JobSourceType = "INTERNAL" | "EXTERNAL";
+
 export interface JobProps {
   companyId: string;
   title: string;
@@ -20,6 +23,10 @@ export interface JobProps {
   requirements: string[];
   benefits: string[];
   bonusPct?: number;
+  /** Defaults to INTERNAL: a job created here is applicable here. */
+  sourceType?: JobSourceType;
+  /** The original posting, for EXTERNAL jobs. Where the user must actually apply. */
+  externalUrl?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -57,6 +64,20 @@ export class Job extends AggregateRoot<JobProps> {
   }
   get benefits(): string[] {
     return this.props.benefits;
+  }
+  get sourceType(): JobSourceType {
+    return this.props.sourceType ?? "INTERNAL";
+  }
+  get externalUrl(): string | undefined {
+    return this.props.externalUrl;
+  }
+  /**
+   * EXTERNAL jobs are ingested from another site: no employer exists in JobFits to
+   * receive an application, and the real posting lives at `externalUrl`. Applying here
+   * would silently go nowhere, so submission must be refused and the user sent onward.
+   */
+  get isApplicableInApp(): boolean {
+    return this.sourceType === "INTERNAL";
   }
   get bonusPct(): number | undefined {
     return this.props.bonusPct;

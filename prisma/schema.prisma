@@ -56,6 +56,13 @@ enum RemoteType {
   REMOTE
 }
 
+// Whether a job can be applied to inside JobFits (INTERNAL) or only on the site it was
+// ingested from (EXTERNAL). See Job.sourceType.
+enum JobSourceType {
+  INTERNAL
+  EXTERNAL
+}
+
 enum EmploymentType {
   FULL_TIME
   PART_TIME
@@ -456,6 +463,15 @@ model Job {
   requirements     String[] @default([])
   benefits         String[] @default([])
   bonusPct         Int? // target annual bonus, % of base
+
+  // Can this job be applied to inside JobFits?
+  //   INTERNAL — posted here; applications are received and tracked here.
+  //   EXTERNAL — ingested from another site; the real posting lives at `externalUrl`
+  //              and the user must be sent there. Applying in JobFits would go nowhere.
+  // Kept as its own column rather than inferred from `source`/`externalUrl`, because
+  // "may this user apply here?" is an authorisation-shaped question that belongs in one
+  // queryable place, not re-derived in every service, DTO and UI branch.
+  sourceType JobSourceType @default(INTERNAL)
 
   // ── Ingestion (FR-JOBS-001): external-source tracking + dedup ──────────────
   source      String? // e.g. "THEMUSE"; NULL = direct employer posting

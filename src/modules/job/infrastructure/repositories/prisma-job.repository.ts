@@ -111,6 +111,8 @@ export class PrismaJobRepository implements IJobRepository {
         requirements: row.requirements ?? [],
         benefits: row.benefits ?? [],
         bonusPct: row.bonusPct ?? undefined,
+        sourceType: row.sourceType,
+        externalUrl: row.externalUrl ?? undefined,
         createdAt: row.createdAt,
         updatedAt: row.updatedAt,
       },
