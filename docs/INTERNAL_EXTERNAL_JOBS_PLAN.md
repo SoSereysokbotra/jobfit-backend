@@ -100,6 +100,53 @@ Each phase ends: tests green → commit → push → report → **wait for accep
 
 ---
 
+### Phase 5 — Reranker ON ✅
+Config flag `MATCHING_RERANK_ENABLED`, default ON. Measured **MRR@10 0.63 → 0.75 (+20%)**.
+An explicit `opts.rerank` always beats config, and the eval harness now passes explicit
+booleans — otherwise a "hybrid baseline" run would silently inherit the deployment's setting
+and quietly invalidate the baseline every future measurement is compared against.
+
+### Phase 6 — Skill-gap analysis ✅ (code) / ⛔ (data)
+`GET /recommendations/skill-gap?jobId=` returns which of a job's stated requirements the
+user's résumé does not evidence. **No percentage** — the Phase C fitScore was measured
+uncorrelated with real fit, so only the lists are served.
+
+**No LLM on this path.** `Job.requirements` is already a structured employer-authored list;
+comparing it to parsed CV skills is a deterministic string operation. An LLM would add
+latency, cost and hallucination risk to a problem that does not need one.
+
+Matching uses word boundaries, relaxed around non-word characters. A plain substring test
+makes **"Go" match "Google"** and **"React" match "Reactive"** — inflating coverage and
+hiding the very gaps the feature exists to surface. Both are pinned by tests. One-character
+skills are skipped for the same reason.
+
+Two empty cases are distinguished (`JOB_HAS_NO_REQUIREMENTS` vs `NO_PARSED_RESUME`) so an
+empty `missing` list is never rendered as "perfect fit" for a job we know nothing about.
+
+#### ⛔ The data does not support this feature yet
+
+All internal jobs share **six** distinct requirement strings, and only **one** names a
+technology:
+
+```
+4+ years of relevant professional experience.
+Strong fundamentals in the core stack for this role.
+Excellent written and verbal communication skills.
+Comfortable working in an agile, collaborative team.
+5+ years backend
+Kubernetes experience          <- the only one naming a technology
+```
+
+This is seed boilerplate. The feature will correctly report "you're missing: 4+ years of
+relevant professional experience", which is not actionable skill advice. **The code is right;
+the input is not there.** Do not demo this until one of:
+
+1. **Write real requirements** on 2–3 internal jobs (fastest path to a working demo), or
+2. **Extract requirements from the job description with the LLM** — this is where the
+   measured 87.7–89.2% requirement groundedness actually applies, and where the 43 ingested
+   TheMuse jobs have genuine descriptions to work from. That extension would make the feature
+   useful across all 52 jobs, including deciding whether to bother applying externally.
+
 ## Later (agreed shape, not built here)
 
 **AI screening — gap analysis, NOT a score.** Phase C measured `/match/reason`'s `fitScore`

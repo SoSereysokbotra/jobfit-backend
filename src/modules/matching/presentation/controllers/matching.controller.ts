@@ -4,11 +4,13 @@ import { AuthenticatedUser } from '@common/guards/jwt-auth.guard';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { RecommendationsQueryService } from '../../application/services/recommendations-query.service';
 import { MatchExternalJobUseCase } from '../../application/use-cases/match-external-job.use-case';
+import { SkillGapService } from '../../application/services/skill-gap.service';
 import { RecommendedJobDto } from '../dtos/recommended-job.dto';
 import {
   ExternalJobMatchDto,
   ExternalJobMatchQueryDto,
 } from '../dtos/external-job-match.dto';
+import { SkillGapDto, SkillGapQueryDto } from '../dtos/skill-gap.dto';
 
 @ApiTags('Matching')
 @ApiBearerAuth()
@@ -17,6 +19,7 @@ export class MatchingController {
   constructor(
     private readonly recommendations: RecommendationsQueryService,
     private readonly matchExternalJob: MatchExternalJobUseCase,
+    private readonly skillGap: SkillGapService,
   ) {}
 
   @Get()
@@ -27,6 +30,22 @@ export class MatchingController {
   })
   async list(@CurrentUser() user: AuthenticatedUser): Promise<RecommendedJobDto[]> {
     return this.recommendations.getForUser(user.id);
+  }
+
+  @Get('skill-gap')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Which of a job’s stated requirements the user’s résumé does not evidence. ' +
+      'Deliberately returns NO match percentage: the LLM fitScore was measured as ' +
+      'uncorrelated with real fit (Phase C), so only the requirement lists are served.',
+  })
+  @ApiResponse({ status: 200, type: SkillGapDto })
+  async skillGapForJob(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: SkillGapQueryDto,
+  ): Promise<SkillGapDto> {
+    return this.skillGap.analyse(user.id, query.jobId);
   }
 
   @Get('by-job')
