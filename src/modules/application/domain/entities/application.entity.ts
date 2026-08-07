@@ -145,6 +145,28 @@ export function candidateActionsFrom(
   );
 }
 
+/**
+ * What the EMPLOYER can actually do to an application in this state. The mirror of
+ * candidateActionsFrom, and served on the pipeline DTO for the same reason.
+ *
+ * The employer board offered every column as a drop target regardless of where a card
+ * was, so "Hired" — which maps to ACCEPTED, the candidate's decision — was a drop target
+ * that refused 100% of the time. Serving the real answer lets the UI derive what is
+ * possible instead of keeping its own copy of these rules, which then rots.
+ *
+ * Worth noting what this returns from SUBMITTED: [SCREENING, REJECTED], NOT INTERVIEW.
+ * Automatic screening never throws, so when the AI service is down applications stay in
+ * SUBMITTED — and those cards sit in the same board column as SCREENING ones. A rule
+ * derived per column rather than per card gets exactly those candidates wrong.
+ */
+export function employerActionsFrom(
+  from: ApplicationStatus,
+): ApplicationStatus[] {
+  return (TRANSITIONS[from] ?? []).filter((s) =>
+    EMPLOYER_SETTABLE_STATUSES.includes(s),
+  );
+}
+
 export interface ApplicationProps {
   userId: string;
   jobId: string;

@@ -8,6 +8,8 @@ import {
   Application,
   CANDIDATE_SETTABLE_STATUSES,
   EMPLOYER_SETTABLE_STATUSES,
+  candidateActionsFrom,
+  employerActionsFrom,
   isTransitionAllowed,
 } from './application.entity';
 import { ApplicationStatus } from '@shared/kernel/enums/application-status.enum';
@@ -141,5 +143,54 @@ describe('isTransitionAllowed', () => {
     expect(
       isTransitionAllowed(ApplicationStatus.SUBMITTED, ApplicationStatus.OFFER),
     ).toBe(false);
+  });
+});
+
+describe('employerActionsFrom', () => {
+  // Served on the pipeline DTO so the board can derive its drop targets instead of
+  // keeping a second copy of these rules. Pinned exactly, per status, because the whole
+  // value of serving them is that the UI can trust them.
+  it.each([
+    [ApplicationStatus.DRAFT, []],
+    // NOT INTERVIEW. Screening never throws, so an application whose screening could not
+    // run stays SUBMITTED — and sits in the same board column as SCREENING ones. This is
+    // why the board must ask per card, not per column.
+    [ApplicationStatus.SUBMITTED, [ApplicationStatus.SCREENING, ApplicationStatus.REJECTED]],
+    [
+      ApplicationStatus.SCREENING,
+      [ApplicationStatus.INTERVIEW, ApplicationStatus.OFFER, ApplicationStatus.REJECTED],
+    ],
+    [ApplicationStatus.INTERVIEW, [ApplicationStatus.OFFER, ApplicationStatus.REJECTED]],
+    // From OFFER the employer has exactly one move left. Accepting, negotiating and
+    // withdrawing are the candidate's replies.
+    [ApplicationStatus.OFFER, [ApplicationStatus.REJECTED]],
+    [ApplicationStatus.NEGOTIATING, [ApplicationStatus.OFFER, ApplicationStatus.REJECTED]],
+    [ApplicationStatus.ACCEPTED, [ApplicationStatus.ARCHIVED]],
+    // Reopening a closed application is an employer action (D2).
+    [ApplicationStatus.REJECTED, [ApplicationStatus.SCREENING, ApplicationStatus.ARCHIVED]],
+    [ApplicationStatus.WITHDRAWN, [ApplicationStatus.ARCHIVED]],
+    [ApplicationStatus.ARCHIVED, []],
+  ])('from %s', (from, expected) => {
+    expect(employerActionsFrom(from as ApplicationStatus)).toEqual(expected);
+  });
+
+  it('never offers the employer a status that is the candidate\'s to decide', () => {
+    const every = Object.values(ApplicationStatus).flatMap((s) =>
+      employerActionsFrom(s),
+    );
+    expect(every).not.toContain(ApplicationStatus.ACCEPTED);
+    expect(every).not.toContain(ApplicationStatus.WITHDRAWN);
+    expect(every).not.toContain(ApplicationStatus.NEGOTIATING);
+  });
+
+  it('mirrors candidateActionsFrom rather than duplicating its logic', () => {
+    // Both are TRANSITIONS filtered by a settable list, so no status may appear in both
+    // answers for the same state except ARCHIVED — the one decision either party can make.
+    for (const status of Object.values(ApplicationStatus)) {
+      const overlap = employerActionsFrom(status).filter((s) =>
+        candidateActionsFrom(status).includes(s),
+      );
+      expect(overlap.filter((s) => s !== ApplicationStatus.ARCHIVED)).toEqual([]);
+    }
   });
 });

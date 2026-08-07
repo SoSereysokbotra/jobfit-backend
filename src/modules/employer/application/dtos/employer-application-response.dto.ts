@@ -5,6 +5,8 @@
 
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ApplicationStatus } from '@prisma/client';
+import { employerActionsFrom } from '@modules/application/domain/entities/application.entity';
+import { ApplicationStatus as DomainStatus } from '@shared/kernel/enums/application-status.enum';
 
 /**
  * What the automatic screening found when this candidate applied.
@@ -66,6 +68,20 @@ export class EmployerApplicationResponseDto {
 
   @ApiProperty() appliedAt: Date;
 
+  @ApiProperty({
+    enum: ApplicationStatus,
+    isArray: true,
+    description:
+      'Statuses the EMPLOYER can move this application to right now — reachable from its ' +
+      'current status AND theirs to decide. Clients must derive their affordances from ' +
+      'this rather than restating the rules: the board offered every column as a drop ' +
+      'target, so "Hired" (ACCEPTED, the candidate\'s decision) refused every time. ' +
+      'Check it PER CARD, not per column — from SUBMITTED this excludes INTERVIEW, and ' +
+      'unscreened applications really do sit in SUBMITTED whenever screening could not ' +
+      'run. An empty array is legitimate: an ARCHIVED application is finished.',
+  })
+  availableActions: ApplicationStatus[];
+
   constructor(row: {
     id: string;
     jobId: string;
@@ -84,5 +100,8 @@ export class EmployerApplicationResponseDto {
     this.employerNotes = row.employerNotes;
     this.screening = row.screening;
     this.appliedAt = row.appliedAt;
+    this.availableActions = employerActionsFrom(
+      row.status as unknown as DomainStatus,
+    ) as unknown as ApplicationStatus[];
   }
 }
