@@ -14,24 +14,38 @@ import { ApplicationStatus } from '@shared/kernel/enums/application-status.enum'
 export class ApplicationRepository implements IRepository<Application> {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Persist the aggregate.
+   *
+   * `status` is deliberately absent from the UPDATE branch. Changing the status of an
+   * application that already exists is a transition, and transitions go through
+   * ApplicationTransitionService — where they are validated, attributed to an actor, and
+   * audited. This method used to write status on update too, which made it a tenth way
+   * around the lifecycle: any caller holding an aggregate could save a new status over an
+   * old one with nothing checked.
+   *
+   * On CREATE there is no previous state to transition from, so the opening status is set
+   * here. That is the one legitimate status write outside the transition service, and the
+   * status-write guard spec allows exactly this file for exactly that reason.
+   */
   async save(application: Application): Promise<void> {
-    const fields = {
+    const mutable = {
       resumeId: application.resumeId ?? null,
-      status: application.status as $Enums.ApplicationStatus,
       notes: application.notes ?? null,
       coverLetter: application.coverLetter ?? null,
       updatedAt: application.updatedAt,
     };
     await this.prisma.application.upsert({
       where: { id: application.id },
-      update: fields,
+      update: mutable,
       create: {
         id: application.id,
         userId: application.userId,
         jobId: application.jobId,
         appliedAt: application.appliedAt,
         createdAt: application.createdAt,
-        ...fields,
+        status: application.status as $Enums.ApplicationStatus,
+        ...mutable,
       },
     });
   }

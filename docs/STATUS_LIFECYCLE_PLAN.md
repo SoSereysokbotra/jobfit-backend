@@ -335,17 +335,25 @@ cd D:\Year2\Jobfit\jobfit-backend && npx jest && npx tsc --noEmit
 **Why:** a convention that lives only in a comment is what produced this situation. This is what
 stops the tenth path someone adds next month.
 
-**Steps**
-1. **ESLint** `no-restricted-syntax` banning a `status` key in a Prisma `application.update`
-   payload outside the chokepoint file. Add to `.eslintrc` with an `overrides` exemption for
-   `application-transition.service.ts`.
-2. **A guard test** — the real gate. ESLint matches AST shape, so it misses
-   `data: buildPayload()`, `updateMany`, and `$executeRaw`. Add a jest test that scans `src/**`
-   for `application.update` payloads containing `status` outside the chokepoint and fails.
-   It runs inside the existing 246-test gate and is harder to silence than an
-   `eslint-disable` comment.
+**Steps** — revised 2026-08-08: **guard test only, no ESLint.**
 
-**Acceptance:** deliberately reintroducing a raw status write fails **both** lint and jest.
+> **The ESLint half was dropped, deliberately.** This project has no ESLint setup at all —
+> no config file, and ESLint is not a dependency. Adding the rule would have meant adopting
+> and configuring ESLint across the whole repo: real scope, and a decision that deserves to
+> be made on its own merits rather than as a side effect of this refactor. The guard test
+> was always the stronger of the two anyway — an AST rule matches shapes and misses
+> `data: buildPayload()`, `updateMany`, and raw SQL.
+
+1. **A guard test** scanning `src/**` for Prisma `update`/`updateMany`/`upsert` calls on the
+   Application model whose arguments contain a `status:` key, plus a second scan for raw
+   `UPDATE ... applications ... SET ... status`. Spec files excluded. Failures report
+   `file:line`.
+2. **A named exemption list**, asserted to be exactly its two entries, so widening the guard
+   is a deliberate reviewable edit rather than a side effect of getting a test to pass.
+
+**Acceptance:** deliberately reintroducing a raw status write fails jest.
+**Verified** by planting a real bypass file and confirming the scan reported it by file and
+line, then removing it — not by trusting an empty result.
 
 ### ⛔ STOP — wait for "proceed"
 
