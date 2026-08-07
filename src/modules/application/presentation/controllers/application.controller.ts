@@ -30,7 +30,10 @@ import { SubmitApplicationDto } from '../../dto/submit-application.dto';
 import { AddContactPersonDto } from '../../dto/add-contact-person.dto';
 import { UpdateApplicationStatusDto } from '../../dto/update-status.dto';
 import { ApplicationResponseDto } from '../../dto/application-response.dto';
-import { Application } from '../../domain/entities/application.entity';
+import {
+  Application,
+  CANDIDATE_SETTABLE_STATUSES,
+} from '../../domain/entities/application.entity';
 import { ApplicationStatus } from '@shared/kernel/enums/application-status.enum';
 
 @ApiTags('Applications')
@@ -78,13 +81,30 @@ export class ApplicationController {
   }
 
   @Patch(':id/status')
-  @ApiOperation({ summary: 'Update an application’s status' })
+  @ApiOperation({
+    summary: 'Update your own application’s status',
+    description:
+      'A candidate may WITHDRAW or ARCHIVE their application, and ACCEPT or start ' +
+      'NEGOTIATING an offer they have received. Statuses that record an EMPLOYER ' +
+      'decision — SCREENING, INTERVIEW, OFFER, REJECTED — are refused with 403.',
+  })
   async updateStatus(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
     @Body() dto: UpdateApplicationStatusDto,
   ): Promise<ApplicationResponseDto> {
     await this.assertOwned(id, user);
+
+    // Ownership is NOT enough. Without this, a candidate could set their own application
+    // to OFFER or ACCEPTED — fabricating a hiring outcome that then shows up in the
+    // employer's pipeline as though the employer had decided it.
+    if (!CANDIDATE_SETTABLE_STATUSES.includes(dto.newStatus)) {
+      throw new ForbiddenException(
+        `Only the employer can set ${dto.newStatus}. You can withdraw or archive your ` +
+          'application, or respond to an offer.',
+      );
+    }
+
     const application = await this.applicationService.updateStatus(
       id,
       dto.newStatus,

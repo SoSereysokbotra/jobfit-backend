@@ -8,35 +8,75 @@ import { ApplicationStatus } from '@shared/kernel/enums/application-status.enum'
 import { ApplicationSubmittedEvent } from '../events/application-submitted.event';
 import { ApplicationStatusChangedEvent } from '../events/application-status-changed.event';
 
-/** Allowed status transitions (BACKEND_PART2). Terminal states map to []. */
+/**
+ * Allowed status transitions. Terminal states map to [] (or to ARCHIVED).
+ *
+ * WITHDRAWN is reachable from EVERY active stage. A candidate can always walk away —
+ * they took another job, or lost interest — and the system must not trap them in a
+ * process they no longer want to be in.
+ *
+ * It used to be reachable only from SUBMITTED. That was survivable while applications sat
+ * in SUBMITTED until an employer touched them; once automatic screening began moving
+ * every new application to SCREENING on submit, withdrawal became unreachable for
+ * everybody. A merely narrow rule turned into one that blocked the single action a
+ * candidate is unconditionally entitled to take.
+ *
+ * ARCHIVED is reachable from the terminal states so a candidate can tidy their list
+ * without destroying the record.
+ */
 const TRANSITIONS: Record<ApplicationStatus, ApplicationStatus[]> = {
-  [ApplicationStatus.DRAFT]: [ApplicationStatus.SUBMITTED],
+  [ApplicationStatus.DRAFT]: [
+    ApplicationStatus.SUBMITTED,
+    ApplicationStatus.WITHDRAWN,
+  ],
   [ApplicationStatus.SUBMITTED]: [
     ApplicationStatus.SCREENING,
+    ApplicationStatus.REJECTED,
     ApplicationStatus.WITHDRAWN,
   ],
   [ApplicationStatus.SCREENING]: [
     ApplicationStatus.INTERVIEW,
     ApplicationStatus.REJECTED,
+    ApplicationStatus.WITHDRAWN,
   ],
   [ApplicationStatus.INTERVIEW]: [
     ApplicationStatus.OFFER,
     ApplicationStatus.REJECTED,
+    ApplicationStatus.WITHDRAWN,
   ],
   [ApplicationStatus.OFFER]: [
     ApplicationStatus.ACCEPTED,
     ApplicationStatus.NEGOTIATING,
     ApplicationStatus.REJECTED,
+    ApplicationStatus.WITHDRAWN,
   ],
   [ApplicationStatus.NEGOTIATING]: [
     ApplicationStatus.ACCEPTED,
     ApplicationStatus.REJECTED,
+    ApplicationStatus.WITHDRAWN,
   ],
-  [ApplicationStatus.ACCEPTED]: [],
-  [ApplicationStatus.REJECTED]: [],
-  [ApplicationStatus.WITHDRAWN]: [],
+  [ApplicationStatus.ACCEPTED]: [ApplicationStatus.ARCHIVED],
+  [ApplicationStatus.REJECTED]: [ApplicationStatus.ARCHIVED],
+  [ApplicationStatus.WITHDRAWN]: [ApplicationStatus.ARCHIVED],
   [ApplicationStatus.ARCHIVED]: [],
 };
+
+/**
+ * Statuses a CANDIDATE may set on their own application.
+ *
+ * Everything absent from this list — SCREENING, INTERVIEW, OFFER, REJECTED — records what
+ * the EMPLOYER decided. A candidate asserting one would be fabricating a hiring outcome
+ * inside the employer's own pipeline view.
+ *
+ * ACCEPTED and NEGOTIATING are the candidate's genuine replies to an offer. TRANSITIONS
+ * already confines them to the OFFER stage, so they cannot be reached early.
+ */
+export const CANDIDATE_SETTABLE_STATUSES: readonly ApplicationStatus[] = [
+  ApplicationStatus.WITHDRAWN,
+  ApplicationStatus.ARCHIVED,
+  ApplicationStatus.ACCEPTED,
+  ApplicationStatus.NEGOTIATING,
+];
 
 export interface ApplicationProps {
   userId: string;
