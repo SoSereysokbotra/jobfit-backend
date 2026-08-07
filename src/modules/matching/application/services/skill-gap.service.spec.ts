@@ -170,6 +170,56 @@ describe('SkillGapService', () => {
     expect(req.matchQuality).toBe('EXACT');
   });
 
+  it('does not let a word that is the job’s subject carry a partial match', async () => {
+    // Measured failure: on a Welding Engineer posting "welding" appears in most
+    // requirements, so "Welding Techniques (MIG, TIG…)" partial-matched a DEGREE, a
+    // CERTIFICATION and an AUTOMATION requirement — none of which the skill evidences.
+    // A word repeated through the list describes the job, not any one requirement.
+    const service = build(
+      [
+        'Bachelor’s degree in Welding Engineering or a related field',
+        'Certification as a Welding Inspector (CWI)',
+        'Experience with automation and robotic welding systems',
+        'Knowledge of Lean Manufacturing methodologies',
+      ],
+      ['Welding Techniques (MIG, TIG, SMAW, FCAW)'],
+    );
+
+    const result = await service.analyse('u1', 'j1');
+
+    expect(result.matchedCount).toBe(0);
+  });
+
+  it('still partial-matches on a word that appears in only one requirement', async () => {
+    // The rare-word case must survive the theme-word rule: "Automotive" appearing once
+    // across ten requirements is a real discriminator.
+    const service = build(
+      [
+        'Deep understanding of KPIs in the Automotive/Manufacturing Industry',
+        'Proven ability to build trusted relationships with stakeholders',
+        'Ability to adapt to a fast moving environment',
+        'Collaboration with partners and virtual teams',
+      ],
+      ['Automotive Engineering Technology'],
+    );
+
+    const result = await service.analyse('u1', 'j1');
+
+    expect(result.matchedCount).toBe(1);
+    expect(result.requirements[0].matchQuality).toBe('PARTIAL');
+  });
+
+  it('never treats a word occurring once as the job’s subject', async () => {
+    // With very few requirements a single occurrence can exceed the percentage
+    // threshold, so the rule also requires the word to appear at least twice.
+    const service = build(
+      ['Deep knowledge of the Automotive Industry'],
+      ['Automotive Engineering Technology'],
+    );
+
+    expect((await service.analyse('u1', 'j1')).matchedCount).toBe(1);
+  });
+
   it('does NOT partial-match on generic résumé filler', async () => {
     // The failure that makes the feature lie: "Technical Skills" must not match every
     // requirement that happens to contain the word "skills".

@@ -118,12 +118,18 @@ export class SkillGapService {
       };
     }
 
+    // Words that recur across this job's requirements describe the job's SUBJECT, not any
+    // particular requirement, so they cannot carry a partial match on their own.
+    const themeWords = themeWordsOf(requirements);
+
     const matches = requirements.map((text) => {
       const exact = skills.filter((skill) => mentionsExactly(text, skill));
       if (exact.length > 0) {
         return { text, matchedSkills: exact, matchQuality: 'EXACT' as const };
       }
-      const partial = skills.filter((skill) => mentionsPartially(text, skill));
+      const partial = skills.filter((skill) =>
+        mentionsPartially(text, skill, themeWords),
+      );
       return partial.length > 0
         ? { text, matchedSkills: partial, matchQuality: 'PARTIAL' as const }
         : { text, matchedSkills: [] };
@@ -177,6 +183,49 @@ function mentionsExactly(requirement: string, skill: string): boolean {
 }
 
 /**
+ * A word must appear in more than this share of a job's requirements — and at least
+ * twice — before it counts as the job's subject rather than a discriminator.
+ */
+const THEME_WORD_SHARE = 0.4;
+
+/**
+ * Words that recur across a job's own requirements.
+ *
+ * Measured need: on a Welding Engineer posting, "welding" appears in most requirements, so
+ * a skill named "Welding Techniques (MIG, TIG, SMAW, FCAW)" partial-matched a *degree*
+ * requirement, a *certification* requirement and an *automation* requirement — none of
+ * which the candidate's skills evidence. It scored 9 of 12 where roughly 5 was defensible.
+ *
+ * A word repeated throughout the requirement list describes what the JOB is about; it
+ * cannot tell one requirement apart from another, so it must not carry a match alone.
+ * Rare words are untouched, which is why "Automotive" (1 of 10 requirements on an
+ * automotive posting) still matches while "welding" no longer does.
+ */
+function themeWordsOf(requirements: string[]): Set<string> {
+  const documentFrequency = new Map<string, number>();
+  for (const requirement of requirements) {
+    for (const word of new Set(wordsOf(requirement))) {
+      documentFrequency.set(word, (documentFrequency.get(word) ?? 0) + 1);
+    }
+  }
+  const limit = Math.max(2, requirements.length * THEME_WORD_SHARE);
+  return new Set(
+    [...documentFrequency.entries()]
+      .filter(([, count]) => count >= limit)
+      .map(([word]) => word),
+  );
+}
+
+/** Meaningful lowercase words, generic résumé filler removed. */
+function wordsOf(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/[^a-z0-9+#.]+/)
+    .map((w) => w.replace(/^\.+|\.+$/g, ''))
+    .filter((w) => w.length >= 3 && !GENERIC_WORDS.has(w));
+}
+
+/**
  * Does `requirement` contain a distinctive word of a MULTI-WORD skill?
  *
  * Measured need: on a Manufacturing/Automotive posting, a candidate with "Automotive
@@ -185,16 +234,21 @@ function mentionsExactly(requirement: string, skill: string): boolean {
  * "Automotive" and "Management" were both literally present. Whole-phrase-only matching
  * reports "you match nothing" to someone who plainly matches something.
  *
+ * Words that are merely the job's subject (see {@link themeWordsOf}) are excluded, so a
+ * welding skill no longer "covers" every requirement that says welding.
+ *
  * Single-token skills are excluded on purpose: they have no parts to match partially, and
  * splitting them would break "C++", "CI/CD" and ".NET", none of which contain a space.
  */
-function mentionsPartially(requirement: string, skill: string): boolean {
+function mentionsPartially(
+  requirement: string,
+  skill: string,
+  themeWords: Set<string>,
+): boolean {
   if (!/\s/.test(skill.trim())) return false;
-  const distinctive = skill
-    .toLowerCase()
-    .split(/[^a-z0-9+#.]+/)
-    .filter((w) => w.length >= 3 && !GENERIC_WORDS.has(w));
-  return distinctive.some((word) => wholeWordTest(word).test(requirement));
+  return wordsOf(skill)
+    .filter((word) => !themeWords.has(word))
+    .some((word) => wholeWordTest(word).test(requirement));
 }
 
 /**
