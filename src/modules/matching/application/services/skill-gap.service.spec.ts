@@ -132,6 +132,76 @@ describe('SkillGapService', () => {
     );
   });
 
+  // ── partial matching of multi-word skills ──────────────────────────────────
+  //
+  // Measured failure this fixes: on a Manufacturing/Automotive posting, a candidate with
+  // "Automotive Engineering Technology" and "Project Management" matched 0 of 10
+  // requirements — the whole phrase never appears verbatim inside a long requirement
+  // sentence, while "Automotive" and "Management" were both literally present.
+
+  it('matches a multi-word skill on a distinctive word', async () => {
+    const service = build(
+      ['Deep understanding of KPIs in the Automotive/Manufacturing Industry'],
+      ['Automotive Engineering Technology'],
+    );
+
+    const result = await service.analyse('u1', 'j1');
+
+    expect(result.matchedCount).toBe(1);
+    expect(result.requirements[0].matchQuality).toBe('PARTIAL');
+  });
+
+  it('labels a verbatim hit EXACT, not PARTIAL', async () => {
+    const service = build(['3+ years with Docker'], ['Docker']);
+
+    expect((await service.analyse('u1', 'j1')).requirements[0].matchQuality).toBe('EXACT');
+  });
+
+  it('prefers the exact match when both are available', async () => {
+    const service = build(
+      ['Project Management and Docker experience'],
+      ['Docker', 'Project Management'],
+    );
+
+    const [req] = (await service.analyse('u1', 'j1')).requirements;
+
+    // "Project Management" is present verbatim too, so this is EXACT — reporting it as
+    // PARTIAL would understate what the CV actually evidences.
+    expect(req.matchQuality).toBe('EXACT');
+  });
+
+  it('does NOT partial-match on generic résumé filler', async () => {
+    // The failure that makes the feature lie: "Technical Skills" must not match every
+    // requirement that happens to contain the word "skills".
+    const service = build(
+      ['Strong interpersonal skills and excellent communication'],
+      ['Technical Skills'],
+    );
+
+    expect((await service.analyse('u1', 'j1')).matchedCount).toBe(0);
+  });
+
+  it('does not partial-match single-token skills', async () => {
+    // "Go" has no parts; splitting single tokens would also break C++ / CI/CD / .NET.
+    const service = build(['Experience with Google Cloud'], ['Go']);
+
+    expect((await service.analyse('u1', 'j1')).matchedCount).toBe(0);
+  });
+
+  it('still respects word boundaries when matching partially', async () => {
+    const service = build(['Familiarity with Reactive programming'], ['React Development']);
+
+    expect((await service.analyse('u1', 'j1')).matchedCount).toBe(0);
+  });
+
+  it('leaves matchQuality unset for a genuine gap', async () => {
+    const service = build(['Kubernetes experience required'], ['Docker']);
+
+    const [req] = (await service.analyse('u1', 'j1')).requirements;
+    expect(req.matchedSkills).toEqual([]);
+    expect(req.matchQuality).toBeUndefined();
+  });
+
   // ── AI-extracted fallback ──────────────────────────────────────────────────
 
   it('falls back to AI-extracted requirements when the employer wrote none', async () => {

@@ -16,6 +16,16 @@ export class RequirementMatchDto {
     description: 'Résumé skills found in this requirement. Empty means it is a gap.',
   })
   matchedSkills: string[];
+
+  @ApiPropertyOptional({
+    enum: ['EXACT', 'PARTIAL'],
+    description:
+      'EXACT — the skill appears verbatim. PARTIAL — only part of a multi-word skill ' +
+      'appears ("Automotive Engineering Technology" against "…Automotive/Manufacturing ' +
+      'Industry"). Real evidence, but weaker: do not present a PARTIAL hit as though ' +
+      'the résumé stated the whole skill. Absent when nothing matched.',
+  })
+  matchQuality?: string;
 }
 
 export class SkillGapDto {

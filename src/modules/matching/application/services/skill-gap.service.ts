@@ -24,11 +24,23 @@ export type SkillGapStatus =
   | 'JOB_HAS_NO_REQUIREMENTS'
   | 'NO_PARSED_RESUME';
 
+/**
+ * How strongly a requirement was matched.
+ *
+ * EXACT   — the skill appears verbatim ("Docker" in "3+ years of Docker").
+ * PARTIAL — only part of a multi-word skill appears ("Automotive Engineering Technology"
+ *           against "…in the Automotive/Manufacturing Industry"). Real evidence, but
+ *           weaker, and the UI must not present it as if the CV said the whole thing.
+ */
+export type MatchQuality = 'EXACT' | 'PARTIAL';
+
 export interface RequirementMatch {
   /** The requirement exactly as the employer wrote it. Never paraphrased. */
   text: string;
   /** CV skills found in this requirement. Empty means it is a gap. */
   matchedSkills: string[];
+  /** Absent when nothing matched. */
+  matchQuality?: MatchQuality;
 }
 
 /**
@@ -106,10 +118,16 @@ export class SkillGapService {
       };
     }
 
-    const matches = requirements.map((text) => ({
-      text,
-      matchedSkills: skills.filter((skill) => mentions(text, skill)),
-    }));
+    const matches = requirements.map((text) => {
+      const exact = skills.filter((skill) => mentionsExactly(text, skill));
+      if (exact.length > 0) {
+        return { text, matchedSkills: exact, matchQuality: 'EXACT' as const };
+      }
+      const partial = skills.filter((skill) => mentionsPartially(text, skill));
+      return partial.length > 0
+        ? { text, matchedSkills: partial, matchQuality: 'PARTIAL' as const }
+        : { text, matchedSkills: [] };
+    });
 
     return {
       status: 'OK',
@@ -138,17 +156,59 @@ function clean(values: string[] | undefined): string[] {
 }
 
 /**
- * Does `requirement` mention `skill` as a whole word?
+ * Words too common in résumés and postings to be evidence of anything.
+ *
+ * Without this, "Technical **Skills**" matches "Strong interpersonal **skills**" and
+ * every candidate matches every requirement — the false-match failure that makes this
+ * whole feature lie. Domain words like "management" or "automotive" are deliberately NOT
+ * here: those are exactly the signal we want.
+ */
+const GENERIC_WORDS = new Set([
+  'skill', 'skills', 'experience', 'experienced', 'knowledge', 'ability', 'abilities',
+  'strong', 'excellent', 'good', 'proven', 'effective', 'effectively', 'understanding',
+  'working', 'work', 'years', 'year', 'professional', 'relevant', 'related', 'various',
+  'general', 'basic', 'advanced', 'and', 'with', 'for', 'the', 'of', 'in', 'to', 'a',
+  'an', 'or', 'other', 'using', 'use',
+]);
+
+/** Does `requirement` contain `skill` verbatim, as a whole word? */
+function mentionsExactly(requirement: string, skill: string): boolean {
+  return wholeWordTest(skill).test(requirement);
+}
+
+/**
+ * Does `requirement` contain a distinctive word of a MULTI-WORD skill?
+ *
+ * Measured need: on a Manufacturing/Automotive posting, a candidate with "Automotive
+ * Engineering Technology" and "Project Management" matched 0 of 10 requirements, because
+ * the whole phrase never appears verbatim inside a long requirement sentence — while
+ * "Automotive" and "Management" were both literally present. Whole-phrase-only matching
+ * reports "you match nothing" to someone who plainly matches something.
+ *
+ * Single-token skills are excluded on purpose: they have no parts to match partially, and
+ * splitting them would break "C++", "CI/CD" and ".NET", none of which contain a space.
+ */
+function mentionsPartially(requirement: string, skill: string): boolean {
+  if (!/\s/.test(skill.trim())) return false;
+  const distinctive = skill
+    .toLowerCase()
+    .split(/[^a-z0-9+#.]+/)
+    .filter((w) => w.length >= 3 && !GENERIC_WORDS.has(w));
+  return distinctive.some((word) => wholeWordTest(word).test(requirement));
+}
+
+/**
+ * Case-insensitive whole-word matcher.
  *
  * Word boundaries matter: a plain substring test makes "Go" match "Google" and "React"
- * match "Reactive", reporting a skill the candidate was never credited with. Boundaries
- * are relaxed around non-word characters so "C++", "CI/CD" and ".NET" still match.
+ * match "Reactive", crediting a skill the candidate never claimed. `\b` is meaningless
+ * next to a non-word character (the "+" in "C++"), so only the ends that actually
+ * start/end with a word character are anchored.
  */
-function mentions(requirement: string, skill: string): boolean {
-  const escaped = skill.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  // \b is meaningless next to a non-word char (e.g. the "+" in "C++"), so only anchor
-  // the ends that actually start/end with a word character.
-  const left = /^\w/.test(skill) ? '\\b' : '';
-  const right = /\w$/.test(skill) ? '\\b' : '';
-  return new RegExp(`${left}${escaped}${right}`, 'i').test(requirement);
+function wholeWordTest(term: string): RegExp {
+  const trimmed = term.trim();
+  const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const left = /^\w/.test(trimmed) ? '\\b' : '';
+  const right = /\w$/.test(trimmed) ? '\\b' : '';
+  return new RegExp(`${left}${escaped}${right}`, 'i');
 }
