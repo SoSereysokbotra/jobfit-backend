@@ -5,6 +5,7 @@ import { RecomputeUserMatchesUseCase } from './application/use-cases/recompute-u
 import { MatchingEmbeddingService } from './application/services/matching-embedding.service';
 import { RecommendationsQueryService } from './application/services/recommendations-query.service';
 import { SkillGapService } from './application/services/skill-gap.service';
+import { JobMatchService } from './application/services/job-match.service';
 import { GenerationEvalService } from './evaluation/generation-eval.service';
 import { RetrievalEvalService } from './evaluation/retrieval-eval.service';
 import { MatchingController } from './presentation/controllers/matching.controller';
@@ -21,6 +22,7 @@ import { UserProfileUpdatedListener } from './listeners/user-profile-updated.lis
     RecomputeUserMatchesUseCase,
     RecommendationsQueryService,
     SkillGapService,
+    JobMatchService,
     RetrievalEvalService,
     GenerationEvalService,
     JobPublishedListener,

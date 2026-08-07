@@ -5,12 +5,14 @@ import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { RecommendationsQueryService } from '../../application/services/recommendations-query.service';
 import { MatchExternalJobUseCase } from '../../application/use-cases/match-external-job.use-case';
 import { SkillGapService } from '../../application/services/skill-gap.service';
+import { JobMatchService } from '../../application/services/job-match.service';
 import { RecommendedJobDto } from '../dtos/recommended-job.dto';
 import {
   ExternalJobMatchDto,
   ExternalJobMatchQueryDto,
 } from '../dtos/external-job-match.dto';
 import { SkillGapDto, SkillGapQueryDto } from '../dtos/skill-gap.dto';
+import { JobMatchDto, JobMatchQueryDto } from '../dtos/job-match.dto';
 
 @ApiTags('Matching')
 @ApiBearerAuth()
@@ -20,6 +22,7 @@ export class MatchingController {
     private readonly recommendations: RecommendationsQueryService,
     private readonly matchExternalJob: MatchExternalJobUseCase,
     private readonly skillGap: SkillGapService,
+    private readonly jobMatch: JobMatchService,
   ) {}
 
   @Get()
@@ -30,6 +33,27 @@ export class MatchingController {
   })
   async list(@CurrentUser() user: AuthenticatedUser): Promise<RecommendedJobDto[]> {
     return this.recommendations.getForUser(user.id);
+  }
+
+  @Get('for-job')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Match score for one job against the current user (job detail page). Uses the ' +
+      'DETERMINISTIC scorer — embedding cosine for skills plus rule-based experience/' +
+      'location/salary — not the LLM fitScore, which Phase C measured as uncorrelated ' +
+      'with real fit.',
+  })
+  @ApiResponse({ status: 200, type: JobMatchDto })
+  @ApiResponse({
+    status: 204,
+    description: 'No profile or unknown job — nothing to match against.',
+  })
+  async matchForJob(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: JobMatchQueryDto,
+  ): Promise<JobMatchDto | undefined> {
+    return (await this.jobMatch.matchForJob(user.id, query.jobId)) ?? undefined;
   }
 
   @Get('skill-gap')

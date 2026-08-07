@@ -6,6 +6,30 @@ export class SalaryRangeResponseDto {
   @ApiProperty() currency: string;
 }
 
+/**
+ * Real company facts, for the job detail page.
+ *
+ * Every field is optional and omitted when the database has no value. The panel this
+ * feeds used to hardcode "Technology & Software", "500-1000 employees", "Series C, $120M"
+ * and "Glassdoor 4.2/5 (234 reviews)" for every company — inventing facts about real
+ * businesses. Most companies have almost none of this recorded (`size` is populated 0
+ * times across the table), so a missing field must render as nothing, never as a default.
+ */
+export class CompanyProfileDto {
+  @ApiProperty() name: string;
+  @ApiPropertyOptional() description?: string;
+  @ApiPropertyOptional() website?: string;
+  @ApiPropertyOptional({ description: 'Resolved Industry.name, not the raw id.' })
+  industry?: string;
+  @ApiPropertyOptional({ description: 'STARTUP | SMALL | MEDIUM | LARGE | ENTERPRISE' })
+  size?: string;
+  @ApiPropertyOptional() foundedYear?: number;
+  @ApiPropertyOptional({ description: 'City and/or country, whichever is recorded.' })
+  location?: string;
+  @ApiPropertyOptional() glassdoorRating?: number;
+  @ApiPropertyOptional() glassdoorReviews?: number;
+}
+
 export class JobResponseDto {
   @ApiProperty() id: string;
   @ApiProperty() companyId: string;
@@ -40,6 +64,14 @@ export class JobResponseDto {
     description: 'The original posting. Present for EXTERNAL jobs; where the user applies.',
   })
   externalUrl?: string;
+
+  @ApiPropertyOptional({
+    type: CompanyProfileDto,
+    description:
+      'Populated on the job DETAIL endpoint only (list responses carry companyName ' +
+      'alone). Fields the database has no value for are omitted entirely.',
+  })
+  company?: CompanyProfileDto;
 
   @ApiProperty() createdAt: string;
   @ApiProperty() updatedAt: string;

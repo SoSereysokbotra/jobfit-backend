@@ -294,7 +294,8 @@ export class RecomputeUserMatchesUseCase {
   }
 
   /** Cosine similarity for a specific set of jobs (for BM25-only hits). */
-  private cosineForJobs(userId: string, jobIds: string[]): Promise<NearJobRow[]> {
+  /** Public so single-job scoring reuses this exact query instead of restating it. */
+  cosineForJobs(userId: string, jobIds: string[]): Promise<NearJobRow[]> {
     return this.prisma.$queryRawUnsafe<NearJobRow[]>(
       `SELECT j.id, 1 - (j.embedding <=> p.embedding) AS cosine_sim
          FROM jobs j

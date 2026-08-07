@@ -39,9 +39,51 @@ export class JobService {
   private async withCompanyName(dto: JobResponseDto): Promise<JobResponseDto> {
     const company = await this.prisma.company.findUnique({
       where: { id: dto.companyId },
-      select: { name: true },
+      select: {
+        name: true,
+        description: true,
+        website: true,
+        industry: true,
+        size: true,
+        foundedYear: true,
+        city: true,
+        country: true,
+        glassdoorRating: true,
+        glassdoorReviews: true,
+      },
     });
-    return { ...dto, companyName: company?.name };
+    if (!company) return dto;
+
+    // `Company.industry` holds an Industry id; resolve it so the client never renders a
+    // raw UUID.
+    const industry = company.industry
+      ? await this.prisma.industry.findUnique({
+          where: { id: company.industry },
+          select: { name: true },
+        })
+      : null;
+
+    const location = [company.city, company.country].filter(Boolean).join(', ');
+
+    // Every field is omitted when its column is null. The panel this feeds used to
+    // hardcode size, funding and a Glassdoor rating for every employer — publishing
+    // invented facts about real businesses — so a missing value must produce a missing
+    // field, never a plausible default.
+    return {
+      ...dto,
+      companyName: company.name,
+      company: {
+        name: company.name,
+        description: company.description ?? undefined,
+        website: company.website ?? undefined,
+        industry: industry?.name ?? undefined,
+        size: company.size ?? undefined,
+        foundedYear: company.foundedYear ?? undefined,
+        location: location || undefined,
+        glassdoorRating: company.glassdoorRating ?? undefined,
+        glassdoorReviews: company.glassdoorReviews ?? undefined,
+      },
+    };
   }
 
   private async withCompanyNames(dtos: JobResponseDto[]): Promise<JobResponseDto[]> {
