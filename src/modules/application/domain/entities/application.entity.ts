@@ -34,8 +34,13 @@ const TRANSITIONS: Record<ApplicationStatus, ApplicationStatus[]> = {
     ApplicationStatus.REJECTED,
     ApplicationStatus.WITHDRAWN,
   ],
+  // SCREENING -> OFFER (D1) lets an employer skip the interview for a candidate they are
+  // already convinced by. The offer module allowed this all along by writing status
+  // straight through Prisma; the choice is now made here, once, where everyone can see it.
+  // SUBMITTED -> OFFER is deliberately NOT allowed: that is a candidate nothing evaluated.
   [ApplicationStatus.SCREENING]: [
     ApplicationStatus.INTERVIEW,
+    ApplicationStatus.OFFER,
     ApplicationStatus.REJECTED,
     ApplicationStatus.WITHDRAWN,
   ],
@@ -50,13 +55,27 @@ const TRANSITIONS: Record<ApplicationStatus, ApplicationStatus[]> = {
     ApplicationStatus.REJECTED,
     ApplicationStatus.WITHDRAWN,
   ],
+  // NEGOTIATING -> OFFER is how a negotiation ends: the employer puts revised terms on the
+  // table. The offer module has always supported re-extending during negotiation
+  // (updateOffer treats NEGOTIATING as editable), so without this the supported flow would
+  // start failing the moment it went through the transition rules.
   [ApplicationStatus.NEGOTIATING]: [
+    ApplicationStatus.OFFER,
     ApplicationStatus.ACCEPTED,
     ApplicationStatus.REJECTED,
     ApplicationStatus.WITHDRAWN,
   ],
   [ApplicationStatus.ACCEPTED]: [ApplicationStatus.ARCHIVED],
-  [ApplicationStatus.REJECTED]: [ApplicationStatus.ARCHIVED],
+  // REJECTED -> SCREENING (D2) reopens a closed application. Re-extending an offer to a
+  // candidate who was rejected — or who declined — worked before these rules were enforced,
+  // because extendOffer upserts and resets the offer. Reopening returns them to the
+  // pipeline rather than teleporting them to OFFER, so the record shows the stage they
+  // actually re-entered. WITHDRAWN gets no such door: walking away is the candidate's
+  // decision, and an employer must not undo it.
+  [ApplicationStatus.REJECTED]: [
+    ApplicationStatus.SCREENING,
+    ApplicationStatus.ARCHIVED,
+  ],
   [ApplicationStatus.WITHDRAWN]: [ApplicationStatus.ARCHIVED],
   [ApplicationStatus.ARCHIVED]: [],
 };

@@ -99,7 +99,8 @@ employers can act fast on strong candidates (`strong 6/7` vs `unrelated 0/7`); f
 INTERVIEW row makes employers fabricate a stage. **Do not** add `SUBMITTED → OFFER` — that is a
 candidate nothing has evaluated.
 
-- [ ] **Decision:** _______________
+- [x] **Decision (2026-08-08): ALLOWED.** `OFFER` added to `TRANSITIONS[SCREENING]`.
+  `SUBMITTED → OFFER` remains forbidden.
 
 ### D2 — Can a rejected application be reopened?
 
@@ -112,7 +113,28 @@ only to `ARCHIVED`. **Re-extending an offer will silently break.**
 candidate re-enters the pipeline rather than teleporting to the end, then `SCREENING → OFFER`
 carries them forward under D1.
 
-- [ ] **Decision:** _______________
+- [x] **Decision (2026-08-08): ALLOWED via reopen.** `SCREENING` added to
+  `TRANSITIONS[REJECTED]`. `extendOffer` performs it as two audited steps (`REOPENED`, then
+  `OFFER_EXTENDED`). **`WITHDRAWN` gets no such door** — walking away is the candidate's
+  decision and an employer must not undo it.
+
+### D3 — Discovered during Phase 2, decided the same way
+
+Three more behaviours only became visible once the writes were actually validated:
+
+1. **`NEGOTIATING → OFFER` added.** `updateOffer` has always treated `NEGOTIATING` as
+   editable (`offer.service.ts:108`), so re-extending revised terms during a negotiation is a
+   supported flow that would have started failing. This is how a negotiation concludes.
+2. **`OFFER → OFFER` is not a transition.** Re-extending an offer already on the table
+   revises the compensation, not the stage, so `extendOffer` skips the transition entirely
+   when the application is already at `OFFER`. The chokepoint stays strict; the caller
+   decides that nothing needs to move.
+3. **Declining an offer now sets `WITHDRAWN`, not `REJECTED`.** `REJECTED` reads as "the
+   employer rejected this candidate" — the opposite of what happened — and it was never a
+   status a candidate is entitled to assert about themselves, so under the chokepoint the
+   old write would have been refused outright. The decline is not lost: the `Offer` row
+   still records `DECLINED`. No visible board change (`employer.mappers.ts:87-88` maps both
+   to "Rejected"); the record simply stops misattributing the decision.
 
 ---
 
