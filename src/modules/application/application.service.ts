@@ -20,6 +20,9 @@ import {
 } from '@modules/job/domain/job.repository.interface';
 import { DomainEventBus } from '@events/domain-event-bus.service';
 import { Application } from './domain/entities/application.entity';
+import { ApplicationTransitionService } from './domain/services/application-transition.service';
+import { ApplicationStatusChangedEvent } from './domain/events/application-status-changed.event';
+import { TransitionActor } from '@shared/kernel/enums/transition-actor.enum';
 import { ApplicationTimeline } from './domain/entities/application-timeline.entity';
 import { ContactPerson } from './domain/entities/contact-person.entity';
 import { ApplicationStatus } from '@shared/kernel/enums/application-status.enum';
@@ -32,6 +35,7 @@ import { ERROR_MESSAGES } from '@common/constants/error-messages';
 export class ApplicationService {
   constructor(
     private readonly applicationRepository: ApplicationRepository,
+    private readonly transitions: ApplicationTransitionService,
     private readonly timelineRepository: ApplicationTimelineRepository,
     private readonly contactPersonRepository: ContactPersonRepository,
     private readonly userRepository: UserRepository,
@@ -106,25 +110,28 @@ export class ApplicationService {
     return application;
   }
 
+  /**
+   * The CANDIDATE's own status change.
+   *
+   * Validation, persistence and both audit rows are the transition service's job now — one
+   * definition of the lifecycle for every caller. What stays here is the domain event, which
+   * is this module's to raise.
+   */
   async updateStatus(
     applicationId: string,
     newStatus: ApplicationStatus,
+    actorUserId?: string,
   ): Promise<Application> {
-    const application = await this.getApplication(applicationId);
-    try {
-      application.updateStatus(newStatus); // validates transition, raises event
-    } catch (err) {
-      throw new BadRequestException((err as Error).message);
-    }
-    await this.applicationRepository.save(application);
-    await this.timelineRepository.addEvent(
+    const { previousStatus } = await this.transitions.transition({
       applicationId,
       newStatus,
-      'STATUS_CHANGED',
-      `Status changed to ${newStatus}`,
+      actor: TransitionActor.CANDIDATE,
+      actorUserId,
+    });
+    await this.eventBus.publish(
+      new ApplicationStatusChangedEvent(applicationId, previousStatus, newStatus),
     );
-    await this.publishEvents(application);
-    return application;
+    return this.getApplication(applicationId);
   }
 
   /** A user's applications, newest first, paginated. */

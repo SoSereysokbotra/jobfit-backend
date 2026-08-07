@@ -5,13 +5,13 @@
 
 import { Module } from '@nestjs/common';
 // Exports ApplicationTransitionService — the one road to a status write.
-import { ApplicationModule } from '../application/application.module';
+import { ApplicationTransitionModule } from '../application/application-transition.module';
 import { OfferService } from './offer.service';
 import { OfferController } from './offer.controller';
 import { EmployerOfferController } from './employer-offer.controller';
 
 @Module({
-  imports: [ApplicationModule],
+  imports: [ApplicationTransitionModule],
   controllers: [OfferController, EmployerOfferController],
   providers: [OfferService],
 })

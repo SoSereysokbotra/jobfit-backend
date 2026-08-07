@@ -31,8 +31,11 @@ import { EmployerCompanyRepository } from './infrastructure/repositories/employe
 import { EmployerJobRepository } from './infrastructure/repositories/employer-job.repository';
 import { EmployerApplicationRepository } from './infrastructure/repositories/employer-application.repository';
 
+// The one road to a status write — the employer pipeline moves candidates through it.
+import { ApplicationTransitionModule } from '../application/application-transition.module';
+
 @Module({
-  imports: [JobModule],
+  imports: [JobModule, ApplicationTransitionModule],
   controllers: [
     EmployerCompanyController,
     EmployerJobController,

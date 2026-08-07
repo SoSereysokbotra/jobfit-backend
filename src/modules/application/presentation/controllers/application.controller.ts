@@ -30,10 +30,7 @@ import { SubmitApplicationDto } from '../../dto/submit-application.dto';
 import { AddContactPersonDto } from '../../dto/add-contact-person.dto';
 import { UpdateApplicationStatusDto } from '../../dto/update-status.dto';
 import { ApplicationResponseDto } from '../../dto/application-response.dto';
-import {
-  Application,
-  CANDIDATE_SETTABLE_STATUSES,
-} from '../../domain/entities/application.entity';
+import { Application } from '../../domain/entities/application.entity';
 import { ApplicationStatus } from '@shared/kernel/enums/application-status.enum';
 
 @ApiTags('Applications')
@@ -95,19 +92,14 @@ export class ApplicationController {
   ): Promise<ApplicationResponseDto> {
     await this.assertOwned(id, user);
 
-    // Ownership is NOT enough. Without this, a candidate could set their own application
-    // to OFFER or ACCEPTED — fabricating a hiring outcome that then shows up in the
-    // employer's pipeline as though the employer had decided it.
-    if (!CANDIDATE_SETTABLE_STATUSES.includes(dto.newStatus)) {
-      throw new ForbiddenException(
-        `Only the employer can set ${dto.newStatus}. You can withdraw or archive your ` +
-          'application, or respond to an offer.',
-      );
-    }
-
+    // Ownership is NOT enough — a candidate setting OFFER or ACCEPTED would fabricate a
+    // hiring outcome that shows up in the employer's pipeline as though the employer had
+    // decided it. That rule used to be re-stated here; it now lives in the transition
+    // service with every other lifecycle rule, and raises the same 403.
     const application = await this.applicationService.updateStatus(
       id,
       dto.newStatus,
+      user.id,
     );
     return new ApplicationResponseDto(application);
   }

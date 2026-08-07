@@ -49,11 +49,18 @@ describe('ApplicationScreeningService', () => {
             },
       ),
     };
-    return { service: new ApplicationScreeningService(prisma, jobMatch, skillGap), prisma };
+    // Status is no longer written here — it goes through the transition service as SYSTEM,
+    // which validates SUBMITTED -> SCREENING like any other move and writes both audit rows.
+    const transitions: any = { transition: jest.fn().mockResolvedValue({}) };
+    return {
+      service: new ApplicationScreeningService(prisma, jobMatch, skillGap, transitions),
+      prisma,
+      transitions,
+    };
   };
 
   it('stores the assessment and advances SUBMITTED to SCREENING', async () => {
-    const { service, prisma } = build();
+    const { service, prisma, transitions } = build();
 
     const out = await service.screen('a1');
 
@@ -62,33 +69,39 @@ describe('ApplicationScreeningService', () => {
     expect(out.requirementsTotal).toBe(7);
 
     const data = prisma.application.update.mock.calls[0][0].data;
-    expect(data.status).toBe('SCREENING');
     expect(data.screenMatchScore).toBe(72); // rounded
     expect(data.screenRequirementsSource).toBe('EMPLOYER');
     expect(data.screenedAt).toBeInstanceOf(Date);
+
+    expect(transitions.transition).toHaveBeenCalledWith(
+      expect.objectContaining({ newStatus: 'SCREENING', actor: 'SYSTEM' }),
+    );
   });
 
   it('records a timeline entry the candidate can see', async () => {
-    const { service, prisma } = build();
+    const { service, transitions } = build();
 
     await service.screen('a1');
 
-    const entry = prisma.applicationTimeline.create.mock.calls[0][0].data;
-    expect(entry.status).toBe('SCREENING');
-    expect(entry.eventType).toBe('SCREENED');
-    expect(entry.description).toContain('6 of 7');
+    // The timeline row is the transition service's job now, so the description travels
+    // with the move rather than being written separately beside it.
+    const params = transitions.transition.mock.calls[0][0];
+    expect(params.eventType).toBe('SCREENED');
+    expect(params.description).toContain('6 of 7');
   });
 
   it('NEVER rejects — only ever moves to SCREENING', async () => {
     // A pipeline built on a small model's reading of a CV must not end an application.
-    const { service, prisma } = build({
+    const { service, transitions } = build({
       gap: { requirements: [{}, {}], matchedCount: 0, missing: ['a', 'b'], requirementsSource: 'EMPLOYER' },
       match: { score: 3 },
     });
 
     await service.screen('a1');
 
-    expect(prisma.application.update.mock.calls[0][0].data.status).toBe('SCREENING');
+    expect(transitions.transition).toHaveBeenCalledWith(
+      expect.objectContaining({ newStatus: 'SCREENING' }),
+    );
   });
 
   it('does not re-screen an application that already has an assessment', async () => {
@@ -105,17 +118,17 @@ describe('ApplicationScreeningService', () => {
   });
 
   it('leaves a non-SUBMITTED application on its current status', async () => {
-    const { service, prisma } = build({
+    const { service, prisma, transitions } = build({
       application: { ...application, status: 'INTERVIEW' },
     });
 
     await service.screen('a1');
 
-    // The assessment is still stored, but the employer's own status is untouched.
-    const data = prisma.application.update.mock.calls[0][0].data;
-    expect(data.status).toBeUndefined();
-    expect(data.screenedAt).toBeInstanceOf(Date);
-    expect(prisma.applicationTimeline.create).not.toHaveBeenCalled();
+    // The assessment is still stored, but the employer's own status is untouched. The
+    // guard decides whether a move is WANTED; asking for INTERVIEW -> SCREENING would be
+    // an error rather than a no-op, so screening does not ask.
+    expect(prisma.application.update.mock.calls[0][0].data.screenedAt).toBeInstanceOf(Date);
+    expect(transitions.transition).not.toHaveBeenCalled();
   });
 
   it('returns NOT_FOUND rather than throwing for an unknown application', async () => {

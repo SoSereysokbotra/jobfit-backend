@@ -11,13 +11,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ApplicationStatus } from '@prisma/client';
-// The lifecycle rules live with the Application aggregate; both the candidate and
-// employer paths must enforce the same ones.
-import {
-  EMPLOYER_SETTABLE_STATUSES,
-  isTransitionAllowed,
-} from '@modules/application/domain/entities/application.entity';
+// Every status write goes through the transition service — one definition of the lifecycle,
+// used by the candidate path, the employer path, the offer module and screening alike.
+import { ApplicationTransitionService } from '@modules/application/domain/services/application-transition.service';
 import { ApplicationStatus as DomainStatus } from '@shared/kernel/enums/application-status.enum';
+import { TransitionActor } from '@shared/kernel/enums/transition-actor.enum';
 import { EmployerContextService } from './employer-context.service';
 import { EmployerApplicationRepository } from '../../infrastructure/repositories/employer-application.repository';
 import { ListApplicationsQueryDto } from '../dtos/list-applications.query.dto';
@@ -34,6 +32,7 @@ export class EmployerApplicationService {
   constructor(
     private readonly context: EmployerContextService,
     private readonly appRepo: EmployerApplicationRepository,
+    private readonly transitions: ApplicationTransitionService,
   ) {}
 
   async list(
@@ -86,46 +85,25 @@ export class EmployerApplicationService {
     applicationId: string,
     dto: UpdateApplicationStatusDto,
   ): Promise<ApplicationStatusUpdatedDto> {
-    const app = await this.requireOwnedApplication(userId, applicationId);
-    const previousStatus = app.status;
-    const newStatus = dto.newStatus as unknown as ApplicationStatus;
+    // Company ownership is authorisation — a separate question from the lifecycle, and
+    // still this service's to answer.
+    await this.requireOwnedApplication(userId, applicationId);
 
-    // Owning the job is NOT authorisation to record any outcome. WITHDRAWN, ACCEPTED and
-    // NEGOTIATING are the CANDIDATE's decisions: an employer setting WITHDRAWN would
-    // record that the candidate pulled out when they did not, and ACCEPTED that they took
-    // a job they never agreed to.
-    if (!EMPLOYER_SETTABLE_STATUSES.includes(newStatus as DomainStatus)) {
-      throw new ForbiddenException(
-        `${newStatus} is the candidate's decision to record, not yours.`,
-      );
-    }
-
-    // This path writes through Prisma rather than the Application aggregate, so it was
-    // bypassing the lifecycle rules entirely — any status could overwrite any other, and
-    // a candidate could be moved straight from SUBMITTED to ACCEPTED. Same rule table as
-    // the aggregate uses.
-    if (
-      !isTransitionAllowed(
-        previousStatus as unknown as DomainStatus,
-        newStatus as unknown as DomainStatus,
-      )
-    ) {
-      throw new BadRequestException(
-        `Invalid status transition: ${previousStatus} → ${newStatus}`,
-      );
-    }
-
-    await this.appRepo.transitionStatus({
+    // Everything else — is this transition reachable, is this status the employer's to
+    // assert, and both audit rows — belongs to the transition service. This path used to
+    // re-state those rules locally while the offer module re-stated none of them.
+    const { previousStatus, newStatus } = await this.transitions.transition({
       applicationId,
-      previousStatus,
-      newStatus,
-      employerUserId: userId,
+      newStatus: dto.newStatus as unknown as DomainStatus,
+      actor: TransitionActor.EMPLOYER,
+      actorUserId: userId,
       notes: dto.notes,
     });
+
     return new ApplicationStatusUpdatedDto(
       applicationId,
-      newStatus,
-      previousStatus,
+      newStatus as unknown as ApplicationStatus,
+      previousStatus as unknown as ApplicationStatus,
     );
   }
 
