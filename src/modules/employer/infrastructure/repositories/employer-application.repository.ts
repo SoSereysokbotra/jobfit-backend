@@ -51,7 +51,23 @@ export class EmployerApplicationRepository {
         user: { select: { id: true, name: true, email: true } },
         job: { select: { id: true, title: true, companyId: true } },
       },
-      orderBy: { appliedAt: 'desc' },
+      // Best-first: most requirements evidenced, then match score, then recency.
+      //
+      // Ordered in the DATABASE, not after fetching — sorting a page in memory would only
+      // reorder within that page and silently bury the strongest candidate on page 2.
+      //
+      // Coverage leads because it is what actually discriminates. Measured on four seeded
+      // candidates it separated them 6/7 · 3/7 · 1/7 · 0/7, while the match score gave
+      // 50% · 46% · 46% · 46% — a 4-point spread between a senior full-stack engineer and
+      // a graphic designer. Score is a tiebreak, not the ranking.
+      //
+      // `nulls: 'last'` matters: Postgres sorts NULLs FIRST on DESC, which would float
+      // every unscreened application above every assessed one.
+      orderBy: [
+        { screenRequirementsCovered: { sort: 'desc', nulls: 'last' } },
+        { screenMatchScore: { sort: 'desc', nulls: 'last' } },
+        { appliedAt: 'desc' },
+      ],
       skip: params.skip,
       take: params.take,
     });
@@ -100,18 +116,4 @@ export class EmployerApplicationRepository {
     });
   }
 
-  /** Best-effort match scores for a single job, keyed by candidate userId. */
-  async matchScoresForJob(
-    jobId: string,
-    userIds: string[],
-  ): Promise<Map<string, number>> {
-    if (userIds.length === 0) return new Map();
-    const rows = await this.prisma.matchScore.findMany({
-      where: { jobId, jobSeekerProfile: { userId: { in: userIds } } },
-      select: { score: true, jobSeekerProfile: { select: { userId: true } } },
-    });
-    const map = new Map<string, number>();
-    for (const row of rows) map.set(row.jobSeekerProfile.userId, row.score);
-    return map;
-  }
 }

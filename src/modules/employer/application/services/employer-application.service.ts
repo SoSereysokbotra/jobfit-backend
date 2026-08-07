@@ -41,16 +41,12 @@ export class EmployerApplicationService {
       take: query.take,
     });
 
-    // Match scores are only resolvable for a single-job view (per-row job filtering isn't
-    // expressible in one query when listing across all company jobs).
-    const scores =
-      query.jobId && rows.length > 0
-        ? await this.appRepo.matchScoresForJob(
-            query.jobId,
-            rows.map((r) => r.user.id),
-          )
-        : new Map<string, number>();
-
+    // The screening assessment lives on the application row, so it needs no second query
+    // and — unlike the score it replaces — is available whether the employer is viewing a
+    // single job or the whole pipeline.
+    //
+    // The previous `matchScore` read from the `matchScore` table, which has zero rows and
+    // nothing that writes to it: the field could never hold a value.
     return rows.map(
       (row) =>
         new EmployerApplicationResponseDto({
@@ -64,7 +60,14 @@ export class EmployerApplicationService {
           },
           status: row.status,
           employerNotes: row.employerNotes,
-          matchScore: scores.get(row.user.id) ?? null,
+          screening: {
+            screenedAt: row.screenedAt,
+            matchScore: row.screenMatchScore,
+            requirementsTotal: row.screenRequirementsTotal ?? 0,
+            requirementsCovered: row.screenRequirementsCovered ?? 0,
+            missingRequirements: row.screenMissingRequirements,
+            requirementsSource: row.screenRequirementsSource ?? 'NONE',
+          },
           appliedAt: row.appliedAt,
         }),
     );

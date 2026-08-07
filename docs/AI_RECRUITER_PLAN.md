@@ -115,7 +115,7 @@ measuring the things they have in common.
 3. Phase 5's threshold should be expressed in **coverage**, not score. That is the number
    the data actually supports.
 
-### Phase 3 — Expose it to the employer
+### Phase 3 — Expose it to the employer ✅
 Replace the always-null `matchScore` with the stored assessment on
 `GET /employer/applications`, and sort best-first.
 
@@ -157,6 +157,28 @@ Only now: decide what "strong candidate" means, from the Phase 1–4 data.
 | 2026-08-07 | — | Plan written. Baseline above. |
 | 2026-08-07 | 1 | `scripts/seed-ai-recruiter-demo.ts`. Verified company + internal job with 7 real requirements + 4 candidates. Ranking matches the hand-written expectation exactly. |
 | 2026-08-07 | 2 | `ApplicationScreeningService` + 6 nullable `screen*` columns. Screens on submit, advances SUBMITTED→SCREENING. **Coverage ranks correctly; match score does not.** |
+| 2026-08-07 | 3 | `GET /employer/applications` returns the assessment, ordered best-first in SQL. Dead `matchScoresForJob` removed. |
+
+### Phase 3 result — the employer list, as the API returns it
+
+```
+  #  candidate                     status      covered  score  source
+  1  strong@seed.jobfits.test     SCREENING   6/7       50    EMPLOYER
+       missing: Experience mentoring junior engineers
+  2  partial@seed.jobfits.test    SCREENING   3/7       46    EMPLOYER
+  3  junior@seed.jobfits.test     SCREENING   1/7       46    EMPLOYER
+  4  unrelated@seed.jobfits.test  SCREENING   0/7       46    EMPLOYER
+```
+
+Two details that had to be right:
+
+- **Ordering is in SQL, not in memory.** Sorting a fetched page would only reorder within
+  that page and bury the strongest candidate on page 2.
+- **`nulls: 'last'`.** Postgres sorts NULLs FIRST on DESC, so without it every *unscreened*
+  application would float above every assessed one.
+
+`matchScoresForJob` was deleted. It read from the `matchScore` table — zero rows, nothing
+writes to it — so the employer's `matchScore` field could never hold a value.
 
 ### Phase 1 result — the ranking is already correct
 
