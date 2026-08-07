@@ -6,6 +6,31 @@
 
 ---
 
+## STATUS — all six phases implemented 2026-08-08, branch `feat/status-lifecycle-chokepoint`
+
+| Phase | Commit | Repo |
+|---|---|---|
+| 0 — surface the failure | `3456749` | frontend |
+| 1 — the chokepoint | `4e0666e` | backend |
+| 2 — six offer-module writes | `10735e3` | backend |
+| 3 — remaining three writes | `8955b87` | backend |
+| 4 — the guard | `1b23c33` | backend |
+| 5 — employer `availableActions` | `c205b33` | backend |
+| 6 — board derives droppability | see frontend branch | frontend |
+
+**Metrics: status-write sites not behind the chokepoint 7/9 → 0/10. Sites leaving no audit
+row 6/9 → 0/10.** The denominator moved because Phase 4 found a tenth site the audit missed:
+`ApplicationRepository.save` wrote status in its UPDATE branch.
+
+**jest 246 → 295, tsc clean in both repos.**
+
+⚠️ **NOT yet verified end to end.** Every phase is unit-tested against mocks; no flow has been
+exercised against a running database. The paths with genuinely new behaviour — reopen from
+`REJECTED`, `NEGOTIATING → OFFER`, and decline setting `WITHDRAWN` — have never touched
+Postgres. See §6 below.
+
+---
+
 ## 0. The one idea
 
 The lifecycle rules are a **reference book that callers are trusted to consult**. Two callers
@@ -433,6 +458,23 @@ cd D:\Year2\Jobfit\jobfit-frontend && npx tsc --noEmit
 ### ⛔ STOP — final review
 
 ---
+
+## 6. What still needs a running system
+
+The one thing no phase delivered. Bring up Redis → Ollama → AI service → backend → frontend
+and exercise:
+
+1. **Reopen** — reject an application, then extend an offer to the same candidate. Expect two
+   stage-history rows: `REJECTED → SCREENING` (`REOPENED`), then `SCREENING → OFFER`.
+2. **Negotiation round-trip** — extend, negotiate as the candidate, re-extend revised terms
+   (`NEGOTIATING → OFFER`), accept.
+3. **Decline** — confirm the application lands on `WITHDRAWN` and the offer on `DECLINED`.
+4. **Multi-offer accept** — two live offers, accept one, confirm the other application is
+   `WITHDRAWN` and not `ARCHIVED`.
+5. **The board** — confirm Hired and Applied are inert, that an unscreened (`SUBMITTED`) card
+   cannot reach Interview while a `SCREENING` one can, and that a refused move still shows the
+   backend's message.
+6. **Re-run the §3 SQL** and confirm no status change since the migration lacks an audit row.
 
 ## 4. Rollback
 
