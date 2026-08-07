@@ -3,6 +3,8 @@ import { Module } from '@nestjs/common';
 // UserModule exports UserRepository; JobModule exports the JOB_REPOSITORY token.
 import { UserModule } from '../user/user.module';
 import { JobModule } from '../job/job.module';
+// Exports ApplicationScreeningService — the AI Recruiter screening step.
+import { MatchingModule } from '../matching/matching.module';
 
 import { ApplicationController } from './presentation/controllers/application.controller';
 import { ApplicationService } from './application.service';
@@ -11,7 +13,7 @@ import { ApplicationTimelineRepository } from './infrastructure/repositories/app
 import { ContactPersonRepository } from './infrastructure/repositories/contact-person.repository';
 
 @Module({
-  imports: [UserModule, JobModule],
+  imports: [UserModule, JobModule, MatchingModule],
   controllers: [ApplicationController],
   providers: [
     ApplicationService,

@@ -6,6 +6,7 @@ import { MatchingEmbeddingService } from './application/services/matching-embedd
 import { RecommendationsQueryService } from './application/services/recommendations-query.service';
 import { SkillGapService } from './application/services/skill-gap.service';
 import { JobMatchService } from './application/services/job-match.service';
+import { ApplicationScreeningService } from './application/services/application-screening.service';
 import { GenerationEvalService } from './evaluation/generation-eval.service';
 import { RetrievalEvalService } from './evaluation/retrieval-eval.service';
 import { MatchingController } from './presentation/controllers/matching.controller';
@@ -23,11 +24,13 @@ import { UserProfileUpdatedListener } from './listeners/user-profile-updated.lis
     RecommendationsQueryService,
     SkillGapService,
     JobMatchService,
+    ApplicationScreeningService,
     RetrievalEvalService,
     GenerationEvalService,
     JobPublishedListener,
     UserProfileUpdatedListener,
   ],
-  exports: [MatchingEmbeddingService],
+  // ApplicationScreeningService is consumed by ApplicationModule's apply flow.
+  exports: [MatchingEmbeddingService, ApplicationScreeningService],
 })
 export class MatchingModule {}

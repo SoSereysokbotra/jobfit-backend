@@ -77,7 +77,7 @@ verified company → published internal job → applications from several seeker
 - **Done when:** ≥1 verified company, ≥1 internal published job with requirements, ≥4
   applications from distinct résumés.
 
-### Phase 2 — Screening assessment
+### Phase 2 — Screening assessment ✅
 On application submit, compute and persist:
 `matchScore`, `requirementsTotal`, `requirementsCovered`, `missingRequirements[]`,
 `screenedAt`, then advance `SUBMITTED → SCREENING` with a timeline entry.
@@ -88,6 +88,32 @@ On application submit, compute and persist:
 - Screening failure must not fail the application. The row stays `SUBMITTED` and unscreened
   rather than the applicant losing their application to an AI outage.
 - **Done when:** applying produces a stored assessment; unit tests cover the failure path.
+
+### Phase 2 result — rank by coverage, NOT by match score
+
+Screening the four seeded candidates:
+
+| candidate | match score | requirements covered |
+|---|---|---|
+| `strong` | 50% | **6/7** |
+| `partial` | 46% | **3/7** |
+| `junior` | 46% | **1/7** |
+| `unrelated` | 46% | **0/7** |
+
+**Coverage separates them perfectly. The match score separates nothing** — a 4-point spread
+across a senior full-stack engineer and a graphic designer.
+
+The cause is not a scoring bug. These seeded candidates have no embeddings, so the `skills`
+sub-score is 0 for all four, and the remaining sub-scores (experience, location, salary) are
+near-identical because every seed profile uses the same city and salary band. The score is
+measuring the things they have in common.
+
+**Consequences, carried into Phase 3 and 5:**
+1. **Sort by requirements covered**, with match score as a tiebreak only.
+2. A match score with `skillsScored: false` behind it must not be presented as a ranking
+   signal — it is mostly noise.
+3. Phase 5's threshold should be expressed in **coverage**, not score. That is the number
+   the data actually supports.
 
 ### Phase 3 — Expose it to the employer
 Replace the always-null `matchScore` with the stored assessment on
@@ -130,6 +156,7 @@ Only now: decide what "strong candidate" means, from the Phase 1–4 data.
 |---|---|---|
 | 2026-08-07 | — | Plan written. Baseline above. |
 | 2026-08-07 | 1 | `scripts/seed-ai-recruiter-demo.ts`. Verified company + internal job with 7 real requirements + 4 candidates. Ranking matches the hand-written expectation exactly. |
+| 2026-08-07 | 2 | `ApplicationScreeningService` + 6 nullable `screen*` columns. Screens on submit, advances SUBMITTED→SCREENING. **Coverage ranks correctly; match score does not.** |
 
 ### Phase 1 result — the ranking is already correct
 

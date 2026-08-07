@@ -627,6 +627,22 @@ model Application {
   notes       String?
   coverLetter String?
 
+  // ── AI Recruiter: automatic screening at the moment of applying ──────────────
+  // A SNAPSHOT, never recomputed. It records what was true when this person applied;
+  // rewriting it as their résumé or the job changes would quietly rewrite history and
+  // make the employer's earlier decision unexplainable.
+  //
+  // All nullable: screening must never fail an application, so an AI/DB hiccup leaves
+  // the row unscreened rather than losing the candidate their application.
+  screenedAt                DateTime?
+  screenMatchScore          Float? // 0-100, DETERMINISTIC scorer (never the LLM fitScore)
+  screenRequirementsTotal   Int?
+  screenRequirementsCovered Int?
+  screenMissingRequirements String[] @default([])
+  // EMPLOYER when the employer wrote the requirements, AI_EXTRACTED when they were read
+  // out of the description. The employer is entitled to know which they are judging on.
+  screenRequirementsSource  String?
+
   // ── Employer module: pipeline review (Employer Phase 2) ─────────────────────
   employerNotes        String?
   reviewedByEmployerId String?

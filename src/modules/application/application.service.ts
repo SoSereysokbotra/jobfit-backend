@@ -24,6 +24,7 @@ import { ApplicationTimeline } from './domain/entities/application-timeline.enti
 import { ContactPerson } from './domain/entities/contact-person.entity';
 import { ApplicationStatus } from '@shared/kernel/enums/application-status.enum';
 import { SubmitApplicationDto } from './dto/submit-application.dto';
+import { ApplicationScreeningService } from '@modules/matching/application/services/application-screening.service';
 import { AddContactPersonDto } from './dto/add-contact-person.dto';
 import { ERROR_MESSAGES } from '@common/constants/error-messages';
 
@@ -36,6 +37,7 @@ export class ApplicationService {
     private readonly userRepository: UserRepository,
     @Inject(JOB_REPOSITORY) private readonly jobRepository: IJobRepository,
     private readonly eventBus: DomainEventBus,
+    private readonly screening: ApplicationScreeningService,
   ) {}
 
   async submitApplication(
@@ -84,6 +86,17 @@ export class ApplicationService {
       'Application submitted',
     );
     await this.publishEvents(application);
+
+    // AI Recruiter: assess the candidate against this job's stated requirements and move
+    // SUBMITTED -> SCREENING. Deliberately awaited rather than queued — it is a pgvector
+    // query plus string comparison (no LLM call; requirements were extracted and cached
+    // earlier), so it is fast enough to run inline, and the employer sees a screened
+    // application immediately rather than an unexplained gap.
+    //
+    // `screen` never throws: a scoring failure must not cost the candidate their
+    // application. The row simply stays SUBMITTED and unscreened.
+    await this.screening.screen(application.id);
+
     return application;
   }
 

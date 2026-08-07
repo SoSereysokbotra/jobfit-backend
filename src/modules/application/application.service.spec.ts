@@ -27,6 +27,7 @@ describe('ApplicationService.submitApplication — internal vs external', () => 
   let userRepository: { findById: jest.Mock };
   let jobRepository: { findById: jest.Mock };
   let eventBus: { publish: jest.Mock };
+  let screening: { screen: jest.Mock };
   let service: ApplicationService;
 
   beforeEach(() => {
@@ -38,6 +39,7 @@ describe('ApplicationService.submitApplication — internal vs external', () => 
     userRepository = { findById: jest.fn().mockResolvedValue(user) };
     jobRepository = { findById: jest.fn() };
     eventBus = { publish: jest.fn().mockResolvedValue(undefined) };
+    screening = { screen: jest.fn().mockResolvedValue({ screened: true }) };
 
     service = new ApplicationService(
       applicationRepository as never,
@@ -46,6 +48,7 @@ describe('ApplicationService.submitApplication — internal vs external', () => 
       userRepository as never,
       jobRepository as never,
       eventBus as never,
+      screening as never,
     );
   });
 
@@ -99,6 +102,24 @@ describe('ApplicationService.submitApplication — internal vs external', () => 
     expect(application.jobId).toBe('j1');
     expect(applicationRepository.save).toHaveBeenCalledTimes(1);
     expect(timelineRepository.addEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('screens the application after accepting it', async () => {
+    jobRepository.findById.mockResolvedValue(makeJob('INTERNAL'));
+
+    const application = await service.submitApplication('u1', { jobId: 'j1' } as never);
+
+    expect(screening.screen).toHaveBeenCalledWith(application.id);
+  });
+
+  it('does not screen an application it refused', async () => {
+    jobRepository.findById.mockResolvedValue(makeJob('EXTERNAL', 'https://themuse.com/1'));
+
+    await service
+      .submitApplication('u1', { jobId: 'j1' } as never)
+      .catch(() => undefined);
+
+    expect(screening.screen).not.toHaveBeenCalled();
   });
 
   it('still rejects a duplicate application to an INTERNAL job', async () => {
