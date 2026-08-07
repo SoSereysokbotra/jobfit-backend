@@ -5,11 +5,19 @@
 // operation is scoped to the employer's company (the authorization boundary).
 
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { ApplicationStatus } from '@prisma/client';
+// The lifecycle rules live with the Application aggregate; both the candidate and
+// employer paths must enforce the same ones.
+import {
+  EMPLOYER_SETTABLE_STATUSES,
+  isTransitionAllowed,
+} from '@modules/application/domain/entities/application.entity';
+import { ApplicationStatus as DomainStatus } from '@shared/kernel/enums/application-status.enum';
 import { EmployerContextService } from './employer-context.service';
 import { EmployerApplicationRepository } from '../../infrastructure/repositories/employer-application.repository';
 import { ListApplicationsQueryDto } from '../dtos/list-applications.query.dto';
@@ -81,6 +89,31 @@ export class EmployerApplicationService {
     const app = await this.requireOwnedApplication(userId, applicationId);
     const previousStatus = app.status;
     const newStatus = dto.newStatus as unknown as ApplicationStatus;
+
+    // Owning the job is NOT authorisation to record any outcome. WITHDRAWN, ACCEPTED and
+    // NEGOTIATING are the CANDIDATE's decisions: an employer setting WITHDRAWN would
+    // record that the candidate pulled out when they did not, and ACCEPTED that they took
+    // a job they never agreed to.
+    if (!EMPLOYER_SETTABLE_STATUSES.includes(newStatus as DomainStatus)) {
+      throw new ForbiddenException(
+        `${newStatus} is the candidate's decision to record, not yours.`,
+      );
+    }
+
+    // This path writes through Prisma rather than the Application aggregate, so it was
+    // bypassing the lifecycle rules entirely — any status could overwrite any other, and
+    // a candidate could be moved straight from SUBMITTED to ACCEPTED. Same rule table as
+    // the aggregate uses.
+    if (
+      !isTransitionAllowed(
+        previousStatus as unknown as DomainStatus,
+        newStatus as unknown as DomainStatus,
+      )
+    ) {
+      throw new BadRequestException(
+        `Invalid status transition: ${previousStatus} → ${newStatus}`,
+      );
+    }
 
     await this.appRepo.transitionStatus({
       applicationId,

@@ -78,6 +78,36 @@ export const CANDIDATE_SETTABLE_STATUSES: readonly ApplicationStatus[] = [
   ApplicationStatus.NEGOTIATING,
 ];
 
+/**
+ * Statuses an EMPLOYER may set on an application to their own job.
+ *
+ * The mirror of CANDIDATE_SETTABLE_STATUSES. WITHDRAWN, ACCEPTED and NEGOTIATING are
+ * absent on purpose: those are the CANDIDATE's decisions. An employer marking someone
+ * WITHDRAWN would record that the candidate pulled out when they did not; marking them
+ * ACCEPTED would record that they took a job they never agreed to.
+ */
+export const EMPLOYER_SETTABLE_STATUSES: readonly ApplicationStatus[] = [
+  ApplicationStatus.SCREENING,
+  ApplicationStatus.INTERVIEW,
+  ApplicationStatus.OFFER,
+  ApplicationStatus.REJECTED,
+  ApplicationStatus.ARCHIVED,
+];
+
+/**
+ * Is `to` reachable from `from`?
+ *
+ * Exported because the employer pipeline updates applications through Prisma directly
+ * rather than through this aggregate, and so was writing any status over any other —
+ * skipping stages entirely. One definition of the lifecycle, used by both paths.
+ */
+export function isTransitionAllowed(
+  from: ApplicationStatus,
+  to: ApplicationStatus,
+): boolean {
+  return (TRANSITIONS[from] ?? []).includes(to);
+}
+
 export interface ApplicationProps {
   userId: string;
   jobId: string;

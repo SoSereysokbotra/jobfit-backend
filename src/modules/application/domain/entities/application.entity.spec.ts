@@ -7,6 +7,8 @@
 import {
   Application,
   CANDIDATE_SETTABLE_STATUSES,
+  EMPLOYER_SETTABLE_STATUSES,
+  isTransitionAllowed,
 } from './application.entity';
 import { ApplicationStatus } from '@shared/kernel/enums/application-status.enum';
 
@@ -89,5 +91,55 @@ describe('CANDIDATE_SETTABLE_STATUSES', () => {
     // These record what the EMPLOYER decided. A candidate asserting one would fabricate
     // a hiring outcome inside the employer's own pipeline view.
     expect(CANDIDATE_SETTABLE_STATUSES).not.toContain(status);
+  });
+});
+
+describe('EMPLOYER_SETTABLE_STATUSES', () => {
+  it('lets an employer move a candidate through the hiring pipeline', () => {
+    expect(EMPLOYER_SETTABLE_STATUSES).toEqual(
+      expect.arrayContaining([
+        ApplicationStatus.SCREENING,
+        ApplicationStatus.INTERVIEW,
+        ApplicationStatus.OFFER,
+        ApplicationStatus.REJECTED,
+      ]),
+    );
+  });
+
+  it.each([
+    ApplicationStatus.WITHDRAWN,
+    ApplicationStatus.ACCEPTED,
+    ApplicationStatus.NEGOTIATING,
+  ])('does NOT let an employer set %s', (status) => {
+    // These are the CANDIDATE's decisions. An employer setting WITHDRAWN would record
+    // that the candidate pulled out when they did not; ACCEPTED, that they took a job
+    // they never agreed to.
+    expect(EMPLOYER_SETTABLE_STATUSES).not.toContain(status);
+  });
+
+  it('gives the two roles no overlapping decision except archiving', () => {
+    const overlap = EMPLOYER_SETTABLE_STATUSES.filter((s) =>
+      CANDIDATE_SETTABLE_STATUSES.includes(s),
+    );
+    expect(overlap).toEqual([ApplicationStatus.ARCHIVED]);
+  });
+});
+
+describe('isTransitionAllowed', () => {
+  // The employer pipeline writes through Prisma rather than the aggregate, so it needs
+  // the rule table as a function or it enforces nothing at all — which is what it did.
+  it('agrees with the aggregate', () => {
+    expect(
+      isTransitionAllowed(ApplicationStatus.SCREENING, ApplicationStatus.INTERVIEW),
+    ).toBe(true);
+    expect(
+      isTransitionAllowed(ApplicationStatus.SUBMITTED, ApplicationStatus.ACCEPTED),
+    ).toBe(false);
+  });
+
+  it('blocks jumping straight to a hire', () => {
+    expect(
+      isTransitionAllowed(ApplicationStatus.SUBMITTED, ApplicationStatus.OFFER),
+    ).toBe(false);
   });
 });
