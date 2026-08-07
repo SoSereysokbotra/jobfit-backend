@@ -24,10 +24,10 @@ row 6/9 → 0/10.** The denominator moved because Phase 4 found a tenth site the
 
 **jest 246 → 295, tsc clean in both repos.**
 
-⚠️ **NOT yet verified end to end.** Every phase is unit-tested against mocks; no flow has been
-exercised against a running database. The paths with genuinely new behaviour — reopen from
-`REJECTED`, `NEGOTIATING → OFFER`, and decline setting `WITHDRAWN` — have never touched
-Postgres. See §6 below.
+✅ **Verified end to end 2026-08-08** against the running stack and the real database —
+**33 of 33 checks passed**, including the paths with genuinely new behaviour (reopen from
+`REJECTED`, `NEGOTIATING → OFFER`, decline setting `WITHDRAWN`) and the board's per-card
+drop derivation driven in Chrome. See §6.
 
 ---
 
@@ -459,10 +459,53 @@ cd D:\Year2\Jobfit\jobfit-frontend && npx tsc --noEmit
 
 ---
 
-## 6. What still needs a running system
+## 6. End-to-end verification — DONE 2026-08-08
 
-The one thing no phase delivered. Bring up Redis → Ollama → AI service → backend → frontend
-and exercise:
+Run against the live stack (backend `:4000`, frontend `:3000`, the real Supabase database).
+**33 of 33 checks passed.** Seed accounts only; the four real users' applications were not
+touched, and all seed data was restored afterwards.
+
+| # | Check | Result |
+|---|---|---|
+| A | `availableActions` served, matching the rule table for **every** row | ✅ |
+| B | Employer → `ACCEPTED` from `OFFER` is 403, naming whose decision it is | ✅ |
+| B | Employer → `WITHDRAWN` is 403 | ✅ |
+| C | Skipping stages / moving backwards is 400 | ✅ |
+| D | `SCREENING → OFFER` (D1, skip the interview) | ✅ |
+| E | Negotiate round-trip incl. `NEGOTIATING → OFFER` (D3) | ✅ |
+| F | Declining sets `WITHDRAWN`; the offer records `DECLINED` | ✅ |
+| G | Reopen is **two audited steps** `REJECTED→SCREENING→OFFER`, never a teleport | ✅ |
+| H | Accepting is fully audited end to end | ✅ |
+| I | Accepting one offer **withdraws** the others (not `ARCHIVED`) | ✅ |
+| J | Board: Hired and Applied inert; per-card derivation proven in Chrome | ✅ |
+
+**The audit gap closed, measured on the same query as §3: 6 of 8 → 2 of 8.** The two
+remaining are historical rows written before the chokepoint existed — and both are
+fingerprints of the bugs this work fixed: `adca2cbf` (offer `DECLINED`, application
+`REJECTED` — the misattribution) and `3ecb67e2` (`ARCHIVED` from the old auto-archive).
+Every status change made through the new code path wrote both audit rows.
+
+**Check J is the sharpest.** With one unscreened (`SUBMITTED`) and one screened (`SCREENING`)
+candidate in the SAME "Applied" column, a real `DragEvent` probe showed:
+
+```
+Sophea Chan [Applied]  ->  Interview: inert       (SUBMITTED — nothing evaluated them)
+Rithy Meas  [Applied]  ->  Interview: DROPPABLE   (SCREENING)
+                           Offer:     DROPPABLE   (D1 live in the UI)
+```
+
+Same column, different answers — which a per-column rule could not have produced.
+
+### Reproducing it
+
+Drivers are in the session scratchpad (`e2e.js`, `flows.js`, `multi.js`, `board.js`). If this
+becomes routine, they are worth committing under `scripts/`.
+
+Note the Ollama/AI service was **not** running and screening still advanced applications —
+consistent with the design note in `application-screening.service.ts`: screening is a pgvector
+query plus string comparison, with requirements extracted and cached earlier. No LLM call.
+
+### Original checklist (kept for reference)
 
 1. **Reopen** — reject an application, then extend an offer to the same candidate. Expect two
    stage-history rows: `REJECTED → SCREENING` (`REOPENED`), then `SCREENING → OFFER`.
