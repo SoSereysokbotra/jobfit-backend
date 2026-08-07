@@ -121,7 +121,7 @@ Replace the always-null `matchScore` with the stored assessment on
 
 - **Done when:** the endpoint returns covered/total/missing per applicant, tests green.
 
-### Phase 4 — Employer applicant UI
+### Phase 4 — Employer applicant UI ✅
 `/employer/jobs/<id>/applicants` shows per candidate: score, ✓ covered, ✗ missing, sorted.
 
 - Must state when requirements were **AI-extracted** rather than employer-written — same
@@ -158,6 +158,21 @@ Only now: decide what "strong candidate" means, from the Phase 1–4 data.
 | 2026-08-07 | 1 | `scripts/seed-ai-recruiter-demo.ts`. Verified company + internal job with 7 real requirements + 4 candidates. Ranking matches the hand-written expectation exactly. |
 | 2026-08-07 | 2 | `ApplicationScreeningService` + 6 nullable `screen*` columns. Screens on submit, advances SUBMITTED→SCREENING. **Coverage ranks correctly; match score does not.** |
 | 2026-08-07 | 3 | `GET /employer/applications` returns the assessment, ordered best-first in SQL. Dead `matchScoresForJob` removed. |
+| 2026-08-07 | 4 | Applicants page shows "requirements met" as the lead column with the missing ones listed. Nullable score surfaced 6 latent bugs. |
+
+### Phase 4 result
+
+The applicants table leads with **requirements met**, not the score, and lists what each
+candidate fails to evidence — an employer can act on "missing Docker, CI/CD"; they cannot
+act on a bare percentage.
+
+**Making `match` nullable surfaced six places that assumed a number**, all previously
+written as `a.match > 0`. Two mattered:
+- the dashboard averaged unscreened candidates in as **0**, understating the pipeline;
+- `0%` and "never screened" rendered identically, so an unknown candidate looked unqualified.
+
+"Not screened" is now distinct from "0 of 7", and the AI-extracted provenance notice appears
+on the employer side too — they are judging candidates against those requirements.
 
 ### Phase 3 result — the employer list, as the API returns it
 
