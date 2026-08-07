@@ -8,6 +8,7 @@ import { MatchingModule } from '../matching/matching.module';
 
 import { ApplicationController } from './presentation/controllers/application.controller';
 import { ApplicationService } from './application.service';
+import { ApplicationTransitionService } from './domain/services/application-transition.service';
 import { ApplicationRepository } from './infrastructure/repositories/application.repository';
 import { ApplicationTimelineRepository } from './infrastructure/repositories/application-timeline.repository';
 import { ContactPersonRepository } from './infrastructure/repositories/contact-person.repository';
@@ -17,10 +18,13 @@ import { ContactPersonRepository } from './infrastructure/repositories/contact-p
   controllers: [ApplicationController],
   providers: [
     ApplicationService,
+    ApplicationTransitionService,
     ApplicationRepository,
     ApplicationTimelineRepository,
     ContactPersonRepository,
   ],
-  exports: [ApplicationService],
+  // ApplicationTransitionService is exported because the offer, employer and matching
+  // modules must all write status through it — that is the entire point of it existing.
+  exports: [ApplicationService, ApplicationTransitionService],
 })
 export class ApplicationModule {}
