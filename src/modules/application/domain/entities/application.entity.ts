@@ -108,6 +108,24 @@ export function isTransitionAllowed(
   return (TRANSITIONS[from] ?? []).includes(to);
 }
 
+/**
+ * What the CANDIDATE can actually do to an application in this state.
+ *
+ * Both rules at once: reachable from `from`, AND theirs to make. Served to the client so
+ * the UI offers only real options — listing every candidate-settable status regardless of
+ * the current stage produced a menu where each choice answered with "Invalid status
+ * transition", which reads as broken rather than as "there is nothing to do here".
+ *
+ * An empty array is a legitimate answer: an ARCHIVED application is finished.
+ */
+export function candidateActionsFrom(
+  from: ApplicationStatus,
+): ApplicationStatus[] {
+  return (TRANSITIONS[from] ?? []).filter((s) =>
+    CANDIDATE_SETTABLE_STATUSES.includes(s),
+  );
+}
+
 export interface ApplicationProps {
   userId: string;
   jobId: string;
