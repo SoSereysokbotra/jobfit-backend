@@ -7,10 +7,20 @@ import { Injectable } from '@nestjs/common';
 import { Application, ApplicationStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '@infra/prisma/prisma.service';
 
+// The unread count rides along with the list so the board can badge a card without a
+// second request per candidate. A state badge cannot tell message 1 from message 5, which
+// is the whole reason later messages went unnoticed.
+const OFFER_UNREAD = {
+  select: {
+    _count: { select: { messages: { where: { authorRole: 'CANDIDATE', readAt: null } } } },
+  },
+} as const;
+
 export type PipelineApplicationRow = Prisma.ApplicationGetPayload<{
   include: {
     user: { select: { id: true; name: true; email: true } };
     job: { select: { id: true; title: true; companyId: true } };
+    offer: typeof OFFER_UNREAD;
   };
 }>;
 
@@ -55,6 +65,7 @@ export class EmployerApplicationRepository {
       include: {
         user: { select: { id: true, name: true, email: true } },
         job: { select: { id: true, title: true, companyId: true } },
+        offer: OFFER_UNREAD,
       },
       // Best-first: most requirements evidenced, then match score, then recency.
       //

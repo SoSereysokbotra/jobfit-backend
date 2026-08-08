@@ -65,6 +65,14 @@ export class EmployerApplicationResponseDto {
   })
   archived: boolean;
 
+  @ApiProperty({
+    description:
+      'Messages from this candidate about their offer that you have not read. Drives the ' +
+      'board badge — a status alone cannot distinguish a first message from a fifth, ' +
+      'which is why later messages went unnoticed.',
+  })
+  unreadMessages: number;
+
   @ApiPropertyOptional({ type: String, nullable: true }) employerNotes: string | null;
 
   @ApiProperty({
@@ -99,6 +107,7 @@ export class EmployerApplicationResponseDto {
     candidate: { id: string; name: string; email: string };
     status: ApplicationStatus;
     archived: boolean;
+    unreadMessages: number;
     employerNotes: string | null;
     screening: ScreeningSummaryDto;
     appliedAt: Date;
@@ -109,6 +118,7 @@ export class EmployerApplicationResponseDto {
     this.candidate = row.candidate;
     this.status = row.status;
     this.archived = row.archived;
+    this.unreadMessages = row.unreadMessages;
     this.employerNotes = row.employerNotes;
     this.screening = row.screening;
     this.appliedAt = row.appliedAt;
