@@ -6,6 +6,7 @@
 import {
   Body,
   Controller,
+  Get,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -25,6 +26,22 @@ import { EmployerOfferResponseDto } from './dtos/offer-response.dto';
 @Controller('employer/applications')
 export class EmployerOfferController {
   constructor(private readonly offers: OfferService) {}
+
+  @Get(':id/offer')
+  @ApiOperation({
+    summary: 'Read the offer on an application, including its note thread',
+    description:
+      'The `notes` field is the thread on this offer: your own note from when you ' +
+      'extended it, plus any message the candidate sent when opening a negotiation, ' +
+      'prefixed `[Candidate]`. 404 when no offer has been extended.',
+  })
+  @ApiOkResponse({ type: EmployerOfferResponseDto })
+  get(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) applicationId: string,
+  ): Promise<EmployerOfferResponseDto> {
+    return this.offers.getOfferForEmployer(user.id, applicationId);
+  }
 
   @Post(':id/offer')
   @ApiOperation({ summary: 'Extend (or re-extend) an offer on an application' })

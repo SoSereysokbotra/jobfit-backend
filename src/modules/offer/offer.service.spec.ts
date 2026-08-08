@@ -125,6 +125,31 @@ describe('OfferService status writes', () => {
     });
   });
 
+  describe('getOfferForEmployer', () => {
+    it('returns the offer with its note thread', async () => {
+      // Without this the employer had no read path at all, so a candidate's negotiation
+      // message sat in a column nobody on their side could reach.
+      const { service } = setup({
+        offer: { notes: 'Excited to have you.\n[Candidate] Could we revisit base?' },
+      });
+
+      const offer = await service.getOfferForEmployer('emp-1', 'app-1');
+
+      expect(offer.notes).toContain('[Candidate] Could we revisit base?');
+    });
+
+    it('refuses an application belonging to another company', async () => {
+      const { service, prisma } = setup();
+      prisma.application.findUnique.mockResolvedValue({
+        id: 'app-1', status: 'OFFER', job: { companyId: 'someone-else' },
+      });
+
+      await expect(service.getOfferForEmployer('emp-1', 'app-1')).rejects.toThrow(
+        'This application is for another company.',
+      );
+    });
+  });
+
   describe('withdrawOffer', () => {
     it('rescinds as the EMPLOYER and rejects the application', async () => {
       const { service, transitions } = setup({ appStatus: ApplicationStatus.OFFER });
