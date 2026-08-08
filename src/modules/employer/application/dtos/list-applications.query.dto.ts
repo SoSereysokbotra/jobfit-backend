@@ -2,7 +2,15 @@
 //
 // Query params for GET /employer/applications (pipeline view).
 
-import { IsEnum, IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsUUID,
+  Max,
+  Min,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { ApplicationStatus } from '@shared/kernel/enums/application-status.enum';
@@ -17,6 +25,17 @@ export class ListApplicationsQueryDto {
   @IsOptional()
   @IsEnum(ApplicationStatus)
   status?: ApplicationStatus;
+
+  @ApiPropertyOptional({
+    default: false,
+    description:
+      'Include the applications YOU archived. The candidate’s own archiving is a ' +
+      'separate flag and never hides anything from this board.',
+  })
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  includeArchived = false;
 
   @ApiPropertyOptional({ default: 0, minimum: 0 })
   @IsOptional()

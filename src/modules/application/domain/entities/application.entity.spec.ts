@@ -36,14 +36,20 @@ describe('Application status transitions', () => {
     expect(application.status).toBe(ApplicationStatus.WITHDRAWN);
   });
 
-  it('allows archiving a finished application', () => {
+  it('treats a finished application as finished', () => {
+    // ARCHIVED used to be reachable from here so a candidate could tidy their list. A
+    // status is shared, so tidying rewrote the employer's board and erased the outcome
+    // underneath it — an accepted job stopped saying it had been accepted. Archiving is a
+    // view preference now, in per-actor columns, and no longer a state anyone can enter.
     for (const status of [
       ApplicationStatus.ACCEPTED,
       ApplicationStatus.REJECTED,
       ApplicationStatus.WITHDRAWN,
     ]) {
       const application = make(status);
-      expect(() => application.updateStatus(ApplicationStatus.ARCHIVED)).not.toThrow();
+      expect(() => application.updateStatus(ApplicationStatus.ARCHIVED)).toThrow(
+        /Invalid status transition/,
+      );
     }
   });
 
@@ -73,15 +79,18 @@ describe('Application status transitions', () => {
 });
 
 describe('CANDIDATE_SETTABLE_STATUSES', () => {
-  it('lets a candidate withdraw, archive, and answer an offer', () => {
+  it('lets a candidate withdraw and answer an offer', () => {
     expect(CANDIDATE_SETTABLE_STATUSES).toEqual(
       expect.arrayContaining([
         ApplicationStatus.WITHDRAWN,
-        ApplicationStatus.ARCHIVED,
         ApplicationStatus.ACCEPTED,
         ApplicationStatus.NEGOTIATING,
       ]),
     );
+  });
+
+  it('does not treat tidying your own list as a decision about the hire', () => {
+    expect(CANDIDATE_SETTABLE_STATUSES).not.toContain(ApplicationStatus.ARCHIVED);
   });
 
   it.each([
@@ -119,11 +128,13 @@ describe('EMPLOYER_SETTABLE_STATUSES', () => {
     expect(EMPLOYER_SETTABLE_STATUSES).not.toContain(status);
   });
 
-  it('gives the two roles no overlapping decision except archiving', () => {
+  it('gives the two roles no overlapping decision at all', () => {
+    // ARCHIVED was the single shared one, and sharing it is precisely what let a
+    // candidate's housekeeping edit the employer's board.
     const overlap = EMPLOYER_SETTABLE_STATUSES.filter((s) =>
       CANDIDATE_SETTABLE_STATUSES.includes(s),
     );
-    expect(overlap).toEqual([ApplicationStatus.ARCHIVED]);
+    expect(overlap).toEqual([]);
   });
 });
 
@@ -165,10 +176,11 @@ describe('employerActionsFrom', () => {
     // withdrawing are the candidate's replies.
     [ApplicationStatus.OFFER, [ApplicationStatus.REJECTED]],
     [ApplicationStatus.NEGOTIATING, [ApplicationStatus.OFFER, ApplicationStatus.REJECTED]],
-    [ApplicationStatus.ACCEPTED, [ApplicationStatus.ARCHIVED]],
+    // Nothing follows a hire. Hiding the card is a view preference, not a move.
+    [ApplicationStatus.ACCEPTED, []],
     // Reopening a closed application is an employer action (D2).
-    [ApplicationStatus.REJECTED, [ApplicationStatus.SCREENING, ApplicationStatus.ARCHIVED]],
-    [ApplicationStatus.WITHDRAWN, [ApplicationStatus.ARCHIVED]],
+    [ApplicationStatus.REJECTED, [ApplicationStatus.SCREENING]],
+    [ApplicationStatus.WITHDRAWN, []],
     [ApplicationStatus.ARCHIVED, []],
   ])('from %s', (from, expected) => {
     expect(employerActionsFrom(from as ApplicationStatus)).toEqual(expected);
@@ -183,14 +195,14 @@ describe('employerActionsFrom', () => {
     expect(every).not.toContain(ApplicationStatus.NEGOTIATING);
   });
 
-  it('mirrors candidateActionsFrom rather than duplicating its logic', () => {
-    // Both are TRANSITIONS filtered by a settable list, so no status may appear in both
-    // answers for the same state except ARCHIVED — the one decision either party can make.
+  it('never offers the same move to both parties', () => {
+    // Both are TRANSITIONS filtered by a settable list, so for any given state the two
+    // answers are disjoint: every move belongs to exactly one party.
     for (const status of Object.values(ApplicationStatus)) {
       const overlap = employerActionsFrom(status).filter((s) =>
         candidateActionsFrom(status).includes(s),
       );
-      expect(overlap.filter((s) => s !== ApplicationStatus.ARCHIVED)).toEqual([]);
+      expect(overlap).toEqual([]);
     }
   });
 });

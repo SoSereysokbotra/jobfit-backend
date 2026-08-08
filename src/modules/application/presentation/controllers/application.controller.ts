@@ -9,6 +9,7 @@
 import {
   Body,
   Controller,
+  Delete,
   ForbiddenException,
   Get,
   HttpCode,
@@ -59,12 +60,47 @@ export class ApplicationController {
   async list(
     @CurrentUser() user: AuthenticatedUser,
     @Query('status') status?: ApplicationStatus,
+    @Query('includeArchived') includeArchived?: string,
   ): Promise<ApplicationResponseDto[]> {
-    const applications = await this.applicationService.getApplications(user.id);
+    const applications = await this.applicationService.getApplications(
+      user.id,
+      0,
+      20,
+      includeArchived === 'true',
+    );
     const filtered = status
       ? applications.filter((a) => a.status === status)
       : applications;
     return filtered.map((a) => new ApplicationResponseDto(a));
+  }
+
+  @Post(':id/archive')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Hide an application from your own list',
+    description:
+      'A view preference, not a decision. The application keeps its real status and the ' +
+      'employer still sees it exactly as before — they have a separate flag of their own. ' +
+      'This replaces the old ARCHIVED status, under which tidying your list removed a ' +
+      'hire from the employer’s board and erased that you had been hired.',
+  })
+  async archive(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<void> {
+    await this.assertOwned(id, user);
+    await this.applicationService.setArchived(id, true);
+  }
+
+  @Delete(':id/archive')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Restore an application to your list' })
+  async unarchive(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<void> {
+    await this.assertOwned(id, user);
+    await this.applicationService.setArchived(id, false);
   }
 
   @Get(':id')

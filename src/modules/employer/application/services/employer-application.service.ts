@@ -44,6 +44,7 @@ export class EmployerApplicationService {
       companyId: ctx.companyId,
       jobId: query.jobId,
       status: query.status as unknown as ApplicationStatus,
+      includeArchived: query.includeArchived,
       skip: query.skip,
       take: query.take,
     });
@@ -66,6 +67,7 @@ export class EmployerApplicationService {
             email: row.user.email,
           },
           status: row.status,
+          archived: row.archivedByEmployerAt != null,
           employerNotes: row.employerNotes,
           screening: {
             screenedAt: row.screenedAt,
@@ -105,6 +107,21 @@ export class EmployerApplicationService {
       newStatus as unknown as ApplicationStatus,
       previousStatus as unknown as ApplicationStatus,
     );
+  }
+
+  /**
+   * Hide (or restore) an application on this employer's board.
+   *
+   * Not a status change: no transition, no audit row. It writes the employer's own column,
+   * so the candidate's list is untouched — and, critically, the reverse is also true.
+   */
+  async setArchived(
+    userId: string,
+    applicationId: string,
+    archived: boolean,
+  ): Promise<void> {
+    await this.requireOwnedApplication(userId, applicationId);
+    await this.appRepo.setArchivedByEmployer(applicationId, userId, archived);
   }
 
   async addNotes(

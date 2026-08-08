@@ -55,6 +55,16 @@ export class EmployerApplicationResponseDto {
   candidate: { id: string; name: string; email: string };
 
   @ApiProperty({ enum: ApplicationStatus }) status: ApplicationStatus;
+
+  @ApiProperty({
+    description:
+      'Whether YOU have hidden this from your board. A view preference of your own — the ' +
+      'candidate has a separate flag, and theirs can never remove a row from your board. ' +
+      'It used to be able to: archiving was a shared status, so a candidate tidying an ' +
+      'accepted job dropped it out of Hired and filed them under rejections.',
+  })
+  archived: boolean;
+
   @ApiPropertyOptional({ type: String, nullable: true }) employerNotes: string | null;
 
   @ApiProperty({
@@ -88,6 +98,7 @@ export class EmployerApplicationResponseDto {
     jobTitle: string;
     candidate: { id: string; name: string; email: string };
     status: ApplicationStatus;
+    archived: boolean;
     employerNotes: string | null;
     screening: ScreeningSummaryDto;
     appliedAt: Date;
@@ -97,6 +108,7 @@ export class EmployerApplicationResponseDto {
     this.jobTitle = row.jobTitle;
     this.candidate = row.candidate;
     this.status = row.status;
+    this.archived = row.archived;
     this.employerNotes = row.employerNotes;
     this.screening = row.screening;
     this.appliedAt = row.appliedAt;

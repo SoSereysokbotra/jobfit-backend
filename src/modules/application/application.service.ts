@@ -134,13 +134,35 @@ export class ApplicationService {
     return this.getApplication(applicationId);
   }
 
-  /** A user's applications, newest first, paginated. */
+  /** A user's applications, newest first, paginated. Their own archived ones are hidden. */
   async getApplications(
     userId: string,
     skip = 0,
     take = 20,
+    includeArchived = false,
   ): Promise<Application[]> {
-    return this.applicationRepository.findByUserId(userId, skip, take);
+    return this.applicationRepository.findByUserId(
+      userId,
+      skip,
+      take,
+      includeArchived,
+    );
+  }
+
+  /**
+   * Hide (or restore) an application on the candidate's own list.
+   *
+   * Not a status change, so it does not go through the transition service and writes no
+   * audit row — nothing about the hire has changed. It used to be the ARCHIVED status,
+   * which meant tidying your list edited the employer's board and erased the fact that
+   * you had been hired.
+   */
+  async setArchived(applicationId: string, archived: boolean): Promise<void> {
+    await this.getApplication(applicationId); // 404 if it does not exist
+    await this.applicationRepository.setArchivedByCandidate(
+      applicationId,
+      archived,
+    );
   }
 
   async getApplicationTimeline(

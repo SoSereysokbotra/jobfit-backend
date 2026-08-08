@@ -6,6 +6,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -61,6 +62,32 @@ export class EmployerApplicationController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<ApplicationStatusUpdatedDto> {
     return this.appService.updateStatus(user.id, id, dto);
+  }
+
+  @Post(':id/archive')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Hide an application from your board',
+    description:
+      'A view preference, not a decision: no status change and no audit row. The ' +
+      'candidate still sees the application exactly as before. This replaces the old ' +
+      'shared ARCHIVED status, under which either side’s tidying rewrote the other’s view.',
+  })
+  archive(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<void> {
+    return this.appService.setArchived(user.id, id, true);
+  }
+
+  @Delete(':id/archive')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Restore an application to your board' })
+  unarchive(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<void> {
+    return this.appService.setArchived(user.id, id, false);
   }
 
   @Post(':id/notes')

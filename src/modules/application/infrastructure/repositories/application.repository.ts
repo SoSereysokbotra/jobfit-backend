@@ -57,19 +57,37 @@ export class ApplicationRepository implements IRepository<Application> {
     return row ? this.mapToDomain(row) : null;
   }
 
-  /** A user's applications, newest first, paginated. */
+  /**
+   * A user's applications, newest first, paginated.
+   *
+   * Hides the ones THEY archived. The employer's own archiving is a different column and
+   * has no effect here — that separation is the whole point of the two flags.
+   */
   async findByUserId(
     userId: string,
     skip = 0,
     take = 20,
+    includeArchived = false,
   ): Promise<Application[]> {
     const rows = await this.prisma.application.findMany({
-      where: { userId, deletedAt: null },
+      where: {
+        userId,
+        deletedAt: null,
+        ...(includeArchived ? {} : { archivedByCandidateAt: null }),
+      },
       orderBy: { appliedAt: 'desc' },
       skip,
       take,
     });
     return rows.map((r) => this.mapToDomain(r));
+  }
+
+  /** Hide (or restore) an application on the CANDIDATE's list only. */
+  async setArchivedByCandidate(id: string, archived: boolean): Promise<void> {
+    await this.prisma.application.update({
+      where: { id },
+      data: { archivedByCandidateAt: archived ? new Date() : null },
+    });
   }
 
   async findByJobId(jobId: string): Promise<Application[]> {
@@ -114,6 +132,7 @@ export class ApplicationRepository implements IRepository<Application> {
         appliedAt: raw.appliedAt,
         notes: raw.notes ?? undefined,
         coverLetter: raw.coverLetter ?? undefined,
+        archivedByCandidateAt: raw.archivedByCandidateAt,
         createdAt: raw.createdAt,
         updatedAt: raw.updatedAt,
       },
