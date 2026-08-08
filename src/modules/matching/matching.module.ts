@@ -1,4 +1,8 @@
 import { Module } from '@nestjs/common';
+// Screening advances SUBMITTED -> SCREENING, and does it through the same road as everyone
+// else. Importing the transition module rather than ApplicationModule keeps this acyclic:
+// ApplicationModule imports MatchingModule for the apply flow.
+import { ApplicationTransitionModule } from '../application/application-transition.module';
 import { ComputeMatchScoreUseCase } from './application/use-cases/compute-match-score.use-case';
 import { MatchExternalJobUseCase } from './application/use-cases/match-external-job.use-case';
 import { RecomputeUserMatchesUseCase } from './application/use-cases/recompute-user-matches.use-case';
@@ -15,6 +19,7 @@ import { UserProfileUpdatedListener } from './listeners/user-profile-updated.lis
 
 // PrismaService (global) and AiClient (global AiModule) inject without extra imports.
 @Module({
+  imports: [ApplicationTransitionModule],
   controllers: [MatchingController],
   providers: [
     MatchingEmbeddingService,

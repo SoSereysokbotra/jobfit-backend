@@ -17,6 +17,9 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@infra/prisma/prisma.service';
+import { ApplicationTransitionService } from '@modules/application/domain/services/application-transition.service';
+import { ApplicationStatus } from '@shared/kernel/enums/application-status.enum';
+import { TransitionActor } from '@shared/kernel/enums/transition-actor.enum';
 import { JobMatchService } from './job-match.service';
 import { SkillGapService } from './skill-gap.service';
 
@@ -48,6 +51,7 @@ export class ApplicationScreeningService {
     private readonly prisma: PrismaService,
     private readonly jobMatch: JobMatchService,
     private readonly skillGap: SkillGapService,
+    private readonly transitions: ApplicationTransitionService,
   ) {}
 
   /**
@@ -92,21 +96,23 @@ export class ApplicationScreeningService {
           screenRequirementsCovered: outcome.requirementsCovered,
           screenMissingRequirements: outcome.missingRequirements,
           screenRequirementsSource: outcome.requirementsSource,
-          // Only ever SUBMITTED -> SCREENING. Anything further is the employer's call.
-          ...(application.status === 'SUBMITTED' ? { status: 'SCREENING' as const } : {}),
         },
       });
 
+      // Only ever SUBMITTED -> SCREENING; anything further is the employer's call. The
+      // guard stays because it decides whether a move is WANTED — an application an
+      // employer already advanced needs no move, and asking for one would be an error
+      // rather than a no-op. Whether the move is ALLOWED is the transition service's
+      // question, and it answers it the same way for SYSTEM as for anyone else.
       if (application.status === 'SUBMITTED') {
-        await this.prisma.applicationTimeline.create({
-          data: {
-            applicationId: application.id,
-            status: 'SCREENING',
-            eventType: 'SCREENED',
-            description:
-              `Automatic screening: ${outcome.requirementsCovered} of ` +
-              `${outcome.requirementsTotal} stated requirements evidenced by the résumé.`,
-          },
+        await this.transitions.transition({
+          applicationId: application.id,
+          newStatus: ApplicationStatus.SCREENING,
+          actor: TransitionActor.SYSTEM,
+          eventType: 'SCREENED',
+          description:
+            `Automatic screening: ${outcome.requirementsCovered} of ` +
+            `${outcome.requirementsTotal} stated requirements evidenced by the résumé.`,
         });
       }
 

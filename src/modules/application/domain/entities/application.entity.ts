@@ -9,7 +9,7 @@ import { ApplicationSubmittedEvent } from '../events/application-submitted.event
 import { ApplicationStatusChangedEvent } from '../events/application-status-changed.event';
 
 /**
- * Allowed status transitions. Terminal states map to [] (or to ARCHIVED).
+ * Allowed status transitions. Terminal states map to [].
  *
  * WITHDRAWN is reachable from EVERY active stage. A candidate can always walk away —
  * they took another job, or lost interest — and the system must not trap them in a
@@ -21,8 +21,15 @@ import { ApplicationStatusChangedEvent } from '../events/application-status-chan
  * everybody. A merely narrow rule turned into one that blocked the single action a
  * candidate is unconditionally entitled to take.
  *
- * ARCHIVED is reachable from the terminal states so a candidate can tidy their list
- * without destroying the record.
+ * ARCHIVED is NO LONGER a destination. It was reachable from the terminal states so a
+ * candidate could tidy their list — but a status is shared, so tidying rewrote a record
+ * the other party reads: archiving an accepted job removed it from the employer's Hired
+ * column and filed a hired candidate under rejections. It also overwrote the status
+ * beneath it, so the row stopped saying the person had been hired at all. Archiving is a
+ * view preference and now lives in per-actor columns (archivedByCandidateAt /
+ * archivedByEmployerAt) where one side's housekeeping cannot edit the other's.
+ *
+ * The enum value survives for rows written before this change; nothing produces it.
  */
 const TRANSITIONS: Record<ApplicationStatus, ApplicationStatus[]> = {
   [ApplicationStatus.DRAFT]: [
@@ -34,8 +41,13 @@ const TRANSITIONS: Record<ApplicationStatus, ApplicationStatus[]> = {
     ApplicationStatus.REJECTED,
     ApplicationStatus.WITHDRAWN,
   ],
+  // SCREENING -> OFFER (D1) lets an employer skip the interview for a candidate they are
+  // already convinced by. The offer module allowed this all along by writing status
+  // straight through Prisma; the choice is now made here, once, where everyone can see it.
+  // SUBMITTED -> OFFER is deliberately NOT allowed: that is a candidate nothing evaluated.
   [ApplicationStatus.SCREENING]: [
     ApplicationStatus.INTERVIEW,
+    ApplicationStatus.OFFER,
     ApplicationStatus.REJECTED,
     ApplicationStatus.WITHDRAWN,
   ],
@@ -50,14 +62,25 @@ const TRANSITIONS: Record<ApplicationStatus, ApplicationStatus[]> = {
     ApplicationStatus.REJECTED,
     ApplicationStatus.WITHDRAWN,
   ],
+  // NEGOTIATING -> OFFER is how a negotiation ends: the employer puts revised terms on the
+  // table. The offer module has always supported re-extending during negotiation
+  // (updateOffer treats NEGOTIATING as editable), so without this the supported flow would
+  // start failing the moment it went through the transition rules.
   [ApplicationStatus.NEGOTIATING]: [
+    ApplicationStatus.OFFER,
     ApplicationStatus.ACCEPTED,
     ApplicationStatus.REJECTED,
     ApplicationStatus.WITHDRAWN,
   ],
-  [ApplicationStatus.ACCEPTED]: [ApplicationStatus.ARCHIVED],
-  [ApplicationStatus.REJECTED]: [ApplicationStatus.ARCHIVED],
-  [ApplicationStatus.WITHDRAWN]: [ApplicationStatus.ARCHIVED],
+  [ApplicationStatus.ACCEPTED]: [],
+  // REJECTED -> SCREENING (D2) reopens a closed application. Re-extending an offer to a
+  // candidate who was rejected — or who declined — worked before these rules were enforced,
+  // because extendOffer upserts and resets the offer. Reopening returns them to the
+  // pipeline rather than teleporting them to OFFER, so the record shows the stage they
+  // actually re-entered. WITHDRAWN gets no such door: walking away is the candidate's
+  // decision, and an employer must not undo it.
+  [ApplicationStatus.REJECTED]: [ApplicationStatus.SCREENING],
+  [ApplicationStatus.WITHDRAWN]: [],
   [ApplicationStatus.ARCHIVED]: [],
 };
 
@@ -70,10 +93,12 @@ const TRANSITIONS: Record<ApplicationStatus, ApplicationStatus[]> = {
  *
  * ACCEPTED and NEGOTIATING are the candidate's genuine replies to an offer. TRANSITIONS
  * already confines them to the OFFER stage, so they cannot be reached early.
+ *
+ * ARCHIVED was here. Tidying your own list is not a statement about the hire, so it is no
+ * longer a status at all — see the note on TRANSITIONS.
  */
 export const CANDIDATE_SETTABLE_STATUSES: readonly ApplicationStatus[] = [
   ApplicationStatus.WITHDRAWN,
-  ApplicationStatus.ARCHIVED,
   ApplicationStatus.ACCEPTED,
   ApplicationStatus.NEGOTIATING,
 ];
@@ -91,7 +116,6 @@ export const EMPLOYER_SETTABLE_STATUSES: readonly ApplicationStatus[] = [
   ApplicationStatus.INTERVIEW,
   ApplicationStatus.OFFER,
   ApplicationStatus.REJECTED,
-  ApplicationStatus.ARCHIVED,
 ];
 
 /**
@@ -126,6 +150,28 @@ export function candidateActionsFrom(
   );
 }
 
+/**
+ * What the EMPLOYER can actually do to an application in this state. The mirror of
+ * candidateActionsFrom, and served on the pipeline DTO for the same reason.
+ *
+ * The employer board offered every column as a drop target regardless of where a card
+ * was, so "Hired" — which maps to ACCEPTED, the candidate's decision — was a drop target
+ * that refused 100% of the time. Serving the real answer lets the UI derive what is
+ * possible instead of keeping its own copy of these rules, which then rots.
+ *
+ * Worth noting what this returns from SUBMITTED: [SCREENING, REJECTED], NOT INTERVIEW.
+ * Automatic screening never throws, so when the AI service is down applications stay in
+ * SUBMITTED — and those cards sit in the same board column as SCREENING ones. A rule
+ * derived per column rather than per card gets exactly those candidates wrong.
+ */
+export function employerActionsFrom(
+  from: ApplicationStatus,
+): ApplicationStatus[] {
+  return (TRANSITIONS[from] ?? []).filter((s) =>
+    EMPLOYER_SETTABLE_STATUSES.includes(s),
+  );
+}
+
 export interface ApplicationProps {
   userId: string;
   jobId: string;
@@ -134,6 +180,8 @@ export interface ApplicationProps {
   appliedAt?: Date;
   notes?: string;
   coverLetter?: string;
+  /** When the CANDIDATE hid this from their own list. Never affects the employer's view. */
+  archivedByCandidateAt?: Date | null;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -146,6 +194,7 @@ export class Application extends AggregateRoot {
   appliedAt: Date;
   notes?: string;
   coverLetter?: string;
+  archivedByCandidateAt?: Date | null;
 
   constructor(props: ApplicationProps, id?: string) {
     super(props, id);
@@ -160,6 +209,7 @@ export class Application extends AggregateRoot {
     this.appliedAt = props.appliedAt ?? new Date();
     this.notes = props.notes;
     this.coverLetter = props.coverLetter;
+    this.archivedByCandidateAt = props.archivedByCandidateAt ?? null;
   }
 
   /** New application — raises ApplicationSubmittedEvent. */

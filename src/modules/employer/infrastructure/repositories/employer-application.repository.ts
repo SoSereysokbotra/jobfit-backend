@@ -35,6 +35,7 @@ export class EmployerApplicationRepository {
     companyId: string;
     jobId?: string;
     status?: ApplicationStatus;
+    includeArchived?: boolean;
     skip: number;
     take: number;
   }): Promise<PipelineApplicationRow[]> {
@@ -44,6 +45,10 @@ export class EmployerApplicationRepository {
     };
     if (params.jobId) where.jobId = params.jobId;
     if (params.status) where.status = params.status;
+    // The EMPLOYER's own archive flag. The candidate's is a different column and does not
+    // reach this query — a candidate tidying their list must never remove a hire from
+    // this board, which is exactly what the old shared ARCHIVED status did.
+    if (!params.includeArchived) where.archivedByEmployerAt = null;
 
     return this.prisma.application.findMany({
       where,
@@ -73,35 +78,22 @@ export class EmployerApplicationRepository {
     });
   }
 
-  /**
-   * Move an application to a new status and record the transition in one transaction:
-   * updates status + reviewedByEmployerId, and appends a stage-history row.
-   */
-  async transitionStatus(params: {
-    applicationId: string;
-    previousStatus: ApplicationStatus;
-    newStatus: ApplicationStatus;
-    employerUserId: string;
-    notes?: string;
-  }): Promise<Application> {
-    return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.application.update({
-        where: { id: params.applicationId },
-        data: {
-          status: params.newStatus,
-          reviewedByEmployerId: params.employerUserId,
-        },
-      });
-      await tx.applicationStageHistory.create({
-        data: {
-          applicationId: params.applicationId,
-          previousStatus: params.previousStatus,
-          newStatus: params.newStatus,
-          movedByUserId: params.employerUserId,
-          notes: params.notes ?? null,
-        },
-      });
-      return updated;
+  // transitionStatus lived here. It was one of only two status writes that validated
+  // anything, and it still re-stated the lifecycle rather than sharing it — so the offer
+  // module could skip stages this path refused. ApplicationTransitionService owns it now.
+
+  /** Hide (or restore) an application on the EMPLOYER's board only. */
+  setArchivedByEmployer(
+    applicationId: string,
+    employerUserId: string,
+    archived: boolean,
+  ): Promise<Application> {
+    return this.prisma.application.update({
+      where: { id: applicationId },
+      data: {
+        archivedByEmployerAt: archived ? new Date() : null,
+        reviewedByEmployerId: employerUserId,
+      },
     });
   }
 

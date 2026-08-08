@@ -42,6 +42,14 @@ export class ApplicationResponseDto {
   })
   availableActions: ApplicationStatus[];
 
+  @ApiProperty({
+    description:
+      'Whether YOU have hidden this from your own list. Purely a view preference — it ' +
+      'says nothing about the application and is invisible to the employer, who has a ' +
+      'separate flag of their own.',
+  })
+  archived: boolean;
+
   @ApiProperty()
   createdAt: Date;
 
@@ -55,6 +63,7 @@ export class ApplicationResponseDto {
     this.resumeId = application.resumeId;
     this.status = application.status;
     this.availableActions = candidateActionsFrom(application.status);
+    this.archived = application.archivedByCandidateAt != null;
     this.appliedAt = application.appliedAt;
     this.notes = application.notes;
     this.coverLetter = application.coverLetter;

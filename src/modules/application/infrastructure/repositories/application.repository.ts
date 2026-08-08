@@ -14,24 +14,38 @@ import { ApplicationStatus } from '@shared/kernel/enums/application-status.enum'
 export class ApplicationRepository implements IRepository<Application> {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Persist the aggregate.
+   *
+   * `status` is deliberately absent from the UPDATE branch. Changing the status of an
+   * application that already exists is a transition, and transitions go through
+   * ApplicationTransitionService — where they are validated, attributed to an actor, and
+   * audited. This method used to write status on update too, which made it a tenth way
+   * around the lifecycle: any caller holding an aggregate could save a new status over an
+   * old one with nothing checked.
+   *
+   * On CREATE there is no previous state to transition from, so the opening status is set
+   * here. That is the one legitimate status write outside the transition service, and the
+   * status-write guard spec allows exactly this file for exactly that reason.
+   */
   async save(application: Application): Promise<void> {
-    const fields = {
+    const mutable = {
       resumeId: application.resumeId ?? null,
-      status: application.status as $Enums.ApplicationStatus,
       notes: application.notes ?? null,
       coverLetter: application.coverLetter ?? null,
       updatedAt: application.updatedAt,
     };
     await this.prisma.application.upsert({
       where: { id: application.id },
-      update: fields,
+      update: mutable,
       create: {
         id: application.id,
         userId: application.userId,
         jobId: application.jobId,
         appliedAt: application.appliedAt,
         createdAt: application.createdAt,
-        ...fields,
+        status: application.status as $Enums.ApplicationStatus,
+        ...mutable,
       },
     });
   }
@@ -43,19 +57,37 @@ export class ApplicationRepository implements IRepository<Application> {
     return row ? this.mapToDomain(row) : null;
   }
 
-  /** A user's applications, newest first, paginated. */
+  /**
+   * A user's applications, newest first, paginated.
+   *
+   * Hides the ones THEY archived. The employer's own archiving is a different column and
+   * has no effect here — that separation is the whole point of the two flags.
+   */
   async findByUserId(
     userId: string,
     skip = 0,
     take = 20,
+    includeArchived = false,
   ): Promise<Application[]> {
     const rows = await this.prisma.application.findMany({
-      where: { userId, deletedAt: null },
+      where: {
+        userId,
+        deletedAt: null,
+        ...(includeArchived ? {} : { archivedByCandidateAt: null }),
+      },
       orderBy: { appliedAt: 'desc' },
       skip,
       take,
     });
     return rows.map((r) => this.mapToDomain(r));
+  }
+
+  /** Hide (or restore) an application on the CANDIDATE's list only. */
+  async setArchivedByCandidate(id: string, archived: boolean): Promise<void> {
+    await this.prisma.application.update({
+      where: { id },
+      data: { archivedByCandidateAt: archived ? new Date() : null },
+    });
   }
 
   async findByJobId(jobId: string): Promise<Application[]> {
@@ -100,6 +132,7 @@ export class ApplicationRepository implements IRepository<Application> {
         appliedAt: raw.appliedAt,
         notes: raw.notes ?? undefined,
         coverLetter: raw.coverLetter ?? undefined,
+        archivedByCandidateAt: raw.archivedByCandidateAt,
         createdAt: raw.createdAt,
         updatedAt: raw.updatedAt,
       },

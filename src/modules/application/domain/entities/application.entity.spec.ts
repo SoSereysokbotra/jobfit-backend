@@ -8,6 +8,8 @@ import {
   Application,
   CANDIDATE_SETTABLE_STATUSES,
   EMPLOYER_SETTABLE_STATUSES,
+  candidateActionsFrom,
+  employerActionsFrom,
   isTransitionAllowed,
 } from './application.entity';
 import { ApplicationStatus } from '@shared/kernel/enums/application-status.enum';
@@ -34,14 +36,20 @@ describe('Application status transitions', () => {
     expect(application.status).toBe(ApplicationStatus.WITHDRAWN);
   });
 
-  it('allows archiving a finished application', () => {
+  it('treats a finished application as finished', () => {
+    // ARCHIVED used to be reachable from here so a candidate could tidy their list. A
+    // status is shared, so tidying rewrote the employer's board and erased the outcome
+    // underneath it — an accepted job stopped saying it had been accepted. Archiving is a
+    // view preference now, in per-actor columns, and no longer a state anyone can enter.
     for (const status of [
       ApplicationStatus.ACCEPTED,
       ApplicationStatus.REJECTED,
       ApplicationStatus.WITHDRAWN,
     ]) {
       const application = make(status);
-      expect(() => application.updateStatus(ApplicationStatus.ARCHIVED)).not.toThrow();
+      expect(() => application.updateStatus(ApplicationStatus.ARCHIVED)).toThrow(
+        /Invalid status transition/,
+      );
     }
   });
 
@@ -71,15 +79,18 @@ describe('Application status transitions', () => {
 });
 
 describe('CANDIDATE_SETTABLE_STATUSES', () => {
-  it('lets a candidate withdraw, archive, and answer an offer', () => {
+  it('lets a candidate withdraw and answer an offer', () => {
     expect(CANDIDATE_SETTABLE_STATUSES).toEqual(
       expect.arrayContaining([
         ApplicationStatus.WITHDRAWN,
-        ApplicationStatus.ARCHIVED,
         ApplicationStatus.ACCEPTED,
         ApplicationStatus.NEGOTIATING,
       ]),
     );
+  });
+
+  it('does not treat tidying your own list as a decision about the hire', () => {
+    expect(CANDIDATE_SETTABLE_STATUSES).not.toContain(ApplicationStatus.ARCHIVED);
   });
 
   it.each([
@@ -117,11 +128,13 @@ describe('EMPLOYER_SETTABLE_STATUSES', () => {
     expect(EMPLOYER_SETTABLE_STATUSES).not.toContain(status);
   });
 
-  it('gives the two roles no overlapping decision except archiving', () => {
+  it('gives the two roles no overlapping decision at all', () => {
+    // ARCHIVED was the single shared one, and sharing it is precisely what let a
+    // candidate's housekeeping edit the employer's board.
     const overlap = EMPLOYER_SETTABLE_STATUSES.filter((s) =>
       CANDIDATE_SETTABLE_STATUSES.includes(s),
     );
-    expect(overlap).toEqual([ApplicationStatus.ARCHIVED]);
+    expect(overlap).toEqual([]);
   });
 });
 
@@ -141,5 +154,55 @@ describe('isTransitionAllowed', () => {
     expect(
       isTransitionAllowed(ApplicationStatus.SUBMITTED, ApplicationStatus.OFFER),
     ).toBe(false);
+  });
+});
+
+describe('employerActionsFrom', () => {
+  // Served on the pipeline DTO so the board can derive its drop targets instead of
+  // keeping a second copy of these rules. Pinned exactly, per status, because the whole
+  // value of serving them is that the UI can trust them.
+  it.each([
+    [ApplicationStatus.DRAFT, []],
+    // NOT INTERVIEW. Screening never throws, so an application whose screening could not
+    // run stays SUBMITTED — and sits in the same board column as SCREENING ones. This is
+    // why the board must ask per card, not per column.
+    [ApplicationStatus.SUBMITTED, [ApplicationStatus.SCREENING, ApplicationStatus.REJECTED]],
+    [
+      ApplicationStatus.SCREENING,
+      [ApplicationStatus.INTERVIEW, ApplicationStatus.OFFER, ApplicationStatus.REJECTED],
+    ],
+    [ApplicationStatus.INTERVIEW, [ApplicationStatus.OFFER, ApplicationStatus.REJECTED]],
+    // From OFFER the employer has exactly one move left. Accepting, negotiating and
+    // withdrawing are the candidate's replies.
+    [ApplicationStatus.OFFER, [ApplicationStatus.REJECTED]],
+    [ApplicationStatus.NEGOTIATING, [ApplicationStatus.OFFER, ApplicationStatus.REJECTED]],
+    // Nothing follows a hire. Hiding the card is a view preference, not a move.
+    [ApplicationStatus.ACCEPTED, []],
+    // Reopening a closed application is an employer action (D2).
+    [ApplicationStatus.REJECTED, [ApplicationStatus.SCREENING]],
+    [ApplicationStatus.WITHDRAWN, []],
+    [ApplicationStatus.ARCHIVED, []],
+  ])('from %s', (from, expected) => {
+    expect(employerActionsFrom(from as ApplicationStatus)).toEqual(expected);
+  });
+
+  it('never offers the employer a status that is the candidate\'s to decide', () => {
+    const every = Object.values(ApplicationStatus).flatMap((s) =>
+      employerActionsFrom(s),
+    );
+    expect(every).not.toContain(ApplicationStatus.ACCEPTED);
+    expect(every).not.toContain(ApplicationStatus.WITHDRAWN);
+    expect(every).not.toContain(ApplicationStatus.NEGOTIATING);
+  });
+
+  it('never offers the same move to both parties', () => {
+    // Both are TRANSITIONS filtered by a settable list, so for any given state the two
+    // answers are disjoint: every move belongs to exactly one party.
+    for (const status of Object.values(ApplicationStatus)) {
+      const overlap = employerActionsFrom(status).filter((s) =>
+        candidateActionsFrom(status).includes(s),
+      );
+      expect(overlap).toEqual([]);
+    }
   });
 });

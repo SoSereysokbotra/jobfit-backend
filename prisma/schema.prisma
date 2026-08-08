@@ -648,6 +648,20 @@ model Application {
   reviewedByEmployerId String?
   reviewedByEmployer   User?   @relation("ReviewedByEmployer", fields: [reviewedByEmployerId], references: [id], onDelete: SetNull)
 
+  // ── Archiving: one per side, because tidying is a VIEW, not a STATE ──────────
+  // Archiving used to be the ApplicationStatus value ARCHIVED, which made one party's
+  // housekeeping rewrite a record the other party reads: a candidate tidying an accepted
+  // job dropped it out of the employer's Hired column and — because ARCHIVED mapped to
+  // "Rejected" — filed someone they had hired under rejections. It also overwrote the
+  // status it replaced, so the row stopped saying the person was hired at all.
+  //
+  // These are per-actor and non-destructive. The status keeps telling the truth
+  // (ACCEPTED stays ACCEPTED); each side hides its own list without touching the other's.
+  // Legacy rows still carrying status = ARCHIVED are left alone — their pre-archive status
+  // is unrecoverable, and inventing one would be worse than leaving the history visible.
+  archivedByCandidateAt DateTime?
+  archivedByEmployerAt  DateTime?
+
   timeline      ApplicationTimeline[]
   contactPerson ContactPerson?
   stageHistory  ApplicationStageHistory[]

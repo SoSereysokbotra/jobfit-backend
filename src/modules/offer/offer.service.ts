@@ -11,6 +11,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '@infra/prisma/prisma.service';
+// Every status write in this file goes through the chokepoint. This module used to write
+// status straight through Prisma in six places — which is how an employer could skip the
+// interview stage, and why accepting an offer left no audit row anywhere.
+import { ApplicationTransitionService } from '@modules/application/domain/services/application-transition.service';
+import { ApplicationStatus } from '@shared/kernel/enums/application-status.enum';
+import { TransitionActor } from '@shared/kernel/enums/transition-actor.enum';
 import {
   CreateOfferDto,
   NegotiateOfferDto,
@@ -53,7 +59,10 @@ const DECIDABLE = ['EXTENDED', 'NEGOTIATING'] as const;
 
 @Injectable()
 export class OfferService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly transitions: ApplicationTransitionService,
+  ) {}
 
   // ── Employer side ───────────────────────────────────────────────────────────
 
@@ -71,7 +80,7 @@ export class OfferService {
 
     const app = await this.prisma.application.findUnique({
       where: { id: applicationId },
-      select: { id: true, job: { select: { companyId: true } } },
+      select: { id: true, status: true, job: { select: { companyId: true } } },
     });
     if (!app) throw new NotFoundException('Application not found');
     if (app.job.companyId !== profile.companyId) {
@@ -83,14 +92,45 @@ export class OfferService {
       currency: dto.currency ?? 'USD',
       ...this.optionalData(dto),
     };
-    await this.prisma.offer.upsert({
-      where: { applicationId },
-      create: { applicationId, ...comp, status: 'EXTENDED', extendedByEmployerId: userId },
-      update: { ...comp, status: 'EXTENDED', decidedAt: null, extendedByEmployerId: userId },
-    });
-    await this.prisma.application.update({
-      where: { id: applicationId },
-      data: { status: 'OFFER' },
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.offer.upsert({
+        where: { applicationId },
+        create: { applicationId, ...comp, status: 'EXTENDED', extendedByEmployerId: userId },
+        update: { ...comp, status: 'EXTENDED', decidedAt: null, extendedByEmployerId: userId },
+      });
+
+      // Re-extending an offer already on the table revises the money, not the stage.
+      // OFFER -> OFFER is not a transition, and asking for one would fail.
+      if (app.status === 'OFFER') return;
+
+      // Extending to someone previously closed out reopens them into the pipeline rather
+      // than teleporting them to the end. Two audited steps, so the record shows it.
+      if (app.status === 'REJECTED') {
+        await this.transitions.transition(
+          {
+            applicationId,
+            newStatus: ApplicationStatus.SCREENING,
+            actor: TransitionActor.EMPLOYER,
+            actorUserId: userId,
+            eventType: 'REOPENED',
+            description: 'Reopened by the employer to extend a new offer',
+          },
+          tx,
+        );
+      }
+
+      await this.transitions.transition(
+        {
+          applicationId,
+          newStatus: ApplicationStatus.OFFER,
+          actor: TransitionActor.EMPLOYER,
+          actorUserId: userId,
+          eventType: 'OFFER_EXTENDED',
+          description: 'Offer extended',
+        },
+        tx,
+      );
     });
 
     return this.employerOfferByApplication(applicationId);
@@ -125,13 +165,23 @@ export class OfferService {
     await this.assertEmployerOwnsApplication(userId, applicationId);
     const offer = await this.prisma.offer.findUnique({ where: { applicationId } });
     if (!offer) throw new NotFoundException('No offer on this application');
-    await this.prisma.$transaction([
-      this.prisma.offer.update({
+    await this.prisma.$transaction(async (tx) => {
+      await tx.offer.update({
         where: { applicationId },
         data: { status: 'WITHDRAWN', decidedAt: new Date() },
-      }),
-      this.prisma.application.update({ where: { id: applicationId }, data: { status: 'REJECTED' } }),
-    ]);
+      });
+      await this.transitions.transition(
+        {
+          applicationId,
+          newStatus: ApplicationStatus.REJECTED,
+          actor: TransitionActor.EMPLOYER,
+          actorUserId: userId,
+          eventType: 'OFFER_RESCINDED',
+          description: 'Offer rescinded by the employer',
+        },
+        tx,
+      );
+    });
     return this.employerOfferByApplication(applicationId);
   }
 
@@ -159,7 +209,17 @@ export class OfferService {
 
     await this.prisma.$transaction(async (tx) => {
       await tx.offer.update({ where: { id: offerId }, data: { status: 'ACCEPTED', decidedAt: new Date() } });
-      await tx.application.update({ where: { id: offer.applicationId }, data: { status: 'ACCEPTED' } });
+      await this.transitions.transition(
+        {
+          applicationId: offer.applicationId,
+          newStatus: ApplicationStatus.ACCEPTED,
+          actor: TransitionActor.CANDIDATE,
+          actorUserId: userId,
+          eventType: 'OFFER_ACCEPTED',
+          description: 'Candidate accepted the offer',
+        },
+        tx,
+      );
 
       const others = await tx.offer.findMany({
         where: { id: { not: offerId }, status: { in: ['EXTENDED', 'NEGOTIATING'] }, application: { userId } },
@@ -167,21 +227,51 @@ export class OfferService {
       });
       for (const o of others) {
         await tx.offer.update({ where: { id: o.id }, data: { status: 'WITHDRAWN', decidedAt: new Date() } });
-        await tx.application.update({ where: { id: o.applicationId }, data: { status: 'ARCHIVED' } });
+        // Was ARCHIVED, which the lifecycle does not permit from OFFER or NEGOTIATING —
+        // ARCHIVED is reachable only from a terminal state. WITHDRAWN is both legal and
+        // truthful: the candidate walked away from these because they took another job.
+        await this.transitions.transition(
+          {
+            applicationId: o.applicationId,
+            newStatus: ApplicationStatus.WITHDRAWN,
+            actor: TransitionActor.CANDIDATE,
+            actorUserId: userId,
+            eventType: 'AUTO_WITHDRAWN',
+            description: 'Withdrawn automatically: the candidate accepted an offer elsewhere',
+          },
+          tx,
+        );
       }
     });
 
     return this.getMyOffer(userId, offerId);
   }
 
-  /** Decline an offer; the application is rejected. */
+  /**
+   * Decline an offer; the candidate leaves the process.
+   *
+   * The application was previously set to REJECTED, which reads as "the employer rejected
+   * this candidate" — the opposite of what happened, and not a status a candidate is
+   * entitled to assert about themselves. WITHDRAWN is the truthful one and is theirs to
+   * set. The decline itself is not lost: the Offer row records DECLINED.
+   */
   async decline(userId: string, offerId: string): Promise<OfferResponseDto> {
     const offer = await this.loadOwnedOffer(userId, offerId);
     this.assertDecidable(offer.status);
-    await this.prisma.$transaction([
-      this.prisma.offer.update({ where: { id: offerId }, data: { status: 'DECLINED', decidedAt: new Date() } }),
-      this.prisma.application.update({ where: { id: offer.applicationId }, data: { status: 'REJECTED' } }),
-    ]);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.offer.update({ where: { id: offerId }, data: { status: 'DECLINED', decidedAt: new Date() } });
+      await this.transitions.transition(
+        {
+          applicationId: offer.applicationId,
+          newStatus: ApplicationStatus.WITHDRAWN,
+          actor: TransitionActor.CANDIDATE,
+          actorUserId: userId,
+          eventType: 'OFFER_DECLINED',
+          description: 'Candidate declined the offer',
+        },
+        tx,
+      );
+    });
     return this.getMyOffer(userId, offerId);
   }
 
@@ -195,10 +285,20 @@ export class OfferService {
     this.assertDecidable(offer.status);
     const note = `[Candidate] ${dto.notes}`;
     const notes = offer.notes ? `${offer.notes}\n${note}` : note;
-    await this.prisma.$transaction([
-      this.prisma.offer.update({ where: { id: offerId }, data: { status: 'NEGOTIATING', notes } }),
-      this.prisma.application.update({ where: { id: offer.applicationId }, data: { status: 'NEGOTIATING' } }),
-    ]);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.offer.update({ where: { id: offerId }, data: { status: 'NEGOTIATING', notes } });
+      await this.transitions.transition(
+        {
+          applicationId: offer.applicationId,
+          newStatus: ApplicationStatus.NEGOTIATING,
+          actor: TransitionActor.CANDIDATE,
+          actorUserId: userId,
+          eventType: 'OFFER_NEGOTIATION_OPENED',
+          description: 'Candidate opened a negotiation on the offer',
+        },
+        tx,
+      );
+    });
     return this.getMyOffer(userId, offerId);
   }
 

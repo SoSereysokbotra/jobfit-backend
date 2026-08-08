@@ -43,6 +43,7 @@ describe('ApplicationService.submitApplication — internal vs external', () => 
 
     service = new ApplicationService(
       applicationRepository as never,
+      { transition: jest.fn().mockResolvedValue({}) } as never, // transitions — not on the apply path
       timelineRepository as never,
       {} as never, // contactPersonRepository — unused on this path
       userRepository as never,

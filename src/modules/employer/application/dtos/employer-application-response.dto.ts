@@ -5,6 +5,8 @@
 
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ApplicationStatus } from '@prisma/client';
+import { employerActionsFrom } from '@modules/application/domain/entities/application.entity';
+import { ApplicationStatus as DomainStatus } from '@shared/kernel/enums/application-status.enum';
 
 /**
  * What the automatic screening found when this candidate applied.
@@ -53,6 +55,16 @@ export class EmployerApplicationResponseDto {
   candidate: { id: string; name: string; email: string };
 
   @ApiProperty({ enum: ApplicationStatus }) status: ApplicationStatus;
+
+  @ApiProperty({
+    description:
+      'Whether YOU have hidden this from your board. A view preference of your own — the ' +
+      'candidate has a separate flag, and theirs can never remove a row from your board. ' +
+      'It used to be able to: archiving was a shared status, so a candidate tidying an ' +
+      'accepted job dropped it out of Hired and filed them under rejections.',
+  })
+  archived: boolean;
+
   @ApiPropertyOptional({ type: String, nullable: true }) employerNotes: string | null;
 
   @ApiProperty({
@@ -66,12 +78,27 @@ export class EmployerApplicationResponseDto {
 
   @ApiProperty() appliedAt: Date;
 
+  @ApiProperty({
+    enum: ApplicationStatus,
+    isArray: true,
+    description:
+      'Statuses the EMPLOYER can move this application to right now — reachable from its ' +
+      'current status AND theirs to decide. Clients must derive their affordances from ' +
+      'this rather than restating the rules: the board offered every column as a drop ' +
+      'target, so "Hired" (ACCEPTED, the candidate\'s decision) refused every time. ' +
+      'Check it PER CARD, not per column — from SUBMITTED this excludes INTERVIEW, and ' +
+      'unscreened applications really do sit in SUBMITTED whenever screening could not ' +
+      'run. An empty array is legitimate: an ARCHIVED application is finished.',
+  })
+  availableActions: ApplicationStatus[];
+
   constructor(row: {
     id: string;
     jobId: string;
     jobTitle: string;
     candidate: { id: string; name: string; email: string };
     status: ApplicationStatus;
+    archived: boolean;
     employerNotes: string | null;
     screening: ScreeningSummaryDto;
     appliedAt: Date;
@@ -81,8 +108,12 @@ export class EmployerApplicationResponseDto {
     this.jobTitle = row.jobTitle;
     this.candidate = row.candidate;
     this.status = row.status;
+    this.archived = row.archived;
     this.employerNotes = row.employerNotes;
     this.screening = row.screening;
     this.appliedAt = row.appliedAt;
+    this.availableActions = employerActionsFrom(
+      row.status as unknown as DomainStatus,
+    ) as unknown as ApplicationStatus[];
   }
 }

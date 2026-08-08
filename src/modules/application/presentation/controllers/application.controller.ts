@@ -9,6 +9,7 @@
 import {
   Body,
   Controller,
+  Delete,
   ForbiddenException,
   Get,
   HttpCode,
@@ -30,10 +31,7 @@ import { SubmitApplicationDto } from '../../dto/submit-application.dto';
 import { AddContactPersonDto } from '../../dto/add-contact-person.dto';
 import { UpdateApplicationStatusDto } from '../../dto/update-status.dto';
 import { ApplicationResponseDto } from '../../dto/application-response.dto';
-import {
-  Application,
-  CANDIDATE_SETTABLE_STATUSES,
-} from '../../domain/entities/application.entity';
+import { Application } from '../../domain/entities/application.entity';
 import { ApplicationStatus } from '@shared/kernel/enums/application-status.enum';
 
 @ApiTags('Applications')
@@ -62,12 +60,47 @@ export class ApplicationController {
   async list(
     @CurrentUser() user: AuthenticatedUser,
     @Query('status') status?: ApplicationStatus,
+    @Query('includeArchived') includeArchived?: string,
   ): Promise<ApplicationResponseDto[]> {
-    const applications = await this.applicationService.getApplications(user.id);
+    const applications = await this.applicationService.getApplications(
+      user.id,
+      0,
+      20,
+      includeArchived === 'true',
+    );
     const filtered = status
       ? applications.filter((a) => a.status === status)
       : applications;
     return filtered.map((a) => new ApplicationResponseDto(a));
+  }
+
+  @Post(':id/archive')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Hide an application from your own list',
+    description:
+      'A view preference, not a decision. The application keeps its real status and the ' +
+      'employer still sees it exactly as before — they have a separate flag of their own. ' +
+      'This replaces the old ARCHIVED status, under which tidying your list removed a ' +
+      'hire from the employer’s board and erased that you had been hired.',
+  })
+  async archive(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<void> {
+    await this.assertOwned(id, user);
+    await this.applicationService.setArchived(id, true);
+  }
+
+  @Delete(':id/archive')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Restore an application to your list' })
+  async unarchive(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<void> {
+    await this.assertOwned(id, user);
+    await this.applicationService.setArchived(id, false);
   }
 
   @Get(':id')
@@ -95,19 +128,14 @@ export class ApplicationController {
   ): Promise<ApplicationResponseDto> {
     await this.assertOwned(id, user);
 
-    // Ownership is NOT enough. Without this, a candidate could set their own application
-    // to OFFER or ACCEPTED — fabricating a hiring outcome that then shows up in the
-    // employer's pipeline as though the employer had decided it.
-    if (!CANDIDATE_SETTABLE_STATUSES.includes(dto.newStatus)) {
-      throw new ForbiddenException(
-        `Only the employer can set ${dto.newStatus}. You can withdraw or archive your ` +
-          'application, or respond to an offer.',
-      );
-    }
-
+    // Ownership is NOT enough — a candidate setting OFFER or ACCEPTED would fabricate a
+    // hiring outcome that shows up in the employer's pipeline as though the employer had
+    // decided it. That rule used to be re-stated here; it now lives in the transition
+    // service with every other lifecycle rule, and raises the same 403.
     const application = await this.applicationService.updateStatus(
       id,
       dto.newStatus,
+      user.id,
     );
     return new ApplicationResponseDto(application);
   }
