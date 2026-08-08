@@ -38,6 +38,7 @@ const offerRow = (over: Record<string, unknown> = {}) => ({
   notes: null,
   createdAt: new Date(),
   decidedAt: null,
+  messages: [],
   application: {
     id: 'app-1',
     userId: 'user-1',
@@ -50,10 +51,11 @@ const offerRow = (over: Record<string, unknown> = {}) => ({
 const setup = (opts: { appStatus?: ApplicationStatus; offer?: Record<string, unknown>; others?: unknown[] } = {}) => {
   const tx = {
     offer: {
-      upsert: jest.fn().mockResolvedValue({}),
+      upsert: jest.fn().mockResolvedValue({ id: 'offer-1' }),
       update: jest.fn().mockResolvedValue({}),
       findMany: jest.fn().mockResolvedValue(opts.others ?? []),
     },
+    offerMessage: { create: jest.fn().mockResolvedValue({}) },
   };
   const prisma = {
     employerProfile: { findUnique: jest.fn().mockResolvedValue({ companyId: 'co-1' }) },
@@ -65,6 +67,10 @@ const setup = (opts: { appStatus?: ApplicationStatus; offer?: Record<string, unk
       }),
     },
     offer: { findUnique: jest.fn().mockResolvedValue(offerRow(opts.offer)) },
+    offerMessage: {
+      create: jest.fn().mockResolvedValue({}),
+      updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
     $transaction: jest.fn((cb: (c: typeof tx) => unknown) => cb(tx)),
   };
   const transitions = { transition: jest.fn().mockResolvedValue({}) };
@@ -204,6 +210,72 @@ describe('OfferService status writes', () => {
       expect(tx.offer.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ status: 'DECLINED' }) }),
       );
+    });
+  });
+
+  describe('the conversation', () => {
+    it('lets the candidate send a SECOND message', async () => {
+      // The bug: the second message asked the lifecycle for NEGOTIATING -> NEGOTIATING,
+      // which is not a transition, so it threw and was never stored. The employer saw
+      // nothing because nothing was written.
+      const { service, tx, transitions } = setup({ offer: { status: 'NEGOTIATING' } });
+
+      await service.postCandidateMessage('user-1', 'offer-1', 'Any update on the base?');
+
+      expect(tx.offerMessage.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ authorRole: 'CANDIDATE', body: 'Any update on the base?' }),
+      });
+      // Already negotiating — nothing about the offer's state changed.
+      expect(transitions.transition).not.toHaveBeenCalled();
+      expect(tx.offer.update).not.toHaveBeenCalled();
+    });
+
+    it('still opens the negotiation on the FIRST message', async () => {
+      const { service, tx, transitions } = setup({ offer: { status: 'EXTENDED' } });
+
+      await service.postCandidateMessage('user-1', 'offer-1', 'Could we revisit base?');
+
+      expect(tx.offerMessage.create).toHaveBeenCalled();
+      expect(movesOf(transitions)).toEqual([
+        [ApplicationStatus.NEGOTIATING, TransitionActor.CANDIDATE],
+      ]);
+    });
+
+    it('lets the employer reply without changing the offer', async () => {
+      const { service, prisma, transitions } = setup({ offer: { status: 'NEGOTIATING' } });
+
+      await service.postEmployerMessage('emp-1', 'app-1', 'We can move to 60k.');
+
+      expect(prisma.offerMessage.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ authorRole: 'EMPLOYER', body: 'We can move to 60k.' }),
+      });
+      expect(transitions.transition).not.toHaveBeenCalled();
+    });
+
+    it('records an employer note as a message, never over the thread', async () => {
+      // optionalData used to write `notes` outright, so an employer adding a note deleted
+      // whatever the candidate had said.
+      const { service, tx } = setup({ appStatus: ApplicationStatus.INTERVIEW });
+
+      await service.extendOffer('emp-1', 'app-1', {
+        baseSalary: 60000, notes: 'Delighted to make this offer.',
+      } as never);
+
+      expect(tx.offerMessage.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ authorRole: 'EMPLOYER', body: 'Delighted to make this offer.' }),
+      });
+      expect(tx.offer.upsert.mock.calls[0][0].create).not.toHaveProperty('notes');
+    });
+
+    it('marks the other side\'s messages read when the thread is opened', async () => {
+      const { service, prisma } = setup();
+
+      await service.getOfferForEmployer('emp-1', 'app-1');
+
+      expect(prisma.offerMessage.updateMany).toHaveBeenCalledWith({
+        where: { offerId: 'offer-1', readAt: null, authorRole: 'CANDIDATE' },
+        data: { readAt: expect.any(Date) },
+      });
     });
   });
 

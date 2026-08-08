@@ -4,7 +4,37 @@
 // offers dashboard; the employer view adds the candidate.
 
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Offer, OfferStatus } from '@prisma/client';
+import { Offer, OfferMessageAuthor, OfferStatus } from '@prisma/client';
+
+/** One message in the negotiation about an offer, oldest first. */
+export class OfferMessageDto {
+  @ApiProperty() id: string;
+  @ApiProperty({ enum: OfferMessageAuthor }) authorRole: OfferMessageAuthor;
+  @ApiProperty() body: string;
+  @ApiProperty() createdAt: Date;
+  @ApiProperty({ description: 'Whether the recipient has seen it.' })
+  read: boolean;
+}
+
+interface MessageRow {
+  id: string;
+  authorRole: OfferMessageAuthor;
+  body: string;
+  readAt: Date | null;
+  createdAt: Date;
+}
+
+const toMessage = (m: MessageRow): OfferMessageDto => ({
+  id: m.id,
+  authorRole: m.authorRole,
+  body: m.body,
+  createdAt: m.createdAt,
+  read: m.readAt !== null,
+});
+
+/** Messages written by the OTHER party that this viewer has not read yet. */
+const unreadFor = (messages: MessageRow[], viewer: OfferMessageAuthor): number =>
+  messages.filter((m) => m.authorRole !== viewer && m.readAt === null).length;
 
 /** Minimal job projection embedded in an offer (the dashboard builds a card from it). */
 export class OfferJobDto {
@@ -19,6 +49,7 @@ export class OfferJobDto {
 
 type OfferRow = Offer & {
   application: { id: string; userId: string; job: { id: string; title: string; companyId: string; location: string | null; remoteType: string; minSalary: number | null; maxSalary: number | null; company: { name: string } | null } };
+  messages?: MessageRow[];
 };
 
 function jobOf(row: OfferRow): OfferJobDto {
@@ -46,7 +77,22 @@ export class OfferResponseDto {
   @ApiPropertyOptional({ type: Number, nullable: true }) equityPrice: number | null;
   @ApiPropertyOptional({ type: String, nullable: true }) startDate: Date | null;
   @ApiPropertyOptional({ type: String, nullable: true }) responseDeadline: Date | null;
-  @ApiPropertyOptional({ type: String, nullable: true }) notes: string | null;
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    deprecated: true,
+    description:
+      'DEPRECATED — superseded by `messages`. This column was used as a conversation and ' +
+      'could not order, timestamp or attribute anything. Always null on new offers.',
+  })
+  notes: string | null;
+
+  @ApiProperty({ type: [OfferMessageDto], description: 'The negotiation, oldest first.' })
+  messages: OfferMessageDto[];
+
+  @ApiProperty({ description: 'Messages from the employer you have not read.' })
+  unreadCount: number;
+
   @ApiProperty() createdAt: Date;
   @ApiPropertyOptional({ type: String, nullable: true }) decidedAt: Date | null;
   @ApiProperty({ type: OfferJobDto }) job: OfferJobDto;
@@ -64,6 +110,8 @@ export class OfferResponseDto {
     this.startDate = row.startDate;
     this.responseDeadline = row.responseDeadline;
     this.notes = row.notes;
+    this.messages = (row.messages ?? []).map(toMessage);
+    this.unreadCount = unreadFor(row.messages ?? [], 'CANDIDATE');
     this.createdAt = row.createdAt;
     this.decidedAt = row.decidedAt;
     this.job = jobOf(row);
@@ -79,6 +127,8 @@ export class EmployerOfferResponseDto extends OfferResponseDto {
 
   constructor(row: EmployerOfferRow) {
     super(row);
+    // The inherited count is from the candidate's side; recount for this viewer.
+    this.unreadCount = unreadFor(row.messages ?? [], 'EMPLOYER');
     this.candidate = {
       id: row.application.user.id,
       name: row.application.user.name ?? '',

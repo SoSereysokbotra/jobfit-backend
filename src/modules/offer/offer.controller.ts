@@ -15,7 +15,10 @@ import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swa
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { AuthenticatedUser } from '@common/guards/jwt-auth.guard';
 import { OfferService } from './offer.service';
-import { NegotiateOfferDto } from './dtos/offer-request.dtos';
+import {
+  NegotiateOfferDto,
+  PostOfferMessageDto,
+} from './dtos/offer-request.dtos';
 import { OfferResponseDto } from './dtos/offer-response.dto';
 
 @ApiTags('Offers')
@@ -61,8 +64,28 @@ export class OfferController {
     return this.offers.decline(user.id, id);
   }
 
+  @Post(':id/messages')
+  @ApiOperation({
+    summary: 'Write to the employer about this offer',
+    description:
+      'Send as many as you like. The FIRST one opens the negotiation — that is the only ' +
+      'point where the offer’s state changes; the rest are just messages.',
+  })
+  @ApiOkResponse({ type: OfferResponseDto })
+  postMessage(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: PostOfferMessageDto,
+  ): Promise<OfferResponseDto> {
+    return this.offers.postCandidateMessage(user.id, id, dto.body);
+  }
+
   @Post(':id/negotiate')
-  @ApiOperation({ summary: 'Open negotiation with a note' })
+  @ApiOperation({
+    summary: 'Open negotiation with a note',
+    deprecated: true,
+    description: 'Kept for existing clients. Use POST /offers/:id/messages.',
+  })
   @ApiOkResponse({ type: OfferResponseDto })
   negotiate(
     @CurrentUser() user: AuthenticatedUser,

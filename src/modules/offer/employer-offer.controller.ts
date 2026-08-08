@@ -17,7 +17,11 @@ import { Roles } from '@common/decorators/roles.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { AuthenticatedUser } from '@common/guards/jwt-auth.guard';
 import { OfferService } from './offer.service';
-import { CreateOfferDto, UpdateOfferDto } from './dtos/offer-request.dtos';
+import {
+  CreateOfferDto,
+  PostOfferMessageDto,
+  UpdateOfferDto,
+} from './dtos/offer-request.dtos';
 import { EmployerOfferResponseDto } from './dtos/offer-response.dto';
 
 @ApiTags('Employer - Offers')
@@ -63,6 +67,22 @@ export class EmployerOfferController {
     @Body() dto: UpdateOfferDto,
   ): Promise<EmployerOfferResponseDto> {
     return this.offers.updateOffer(user.id, applicationId, dto);
+  }
+
+  @Post(':id/offer/messages')
+  @ApiOperation({
+    summary: 'Reply to the candidate about this offer',
+    description:
+      'A message, not a decision: the offer’s status is unchanged. To put revised terms ' +
+      'on the table, extend the offer again.',
+  })
+  @ApiOkResponse({ type: EmployerOfferResponseDto })
+  postMessage(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) applicationId: string,
+    @Body() dto: PostOfferMessageDto,
+  ): Promise<EmployerOfferResponseDto> {
+    return this.offers.postEmployerMessage(user.id, applicationId, dto.body);
   }
 
   @Post(':id/offer/withdraw')

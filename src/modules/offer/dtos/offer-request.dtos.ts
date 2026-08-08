@@ -12,6 +12,7 @@ import {
   Max,
   MaxLength,
   Min,
+  MinLength,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 
@@ -76,4 +77,13 @@ export class NegotiateOfferDto {
   @IsString()
   @MaxLength(2000)
   notes: string;
+}
+
+/** One message in the negotiation, from either side. */
+export class PostOfferMessageDto {
+  @ApiProperty({ description: 'The message.', maxLength: 2000 })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(2000)
+  body: string;
 }

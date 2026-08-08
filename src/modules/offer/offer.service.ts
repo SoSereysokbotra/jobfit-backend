@@ -40,8 +40,15 @@ const JOB_SELECT = {
   company: { select: { name: true } },
 } as const;
 
+// Oldest first: a conversation reads top to bottom.
+const MESSAGES_INCLUDE = {
+  select: { id: true, authorRole: true, body: true, readAt: true, createdAt: true },
+  orderBy: { createdAt: 'asc' },
+} as const;
+
 const SEEKER_INCLUDE = {
   application: { select: { id: true, userId: true, job: { select: JOB_SELECT } } },
+  messages: MESSAGES_INCLUDE,
 } as const;
 
 const EMPLOYER_INCLUDE = {
@@ -53,6 +60,7 @@ const EMPLOYER_INCLUDE = {
       user: { select: { id: true, name: true, email: true } },
     },
   },
+  messages: MESSAGES_INCLUDE,
 } as const;
 
 const DECIDABLE = ['EXTENDED', 'NEGOTIATING'] as const;
@@ -94,11 +102,25 @@ export class OfferService {
     };
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.offer.upsert({
+      const offer = await tx.offer.upsert({
         where: { applicationId },
         create: { applicationId, ...comp, status: 'EXTENDED', extendedByEmployerId: userId },
         update: { ...comp, status: 'EXTENDED', decidedAt: null, extendedByEmployerId: userId },
+        select: { id: true },
       });
+
+      // A note attached to the offer is a message now. Writing it to the column meant
+      // re-extending wiped whatever the candidate had said.
+      if (dto.notes?.trim()) {
+        await tx.offerMessage.create({
+          data: {
+            offerId: offer.id,
+            authorRole: 'EMPLOYER',
+            authorUserId: userId,
+            body: dto.notes.trim(),
+          },
+        });
+      }
 
       // Re-extending an offer already on the table revises the money, not the stage.
       // OFFER -> OFFER is not a transition, and asking for one would fail.
@@ -149,6 +171,37 @@ export class OfferService {
     applicationId: string,
   ): Promise<EmployerOfferResponseDto> {
     await this.assertEmployerOwnsApplication(userId, applicationId);
+    const offer = await this.prisma.offer.findUnique({
+      where: { applicationId },
+      select: { id: true },
+    });
+    if (!offer) throw new NotFoundException('No offer on this application');
+    // Opening the thread is reading it.
+    await this.markThreadRead(offer.id, 'EMPLOYER');
+    return this.employerOfferByApplication(applicationId);
+  }
+
+  /** Reply to the candidate. Says nothing about the offer's state — it is a message. */
+  async postEmployerMessage(
+    userId: string,
+    applicationId: string,
+    body: string,
+  ): Promise<EmployerOfferResponseDto> {
+    await this.assertEmployerOwnsApplication(userId, applicationId);
+    const offer = await this.prisma.offer.findUnique({
+      where: { applicationId },
+      select: { id: true },
+    });
+    if (!offer) throw new NotFoundException('No offer on this application');
+
+    await this.prisma.offerMessage.create({
+      data: {
+        offerId: offer.id,
+        authorRole: 'EMPLOYER',
+        authorUserId: userId,
+        body,
+      },
+    });
     return this.employerOfferByApplication(applicationId);
   }
 
@@ -215,6 +268,7 @@ export class OfferService {
 
   async getMyOffer(userId: string, offerId: string): Promise<OfferResponseDto> {
     const offer = await this.loadOwnedOffer(userId, offerId);
+    await this.markThreadRead(offerId, 'CANDIDATE');
     return new OfferResponseDto(offer as never);
   }
 
@@ -291,18 +345,31 @@ export class OfferService {
     return this.getMyOffer(userId, offerId);
   }
 
-  /** Open negotiation: records the seeker's note and flips both statuses to NEGOTIATING. */
-  async negotiate(
+  /**
+   * The candidate writes to the employer about this offer.
+   *
+   * The FIRST message opens the negotiation — that is the one moment the offer's state
+   * actually changes. Every message after it is a message: asking the lifecycle for
+   * NEGOTIATING -> NEGOTIATING is not a real transition, and it is what limited the
+   * candidate to exactly one message before this. Same judgement extendOffer already makes
+   * when it skips OFFER -> OFFER.
+   */
+  async postCandidateMessage(
     userId: string,
     offerId: string,
-    dto: NegotiateOfferDto,
+    body: string,
   ): Promise<OfferResponseDto> {
     const offer = await this.loadOwnedOffer(userId, offerId);
     this.assertDecidable(offer.status);
-    const note = `[Candidate] ${dto.notes}`;
-    const notes = offer.notes ? `${offer.notes}\n${note}` : note;
+
     await this.prisma.$transaction(async (tx) => {
-      await tx.offer.update({ where: { id: offerId }, data: { status: 'NEGOTIATING', notes } });
+      await tx.offerMessage.create({
+        data: { offerId, authorRole: 'CANDIDATE', authorUserId: userId, body },
+      });
+
+      if (offer.status === 'NEGOTIATING') return; // already open; nothing moves
+
+      await tx.offer.update({ where: { id: offerId }, data: { status: 'NEGOTIATING' } });
       await this.transitions.transition(
         {
           applicationId: offer.applicationId,
@@ -318,9 +385,24 @@ export class OfferService {
     return this.getMyOffer(userId, offerId);
   }
 
+  /** Kept for the existing `/offers/:id/negotiate` route; a message like any other. */
+  negotiate(
+    userId: string,
+    offerId: string,
+    dto: NegotiateOfferDto,
+  ): Promise<OfferResponseDto> {
+    return this.postCandidateMessage(userId, offerId, dto.notes);
+  }
+
   // ── Helpers ───────────────────────────────────────────────────────────────
 
-  /** The seven optional compensation fields, only those provided. */
+  /**
+   * The optional compensation fields, only those provided.
+   *
+   * `notes` is deliberately NOT here any more. It used to write the column outright, which
+   * meant an employer adding a note deleted whatever the candidate had said — the column
+   * was carrying the conversation. An employer's note is now a message.
+   */
   private optionalData(dto: UpdateOfferDto) {
     return {
       ...(dto.signingBonus !== undefined && { signingBonus: dto.signingBonus }),
@@ -329,8 +411,22 @@ export class OfferService {
       ...(dto.equityPrice !== undefined && { equityPrice: dto.equityPrice }),
       ...(dto.startDate !== undefined && { startDate: new Date(dto.startDate) }),
       ...(dto.responseDeadline !== undefined && { responseDeadline: new Date(dto.responseDeadline) }),
-      ...(dto.notes !== undefined && { notes: dto.notes }),
     };
+  }
+
+  /** Stamp the other party's unread messages as seen. */
+  private async markThreadRead(
+    offerId: string,
+    viewer: 'CANDIDATE' | 'EMPLOYER',
+  ): Promise<void> {
+    await this.prisma.offerMessage.updateMany({
+      where: {
+        offerId,
+        readAt: null,
+        authorRole: viewer === 'EMPLOYER' ? 'CANDIDATE' : 'EMPLOYER',
+      },
+      data: { readAt: new Date() },
+    });
   }
 
   private assertDecidable(status: string): void {

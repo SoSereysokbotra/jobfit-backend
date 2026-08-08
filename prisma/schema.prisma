@@ -183,6 +183,7 @@ model User {
   postedJobs             Job[]                     @relation("PostedByEmployer")
   reviewedApplications   Application[]             @relation("ReviewedByEmployer")
   extendedOffers         Offer[]                   @relation("ExtendedOffers")
+  offerMessages          OfferMessage[]            @relation("OfferMessages")
   movedApplicationStages ApplicationStageHistory[] @relation("MovedByUser")
 
   @@index([email])
@@ -707,7 +708,15 @@ model Offer {
 
   startDate        DateTime?
   responseDeadline DateTime?
+  /// DEPRECATED — superseded by OfferMessage. This single column was used as a
+  /// conversation: the employer's note, with candidate replies appended as
+  /// "[Candidate] …". It could not order, timestamp or attribute anything, appending
+  /// meant rewriting the whole string, and the employer's own write path REPLACED it —
+  /// so replying deleted the candidate's message. Migrated into OfferMessage and no
+  /// longer written. Kept only so the migration is reversible.
   notes            String?
+
+  messages OfferMessage[]
 
   // Who extended it (the employer user).
   extendedByEmployerId String?
@@ -719,6 +728,39 @@ model Offer {
 
   @@index([status])
   @@map("offers")
+}
+
+// ── Offer negotiation messages ────────────────────────────────────────────────
+// The conversation about an offer. Replaces the Offer.notes string, which could hold
+// exactly one candidate message before the write path refused, and which the employer's
+// own note overwrote wholesale.
+enum OfferMessageAuthor {
+  CANDIDATE
+  EMPLOYER
+}
+
+model OfferMessage {
+  id      String @id @default(uuid())
+  offerId String
+  offer   Offer  @relation(fields: [offerId], references: [id], onDelete: Cascade)
+
+  authorRole OfferMessageAuthor
+  // Nullable so a deleted account does not take the conversation with it. authorRole is
+  // what the UI attributes by, and it survives independently.
+  authorUserId String?
+  authorUser   User?   @relation("OfferMessages", fields: [authorUserId], references: [id], onDelete: SetNull)
+
+  body String
+
+  /// When the RECIPIENT read it. One column is enough: the recipient is implied by
+  /// authorRole, and "has the author read their own message" is not a question anyone asks.
+  readAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([offerId, createdAt])
+  @@index([offerId, readAt])
+  @@map("offer_messages")
 }
 
 // ── Employer module: application pipeline stage history (Employer Phase 2) ─────

@@ -68,6 +68,7 @@ export class EmployerApplicationService {
           },
           status: row.status,
           archived: row.archivedByEmployerAt != null,
+          unreadMessages: row.offer?._count.messages ?? 0,
           employerNotes: row.employerNotes,
           screening: {
             screenedAt: row.screenedAt,
