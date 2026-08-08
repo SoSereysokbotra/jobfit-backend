@@ -136,6 +136,22 @@ export class OfferService {
     return this.employerOfferByApplication(applicationId);
   }
 
+  /**
+   * The offer on one of this company's applications, including its note thread.
+   *
+   * The employer could write offers but never read one back: there was no GET at all, so
+   * when a candidate opened a negotiation their message landed in `notes` where nobody on
+   * the employer side could reach it. Extending and editing returned the offer, but only
+   * as the response to a write they had already decided to make.
+   */
+  async getOfferForEmployer(
+    userId: string,
+    applicationId: string,
+  ): Promise<EmployerOfferResponseDto> {
+    await this.assertEmployerOwnsApplication(userId, applicationId);
+    return this.employerOfferByApplication(applicationId);
+  }
+
   /** Edit an offer that hasn't been decided yet. */
   async updateOffer(
     userId: string,
