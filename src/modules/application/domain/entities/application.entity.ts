@@ -176,6 +176,23 @@ export const WITHDRAWABLE_FROM: readonly ApplicationStatus[] = (
   Object.keys(TRANSITIONS) as ApplicationStatus[]
 ).filter((from) => TRANSITIONS[from].includes(ApplicationStatus.WITHDRAWN));
 
+/**
+ * Statuses from which an offer can still be accepted.
+ *
+ * Derived from TRANSITIONS for the same reason as WITHDRAWABLE_FROM: it is the rules, not a
+ * second copy of them.
+ *
+ * The `Offer` row and the `Application` row were written independently before the lifecycle
+ * was enforced, so the database holds offers reading EXTENDED on applications that are
+ * already ACCEPTED or ARCHIVED. An offer's own status cannot tell you whether it is still
+ * live — the application underneath it decides that. Every caller that asks "can this offer
+ * still be acted on?" must consult BOTH, or it will offer the candidate a button whose only
+ * possible outcome is `Invalid status transition: ACCEPTED -> WITHDRAWN`.
+ */
+export const ACCEPTABLE_FROM: readonly ApplicationStatus[] = (
+  Object.keys(TRANSITIONS) as ApplicationStatus[]
+).filter((from) => TRANSITIONS[from].includes(ApplicationStatus.ACCEPTED));
+
 export function employerActionsFrom(
   from: ApplicationStatus,
 ): ApplicationStatus[] {

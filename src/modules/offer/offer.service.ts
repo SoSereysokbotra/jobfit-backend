@@ -15,7 +15,10 @@ import { PrismaService } from '@infra/prisma/prisma.service';
 // status straight through Prisma in six places — which is how an employer could skip the
 // interview stage, and why accepting an offer left no audit row anywhere.
 import { ApplicationTransitionService } from '@modules/application/domain/services/application-transition.service';
-import { WITHDRAWABLE_FROM } from '@modules/application/domain/entities/application.entity';
+import {
+  ACCEPTABLE_FROM,
+  WITHDRAWABLE_FROM,
+} from '@modules/application/domain/entities/application.entity';
 import { ApplicationStatus } from '@shared/kernel/enums/application-status.enum';
 import { TransitionActor } from '@shared/kernel/enums/transition-actor.enum';
 import {
@@ -47,8 +50,12 @@ const MESSAGES_INCLUDE = {
   orderBy: { createdAt: 'asc' },
 } as const;
 
+// `status` is selected on both sides because an offer's own status does not tell you
+// whether it is still live — see ACCEPTABLE_FROM.
 const SEEKER_INCLUDE = {
-  application: { select: { id: true, userId: true, job: { select: JOB_SELECT } } },
+  application: {
+    select: { id: true, userId: true, status: true, job: { select: JOB_SELECT } },
+  },
   messages: MESSAGES_INCLUDE,
 } as const;
 
@@ -57,6 +64,7 @@ const EMPLOYER_INCLUDE = {
     select: {
       id: true,
       userId: true,
+      status: true,
       job: { select: JOB_SELECT },
       user: { select: { id: true, name: true, email: true } },
     },
@@ -65,6 +73,16 @@ const EMPLOYER_INCLUDE = {
 } as const;
 
 const DECIDABLE = ['EXTENDED', 'NEGOTIATING'] as const;
+
+/**
+ * Is the hiring process behind this offer still open?
+ *
+ * "Live" means the application can still reach ACCEPTED, which is derived from the
+ * lifecycle rules rather than listed here, so a change to TRANSITIONS carries through.
+ */
+function isLive(applicationStatus: string): boolean {
+  return (ACCEPTABLE_FROM as readonly string[]).includes(applicationStatus);
+}
 
 @Injectable()
 export class OfferService {
@@ -276,7 +294,7 @@ export class OfferService {
   /** Accept an offer: also archives the user's other active offers. */
   async accept(userId: string, offerId: string): Promise<OfferResponseDto> {
     const offer = await this.loadOwnedOffer(userId, offerId);
-    this.assertDecidable(offer.status);
+    this.assertActionable(offer);
 
     await this.prisma.$transaction(async (tx) => {
       await tx.offer.update({ where: { id: offerId }, data: { status: 'ACCEPTED', decidedAt: new Date() } });
@@ -343,7 +361,7 @@ export class OfferService {
    */
   async decline(userId: string, offerId: string): Promise<OfferResponseDto> {
     const offer = await this.loadOwnedOffer(userId, offerId);
-    this.assertDecidable(offer.status);
+    this.assertActionable(offer);
     await this.prisma.$transaction(async (tx) => {
       await tx.offer.update({ where: { id: offerId }, data: { status: 'DECLINED', decidedAt: new Date() } });
       await this.transitions.transition(
@@ -376,7 +394,7 @@ export class OfferService {
     body: string,
   ): Promise<OfferResponseDto> {
     const offer = await this.loadOwnedOffer(userId, offerId);
-    this.assertDecidable(offer.status);
+    this.assertActionable(offer);
 
     await this.prisma.$transaction(async (tx) => {
       await tx.offerMessage.create({
@@ -445,9 +463,32 @@ export class OfferService {
     });
   }
 
-  private assertDecidable(status: string): void {
-    if (!DECIDABLE.includes(status as (typeof DECIDABLE)[number])) {
-      throw new BadRequestException(`This offer is already ${status.toLowerCase()}.`);
+  /**
+   * Can the candidate still act on this offer?
+   *
+   * TWO questions, not one. The offer's own status answers "have I already replied to it?".
+   * The application's status answers "is this hiring process still open?" — and those two
+   * rows disagree in the live database, because they were written independently before the
+   * lifecycle was enforced. An EXTENDED offer sitting on an ACCEPTED application looks
+   * perfectly live from here, and the old check waved it through: the button then failed
+   * deep inside the transition service with `Invalid status transition: ACCEPTED ->
+   * WITHDRAWN`, which tells the candidate nothing about what went wrong.
+   *
+   * Checking the application first means the message names the real reason.
+   */
+  private assertActionable(offer: {
+    status: string;
+    application: { status: string };
+  }): void {
+    if (!isLive(offer.application.status)) {
+      throw new BadRequestException(
+        'This application is already closed, so its offer can no longer be answered.',
+      );
+    }
+    if (!DECIDABLE.includes(offer.status as (typeof DECIDABLE)[number])) {
+      throw new BadRequestException(
+        `This offer is already ${offer.status.toLowerCase()}.`,
+      );
     }
   }
 

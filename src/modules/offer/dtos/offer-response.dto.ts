@@ -5,6 +5,7 @@
 
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Offer, OfferMessageAuthor, OfferStatus } from '@prisma/client';
+import { ACCEPTABLE_FROM } from '@modules/application/domain/entities/application.entity';
 
 /** One message in the negotiation about an offer, oldest first. */
 export class OfferMessageDto {
@@ -48,7 +49,7 @@ export class OfferJobDto {
 }
 
 type OfferRow = Offer & {
-  application: { id: string; userId: string; job: { id: string; title: string; companyId: string; location: string | null; remoteType: string; minSalary: number | null; maxSalary: number | null; company: { name: string } | null } };
+  application: { id: string; userId: string; status: string; job: { id: string; title: string; companyId: string; location: string | null; remoteType: string; minSalary: number | null; maxSalary: number | null; company: { name: string } | null } };
   messages?: MessageRow[];
 };
 
@@ -64,6 +65,9 @@ function jobOf(row: OfferRow): OfferJobDto {
     maxSalary: j.maxSalary,
   };
 }
+
+/** Offer statuses that claim the candidate has not replied yet. */
+const DECIDABLE_OFFER_STATUSES: OfferStatus[] = ['EXTENDED', 'NEGOTIATING'];
 
 export class OfferResponseDto {
   @ApiProperty() id: string;
@@ -97,6 +101,20 @@ export class OfferResponseDto {
   @ApiPropertyOptional({ type: String, nullable: true }) decidedAt: Date | null;
   @ApiProperty({ type: OfferJobDto }) job: OfferJobDto;
 
+  @ApiProperty({
+    description:
+      "The application's own status. An offer is only as live as the process behind it.",
+  })
+  applicationStatus: string;
+
+  @ApiProperty({
+    description:
+      'True when the offer still reads EXTENDED/NEGOTIATING but the application underneath ' +
+      'it is already closed. Such an offer cannot be accepted or declined — clients must ' +
+      'not present it as an open decision.',
+  })
+  lapsed: boolean;
+
   constructor(row: OfferRow) {
     this.id = row.id;
     this.applicationId = row.applicationId;
@@ -115,6 +133,14 @@ export class OfferResponseDto {
     this.createdAt = row.createdAt;
     this.decidedAt = row.decidedAt;
     this.job = jobOf(row);
+    this.applicationStatus = row.application.status;
+    // Derived here rather than filtered out of the query on purpose: the candidate DID
+    // receive this offer, and deleting it from the response would rewrite their history to
+    // tidy up a display problem. Reporting it as lapsed keeps the record and still stops
+    // the UI offering a decision that cannot be made.
+    this.lapsed =
+      DECIDABLE_OFFER_STATUSES.includes(row.status) &&
+      !(ACCEPTABLE_FROM as readonly string[]).includes(row.application.status);
   }
 }
 

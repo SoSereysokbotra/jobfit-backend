@@ -23,7 +23,13 @@ const JOB = {
   company: { name: 'Acme' },
 };
 
-const offerRow = (over: Record<string, unknown> = {}) => ({
+/**
+ * `appStatus` is the status of the application the offer HANGS ON, as seen through the
+ * seeker-side include. It is separate from `setup({ appStatus })` — which drives the
+ * employer-side lookup — because the point of several tests below is that those two can
+ * disagree in the real database.
+ */
+const offerRow = (over: Record<string, unknown> = {}, appStatus = ApplicationStatus.OFFER) => ({
   id: 'offer-1',
   applicationId: 'app-1',
   status: 'EXTENDED',
@@ -42,13 +48,20 @@ const offerRow = (over: Record<string, unknown> = {}) => ({
   application: {
     id: 'app-1',
     userId: 'user-1',
+    status: appStatus,
     job: JOB,
     user: { id: 'user-1', name: 'Dara', email: 'dara@example.test' },
   },
   ...over,
 });
 
-const setup = (opts: { appStatus?: ApplicationStatus; offer?: Record<string, unknown>; others?: unknown[] } = {}) => {
+const setup = (opts: {
+  appStatus?: ApplicationStatus;
+  offer?: Record<string, unknown>;
+  /** Status of the application on the loaded offer row (seeker side). */
+  offerAppStatus?: ApplicationStatus;
+  others?: unknown[];
+} = {}) => {
   const tx = {
     offer: {
       upsert: jest.fn().mockResolvedValue({ id: 'offer-1' }),
@@ -66,7 +79,10 @@ const setup = (opts: { appStatus?: ApplicationStatus; offer?: Record<string, unk
         job: { companyId: 'co-1' },
       }),
     },
-    offer: { findUnique: jest.fn().mockResolvedValue(offerRow(opts.offer)) },
+    offer: {
+      findUnique: jest.fn().mockResolvedValue(offerRow(opts.offer, opts.offerAppStatus)),
+      findMany: jest.fn().mockResolvedValue([offerRow(opts.offer, opts.offerAppStatus)]),
+    },
     offerMessage: {
       create: jest.fn().mockResolvedValue({}),
       updateMany: jest.fn().mockResolvedValue({ count: 0 }),
@@ -311,6 +327,84 @@ describe('OfferService status writes', () => {
       expect(movesOf(transitions)).toEqual([
         [ApplicationStatus.NEGOTIATING, TransitionActor.CANDIDATE],
       ]);
+    });
+  });
+
+  // An offer row and its application row were written independently before the lifecycle
+  // was enforced, so the live database holds offers reading EXTENDED/NEGOTIATING on
+  // applications that are already ACCEPTED or ARCHIVED. `accept` already refuses to SWEEP
+  // those up; these pin that the candidate cannot act on one directly either.
+  describe('offers stranded on a closed application', () => {
+    it.each([
+      ApplicationStatus.ACCEPTED,
+      ApplicationStatus.ARCHIVED,
+      ApplicationStatus.WITHDRAWN,
+      ApplicationStatus.REJECTED,
+    ])('refuses accept when the application is %s', async (offerAppStatus) => {
+      const { service, transitions } = setup({ offerAppStatus });
+
+      await expect(service.accept('user-1', 'offer-1')).rejects.toThrow(
+        'This application is already closed',
+      );
+      // The refusal happens BEFORE any write is attempted. Reaching the chokepoint would
+      // produce "Invalid status transition: ACCEPTED -> WITHDRAWN", which names the
+      // mechanism instead of the reason.
+      expect(transitions.transition).not.toHaveBeenCalled();
+    });
+
+    it('refuses decline on a closed application', async () => {
+      const { service } = setup({ offerAppStatus: ApplicationStatus.ACCEPTED });
+
+      await expect(service.decline('user-1', 'offer-1')).rejects.toThrow(
+        'This application is already closed',
+      );
+    });
+
+    it('refuses a new message on a closed application', async () => {
+      const { service, tx } = setup({
+        offer: { status: 'NEGOTIATING' },
+        offerAppStatus: ApplicationStatus.ARCHIVED,
+      });
+
+      await expect(
+        service.postCandidateMessage('user-1', 'offer-1', 'Still interested?'),
+      ).rejects.toThrow('This application is already closed');
+      expect(tx.offerMessage.create).not.toHaveBeenCalled();
+    });
+
+    it('reports the offer as lapsed rather than deleting it from the response', async () => {
+      // The candidate DID receive this offer. Filtering it out of the list would rewrite
+      // their history to tidy up a display problem; `lapsed` keeps the record and still
+      // stops the UI presenting a decision that cannot be made.
+      const { service } = setup({ offerAppStatus: ApplicationStatus.ACCEPTED });
+
+      const offers = await service.listMyOffers('user-1');
+
+      expect(offers).toHaveLength(1);
+      expect(offers[0].lapsed).toBe(true);
+      expect(offers[0].status).toBe('EXTENDED'); // unchanged — this is what the row says
+      expect(offers[0].applicationStatus).toBe(ApplicationStatus.ACCEPTED);
+    });
+
+    it('leaves a genuinely live offer alone', async () => {
+      const { service } = setup({ offerAppStatus: ApplicationStatus.OFFER });
+
+      const offers = await service.listMyOffers('user-1');
+
+      expect(offers[0].lapsed).toBe(false);
+    });
+
+    it('does not call an already-answered offer lapsed', async () => {
+      // ACCEPTED application + ACCEPTED offer is the normal end of a successful hire, not
+      // a divergence. Only an offer still claiming to await a reply can be stranded.
+      const { service } = setup({
+        offer: { status: 'ACCEPTED' },
+        offerAppStatus: ApplicationStatus.ACCEPTED,
+      });
+
+      const offers = await service.listMyOffers('user-1');
+
+      expect(offers[0].lapsed).toBe(false);
     });
   });
 
