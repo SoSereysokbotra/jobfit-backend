@@ -164,6 +164,18 @@ export function candidateActionsFrom(
  * SUBMITTED — and those cards sit in the same board column as SCREENING ones. A rule
  * derived per column rather than per card gets exactly those candidates wrong.
  */
+/**
+ * Statuses a candidate can still walk away from.
+ *
+ * Derived from TRANSITIONS rather than listed, so it cannot drift from the rules. Callers
+ * that close applications in bulk need this: an application can be finished while its offer
+ * row still looks live, and asking to withdraw one of those refuses the transition — which,
+ * inside a transaction, takes the caller's real work down with it.
+ */
+export const WITHDRAWABLE_FROM: readonly ApplicationStatus[] = (
+  Object.keys(TRANSITIONS) as ApplicationStatus[]
+).filter((from) => TRANSITIONS[from].includes(ApplicationStatus.WITHDRAWN));
+
 export function employerActionsFrom(
   from: ApplicationStatus,
 ): ApplicationStatus[] {

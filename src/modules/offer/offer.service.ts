@@ -15,6 +15,7 @@ import { PrismaService } from '@infra/prisma/prisma.service';
 // status straight through Prisma in six places — which is how an employer could skip the
 // interview stage, and why accepting an offer left no audit row anywhere.
 import { ApplicationTransitionService } from '@modules/application/domain/services/application-transition.service';
+import { WITHDRAWABLE_FROM } from '@modules/application/domain/entities/application.entity';
 import { ApplicationStatus } from '@shared/kernel/enums/application-status.enum';
 import { TransitionActor } from '@shared/kernel/enums/transition-actor.enum';
 import {
@@ -292,7 +293,22 @@ export class OfferService {
       );
 
       const others = await tx.offer.findMany({
-        where: { id: { not: offerId }, status: { in: ['EXTENDED', 'NEGOTIATING'] }, application: { userId } },
+        where: {
+          id: { not: offerId },
+          status: { in: ['EXTENDED', 'NEGOTIATING'] },
+          application: {
+            userId,
+            // Only applications this can legally close.
+            //
+            // A live-looking offer row can sit on an application that is already finished
+            // — the two were written independently before the lifecycle was enforced, so
+            // ACCEPTED applications still carry EXTENDED offers. Sweeping one of those up
+            // asks for ACCEPTED -> WITHDRAWN, which is refused, and because this runs in a
+            // transaction the refusal rolled back the accept the candidate actually asked
+            // for: clicking Accept failed outright.
+            status: { in: WITHDRAWABLE_FROM as unknown as ApplicationStatus[] },
+          },
+        },
         select: { id: true, applicationId: true },
       });
       for (const o of others) {

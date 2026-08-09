@@ -179,6 +179,29 @@ describe('OfferService status writes', () => {
       ]);
     });
 
+    it('ignores live-looking offers on applications that are already finished', async () => {
+      // Reported from the running app: clicking Accept failed with
+      // "Invalid status transition: ACCEPTED → WITHDRAWN". The candidate had offers still
+      // marked EXTENDED on applications already ACCEPTED — the offer row and the
+      // application status were written independently before the lifecycle was enforced.
+      // Sweeping one up asked for an illegal move, and because this runs in a transaction
+      // the refusal rolled back the accept itself.
+      const { service, tx } = setup();
+
+      await service.accept('user-1', 'offer-1');
+
+      const where = tx.offer.findMany.mock.calls[0][0].where;
+      expect(where.application.status.in).toEqual(
+        expect.arrayContaining([
+          ApplicationStatus.OFFER,
+          ApplicationStatus.NEGOTIATING,
+          ApplicationStatus.SCREENING,
+        ]),
+      );
+      expect(where.application.status.in).not.toContain(ApplicationStatus.ACCEPTED);
+      expect(where.application.status.in).not.toContain(ApplicationStatus.ARCHIVED);
+    });
+
     it('WITHDRAWS the other live applications rather than archiving them', async () => {
       // ARCHIVED is reachable only from a terminal state, so the old write produced a state
       // the rules say is unreachable. WITHDRAWN is legal and truthful: the candidate walked
