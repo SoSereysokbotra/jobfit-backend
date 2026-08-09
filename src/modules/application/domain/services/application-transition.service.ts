@@ -225,9 +225,10 @@ export class ApplicationTransitionService {
         userId: recipient,
         type: $Enums.NotificationType.APPLICATION,
         title: NOTIFICATION_TITLES[newStatus] ?? 'Application updated',
-        body:
-          params.description ??
-          `${app.job.title} — now ${newStatus.toLowerCase()}.`,
+        // The caller's own description when it has one — those read as sentences
+        // ("Candidate accepted the offer"). The fallback names the JOB, because the title
+        // above already says what happened and the reader needs to know which application.
+        body: params.description ?? `Your application for ${app.job.title}.`,
         link: `/applications/${applicationId}`,
       },
       tx,

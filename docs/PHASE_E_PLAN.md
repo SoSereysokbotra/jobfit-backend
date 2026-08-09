@@ -313,6 +313,24 @@ Booted `dist/main`, logged in as `strong@seed.jobfits.test`:
 - `GET /jobs` → all three postings **omit** `employmentType` and `experienceLevel`
   entirely, rather than reporting a default. Including the teaching one.
 
+**E4 confirmed end to end — a real notification, from a real stage change.** As
+`employer@seed.jobfits.test`, moved `soviseth869@gmail.com`'s *Primary School Mathematics
+Teacher* application `SCREENING → INTERVIEW`. The row that appeared:
+
+```
+to: soviseth869@gmail.com
+[APPLICATION] You have moved to interview
+    link=/applications/62d9cd80-…  read=false
+```
+
+Addressed to the **counterparty**, not the employer who made the move. Unread. Deep link
+resolves. `notifications in database: 1` — it was 0 before the transition, so nothing else
+wrote it. This is the one thing the previous handoff's rule 3 demanded and it now holds.
+
+The fallback body read `"… — now interview."` — grammatically wrong, and only visible by
+looking at the row. Fixed to name the job instead, since the title already says what
+happened. **Third defect this session found by looking at output rather than code.**
+
 ### ⚠️ E1 could NOT be confirmed against live data, and that matters
 
 §6.3 of the 08-09 handoff describes four offers reading `EXTENDED`/`NEGOTIATING` on
