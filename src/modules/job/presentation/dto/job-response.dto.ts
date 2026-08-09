@@ -51,6 +51,25 @@ export class JobResponseDto {
   @ApiProperty({ type: [String] }) benefits: string[];
   @ApiPropertyOptional({ type: Number, nullable: true }) bonusPct?: number | null;
 
+  /**
+   * What the posting is. ABSENT when the employer has not said — which is every job
+   * created before these columns existed.
+   *
+   * Clients must render an absent value as nothing. The frontend previously hardcoded
+   * "Full-time" and "Mid-level" in its mapper because the API had nothing to give it, so
+   * every job card asserted both — including on a part-time teaching post. Same rule as
+   * CompanyProfileDto: a fact we do not have must not look like a fact we do.
+   */
+  @ApiPropertyOptional({
+    enum: ['FULL_TIME', 'PART_TIME', 'CONTRACT', 'TEMPORARY', 'FREELANCE'],
+  })
+  employmentType?: string;
+
+  @ApiPropertyOptional({
+    enum: ['INTERN', 'ENTRY', 'MID', 'SENIOR', 'LEAD', 'MANAGER', 'DIRECTOR', 'C_LEVEL'],
+  })
+  experienceLevel?: string;
+
   @ApiProperty({
     enum: ['INTERNAL', 'EXTERNAL'],
     description:

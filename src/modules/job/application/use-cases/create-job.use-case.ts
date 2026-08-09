@@ -47,6 +47,8 @@ export class CreateJobUseCase implements IUseCase<CreateJobRequest, Job> {
       requirements: dto.requirements ?? [],
       benefits: dto.benefits ?? [],
       bonusPct: dto.bonusPct,
+      employmentType: dto.employmentType,
+      experienceLevel: dto.experienceLevel,
       createdAt: new Date(),
       updatedAt: new Date(),
     });

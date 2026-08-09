@@ -102,6 +102,9 @@ function toJobResponse(row: JobWithSkills): JobResponseDto {
     requirements: row.requirements ?? [],
     benefits: row.benefits ?? [],
     bonusPct: row.bonusPct ?? null,
+    // Absent when the employer has not said. Never defaulted — see JobResponseDto.
+    employmentType: row.employmentType ?? undefined,
+    experienceLevel: row.experienceLevel ?? undefined,
     // Read from the row rather than hardcoded INTERNAL: an employer-posted job is
     // internal today, but the column is the single source of truth for that rule.
     sourceType: row.sourceType,

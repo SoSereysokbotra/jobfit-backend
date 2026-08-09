@@ -10,6 +10,25 @@ import { JobUpdatedEvent } from "../events/job-updated.event";
 /** Can this job be applied to inside JobFits, or only on the site it came from? */
 export type JobSourceType = "INTERNAL" | "EXTERNAL";
 
+/** Mirrors the Prisma `EmploymentType` enum. */
+export type EmploymentType =
+  | "FULL_TIME"
+  | "PART_TIME"
+  | "CONTRACT"
+  | "TEMPORARY"
+  | "FREELANCE";
+
+/** Mirrors the Prisma `JobLevel` enum. */
+export type ExperienceLevel =
+  | "INTERN"
+  | "ENTRY"
+  | "MID"
+  | "SENIOR"
+  | "LEAD"
+  | "MANAGER"
+  | "DIRECTOR"
+  | "C_LEVEL";
+
 export interface JobProps {
   companyId: string;
   title: string;
@@ -23,6 +42,13 @@ export interface JobProps {
   requirements: string[];
   benefits: string[];
   bonusPct?: number;
+  /**
+   * What the posting is, when the employer has said. Undefined is a real answer and must
+   * NOT be defaulted anywhere downstream — the frontend's mapper defaulted these to
+   * "Full-time"/"Mid-level" and every job card claimed both regardless of the posting.
+   */
+  employmentType?: EmploymentType;
+  experienceLevel?: ExperienceLevel;
   /** Defaults to INTERNAL: a job created here is applicable here. */
   sourceType?: JobSourceType;
   /** The original posting, for EXTERNAL jobs. Where the user must actually apply. */
@@ -81,6 +107,12 @@ export class Job extends AggregateRoot<JobProps> {
   }
   get bonusPct(): number | undefined {
     return this.props.bonusPct;
+  }
+  get employmentType(): EmploymentType | undefined {
+    return this.props.employmentType;
+  }
+  get experienceLevel(): ExperienceLevel | undefined {
+    return this.props.experienceLevel;
   }
 
   private constructor(props: JobProps, id?: string) {
@@ -151,6 +183,8 @@ export class Job extends AggregateRoot<JobProps> {
     requirements?: string[];
     benefits?: string[];
     bonusPct?: number;
+    employmentType?: EmploymentType;
+    experienceLevel?: ExperienceLevel;
   }): Result<void> {
     if (this.props.status.isClosed()) {
       return Result.fail("Cannot update a closed job");
@@ -196,6 +230,14 @@ export class Job extends AggregateRoot<JobProps> {
     if (fields.bonusPct !== undefined) {
       this.props.bonusPct = fields.bonusPct;
       changed.push("bonusPct");
+    }
+    if (fields.employmentType !== undefined) {
+      this.props.employmentType = fields.employmentType;
+      changed.push("employmentType");
+    }
+    if (fields.experienceLevel !== undefined) {
+      this.props.experienceLevel = fields.experienceLevel;
+      changed.push("experienceLevel");
     }
 
     this.props.updatedAt = new Date();

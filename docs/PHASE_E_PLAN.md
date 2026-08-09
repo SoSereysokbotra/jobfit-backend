@@ -94,12 +94,31 @@ at least as much as a success does. 4xx no longer retries.
 "Technology", because the mapper hardcodes those three. Carried over from 08-07.
 
 **Root cause.** `Job` has no `employmentType`, no `experienceLevel` and no industry the API
-exposes — so there is nothing truthful to map. The enums `EmploymentType` and `JobLevel`
-already exist in `schema.prisma` and are used by nothing.
+exposes — so there was nothing truthful to map. The enums `EmploymentType` and `JobLevel`
+already existed in `schema.prisma` and were used by no model.
 
-- [ ] Findings
-- [ ] Change
-- [ ] Test
+**The columns exist now, and every existing row is NULL.** Backfilling a default would
+recreate the bug one layer deeper and much harder to see: a fabricated value in the
+database is indistinguishable from an employer's own answer. "The employer has not said"
+is the truth about all 55 existing postings.
+
+**Making the frontend fields optional is what did the work.** `type`, `level` and
+`industry` were required on the `Job` view type, which is *why* the mapper defaulted them.
+Turning them optional produced 17 type errors — every consumer that had been silently
+handed a plausible lie, now forced to decide what "not known" renders as. All three
+render as nothing; facet sections hide when no job in the set states the field, rather
+than showing checkboxes that all read 0.
+
+`industry` now comes off the company profile, which the backend already resolves to a
+name — and only on the DETAIL response, so it is genuinely absent in list results.
+
+The employer's create-job form grew both fields, defaulting to "Not specified". A column
+no one can fill is not a fix.
+
+- [x] Findings
+- [x] Change (backend) — 2 nullable columns, migration, entity/repo/mapper/DTOs/use-cases
+- [x] Change (frontend) — optional types, honest mapper, 17 call sites, employer form
+- [x] Test — `job.mapper.spec.ts` 3/3; backend suite 338/338; both `tsc` clean
 
 ---
 

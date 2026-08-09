@@ -459,6 +459,17 @@ model Job {
   minSalary   Int?
   maxSalary   Int?
 
+  // What the posting actually is. NULLABLE ON PURPOSE, and null must render as nothing.
+  //
+  // The frontend hardcoded `type: "Full-time"` and `level: "Mid-level"` in its mapper
+  // because there was nothing to map, so every job card claimed both regardless of the
+  // posting — including a part-time teaching role. The enums existed here and were used by
+  // nothing. A job whose employer has not said is not a full-time mid-level job; it is a
+  // job we do not know that about, and the two must not look the same. Same judgement as
+  // CompanyProfileDto, which stopped inventing company facts for the same reason.
+  employmentType  EmploymentType?
+  experienceLevel JobLevel?
+
   // Structured posting content (employer-authored). Empty arrays when unset.
   responsibilities String[] @default([])
   requirements     String[] @default([])

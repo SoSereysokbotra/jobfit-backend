@@ -137,6 +137,8 @@ export class JobService {
       requirements: dto.requirements,
       benefits: dto.benefits,
       bonusPct: dto.bonusPct,
+      employmentType: dto.employmentType,
+      experienceLevel: dto.experienceLevel,
     });
     if (updateResult.isFailure) throw new BadRequestException(updateResult.error);
 

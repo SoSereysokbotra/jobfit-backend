@@ -60,6 +60,8 @@ export class PrismaJobRepository implements IJobRepository {
         requirements: job.requirements,
         benefits: job.benefits,
         bonusPct: job.bonusPct ?? null,
+        employmentType: job.employmentType ?? null,
+        experienceLevel: job.experienceLevel ?? null,
         skills: {
           create: job.skillIds.map((skillId) => ({ skillId })),
         },
@@ -76,6 +78,8 @@ export class PrismaJobRepository implements IJobRepository {
         requirements: job.requirements,
         benefits: job.benefits,
         bonusPct: job.bonusPct ?? null,
+        employmentType: job.employmentType ?? null,
+        experienceLevel: job.experienceLevel ?? null,
         updatedAt: job.props.updatedAt,
         skills: {
           deleteMany: {},
@@ -111,6 +115,10 @@ export class PrismaJobRepository implements IJobRepository {
         requirements: row.requirements ?? [],
         benefits: row.benefits ?? [],
         bonusPct: row.bonusPct ?? undefined,
+        // NULL stays undefined all the way to the client. It means "the employer has not
+        // said", which is not the same as any particular type or level.
+        employmentType: row.employmentType ?? undefined,
+        experienceLevel: row.experienceLevel ?? undefined,
         sourceType: row.sourceType,
         externalUrl: row.externalUrl ?? undefined,
         createdAt: row.createdAt,

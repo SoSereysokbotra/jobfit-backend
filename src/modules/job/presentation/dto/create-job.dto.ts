@@ -7,6 +7,25 @@ export enum RemoteTypeDto {
   ON_SITE = 'ON_SITE',
 }
 
+export enum EmploymentTypeDto {
+  FULL_TIME = 'FULL_TIME',
+  PART_TIME = 'PART_TIME',
+  CONTRACT = 'CONTRACT',
+  TEMPORARY = 'TEMPORARY',
+  FREELANCE = 'FREELANCE',
+}
+
+export enum ExperienceLevelDto {
+  INTERN = 'INTERN',
+  ENTRY = 'ENTRY',
+  MID = 'MID',
+  SENIOR = 'SENIOR',
+  LEAD = 'LEAD',
+  MANAGER = 'MANAGER',
+  DIRECTOR = 'DIRECTOR',
+  C_LEVEL = 'C_LEVEL',
+}
+
 export class CreateJobDto {
   @ApiProperty()
   @IsString()
@@ -68,4 +87,18 @@ export class CreateJobDto {
   @IsInt()
   @Min(0)
   bonusPct?: number;
+
+  /**
+   * Optional on purpose. An employer who leaves these blank has said nothing about them,
+   * and the API returns nothing — it does not fill in a plausible-looking default.
+   */
+  @ApiPropertyOptional({ enum: EmploymentTypeDto })
+  @IsOptional()
+  @IsEnum(EmploymentTypeDto)
+  employmentType?: EmploymentTypeDto;
+
+  @ApiPropertyOptional({ enum: ExperienceLevelDto })
+  @IsOptional()
+  @IsEnum(ExperienceLevelDto)
+  experienceLevel?: ExperienceLevelDto;
 }
