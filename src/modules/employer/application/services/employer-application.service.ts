@@ -5,7 +5,6 @@
 // operation is scoped to the employer's company (the authorization boundary).
 
 import {
-  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,

@@ -5,8 +5,13 @@
 // Before this existed the lifecycle rules were a reference book callers were trusted to
 // consult: of nine status-write sites, two consulted it and seven did not, and six wrote no
 // audit row at all — including accept, decline, negotiate and rescind, the four moments that
-// decide a hire. Every status change now goes through here, and an ESLint rule plus a guard
-// test (Phase 4) make going around it mechanical to catch.
+// decide a hire. Every status change now goes through here, and `status-write-guard.spec.ts`
+// scans `src/**` so going around it is mechanical to catch.
+//
+// That guard is a jest spec and NOT an ESLint rule, which this comment used to claim. An AST
+// selector cannot tell a legitimate write to `application.update` (the per-actor archive
+// columns) from a status write, so the rule would either miss bypasses or cry wolf on
+// correct code. The spec was proven by planting a real bypass and watching it fail.
 
 import {
   BadRequestException,

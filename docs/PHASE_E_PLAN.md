@@ -238,12 +238,38 @@ under-credit).
 shipped its guard as a jest spec instead, deliberately.
 
 Adopting ESLint is a real decision, not a side effect — the risk is a hundred pre-existing
-violations turning into noise nobody reads. Adopt with rules that are *already true* of
-this codebase, so the baseline is green on day one.
+violations turning into noise nobody reads. Adopted with rules that are *already true* of
+this codebase, so the baseline is green on day one and any red is a regression in the
+change in front of you.
 
-- [ ] Findings
-- [ ] Change
-- [ ] Test
+**Baselines, and what happened to them:**
+
+| | on adoption | after |
+|---|---|---|
+| backend | 10 errors, 8 files | **0** — every one fixed, none ruled away |
+| frontend | 49 errors, 10 warnings | **0 errors**, 10 warnings kept ON |
+
+The frontend's 10 warnings are left visible on purpose: 9 are `<img>` vs `next/image`,
+which is a real change with real trade-offs and not a lint cleanup, and 1 is a genuine
+`exhaustive-deps` worth fixing properly. Silencing them would mean the count can never
+be a signal.
+
+**It found a real bug on day one.** `NotificationBell` was imported in `topnav.tsx` and
+never rendered — so the entire notification feature, including everything built in E4 this
+session, was unreachable from the app. Nobody found that by using the page; `no-unused-vars`
+found it in the first run. It also caught a missing `useMemo` dependency in the `useOffers`
+rewrite from E2, correct only by coincidence.
+
+**Deliberately NOT added: an ESLint rule for the status chokepoint.** The comment at the
+top of `application-transition.service.ts` claimed one existed; it never did. An AST
+selector cannot tell a legitimate `application.update` (the per-actor archive columns)
+from a status write, so the rule would either miss bypasses or cry wolf on correct code.
+`status-write-guard.spec.ts` already does this properly and was proven by planting a real
+bypass. The stale comment is corrected rather than the claim being made true.
+
+- [x] Findings
+- [x] Change — eslint 8 + typescript-eslint (backend), `next/core-web-vitals` (frontend)
+- [x] Test — `npm run lint` exits 0 in both repos; backend 380/380; both `tsc` clean
 
 ---
 

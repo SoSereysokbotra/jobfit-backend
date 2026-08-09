@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { IJobRepository, JOB_REPOSITORY } from '../../domain/job.repository.interface';
 import { Job } from '../../domain/entities/job.entity';

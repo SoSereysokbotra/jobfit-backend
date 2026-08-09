@@ -4,5 +4,5 @@ import { OnEvent } from '@nestjs/event-emitter';
 @Injectable()
 export class ApplicationSubmittedListener {
   @OnEvent('ApplicationSubmittedEvent')
-  async handle(event: any) { /* TODO: confirm email to job seeker */ }
+  async handle(_event: any) { /* TODO: confirm email to job seeker */ }
 }

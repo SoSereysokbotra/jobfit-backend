@@ -1,0 +1,10 @@
+{
+  // Type-aware linting needs every file it lints to belong to a TypeScript project, and
+  // tsconfig.json includes only `src` — the e2e specs under `test/` are outside it.
+  //
+  // A separate config rather than widening tsconfig.json: there is no tsconfig.build.json
+  // here, so `nest build` reads tsconfig.json directly, and adding `test/**/*` there would
+  // compile the e2e specs into dist/. Linting is not a reason to change what ships.
+  "extends": "./tsconfig.json",
+  "include": ["src/**/*", "test/**/*"]
+}

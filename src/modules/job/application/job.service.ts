@@ -120,7 +120,7 @@ export class JobService {
     if (!job) throw new NotFoundException('Job not found');
     if (job.companyId !== companyId) throw new ForbiddenException();
 
-    let remoteType = dto.remoteType ? RemoteType.fromString(dto.remoteType).value : undefined;
+    const remoteType = dto.remoteType ? RemoteType.fromString(dto.remoteType).value : undefined;
     let salaryRange: SalaryRange | undefined;
     if (dto.minSalary !== undefined && dto.maxSalary !== undefined) {
       salaryRange = SalaryRange.create(dto.minSalary, dto.maxSalary).value;

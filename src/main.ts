@@ -114,4 +114,7 @@ async function bootstrap() {
   logger.log(`📚  Swagger docs at   http://localhost:${port}/api/docs`);
 }
 
-bootstrap();
+// `void`: nothing can await the process entry point, and marking it explicitly says that
+// on purpose rather than leaving a promise nobody looked at. A rejection here already
+// surfaces as an unhandled rejection and kills the process, which is what we want.
+void bootstrap();
