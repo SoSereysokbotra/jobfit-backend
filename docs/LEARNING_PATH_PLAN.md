@@ -5,6 +5,37 @@
 
 ---
 
+## STATUS — all five phases done 2026-08-09
+
+| Phase | Commit |
+|---|---|
+| 1 — service | `b7dcf28` |
+| 2 — endpoint | `5c9ab03` |
+| 3 — page | `1530f8d` (frontend) |
+| 4 — delete the hardcoded list | `5a82f8d` / `2363cac` |
+| 5 — verified live | below |
+
+**The measurement, before and after.** Before: the list could not vary by user, so for anyone
+outside software **10 of 10 recommendations were irrelevant**. After, proven end to end with a
+real teaching posting and a real application:
+
+```
+teaching job  ->  5 teaching requirements, 0 technology
+software job  ->  7 software requirements
+```
+
+Same code, same user, same request. The field is in the data.
+
+Also verified: gap counts for the four seeded candidates mirror what screening measured on the
+same job through a different code path — 6/7, 3/7, 1/7 and 0/7 covered came back as 1, 4, 6
+and 7 gaps. The requirements are reproduced in the employer's own words, each carrying the job
+titles behind its count.
+
+jest 321/321, tsc clean in both repos. The Phase 5 test job and its application were removed
+afterwards; no test data remains.
+
+---
+
 ## 1. The bug
 
 `/learning` tells every user the same thing, and for most of them it is wrong.
