@@ -1,14 +1,9 @@
 // src/modules/learning/presentation/controllers/learning.controller.ts
 //
-// Learning-path endpoints. The global JwtAuthGuard secures by default; the skill-resources
-// route is @Public (generic catalog data). Learning path is own-only.
+// Learning endpoints. The global JwtAuthGuard secures by default; the skill-resources route
+// is @Public (generic catalog data). Skill gaps are own-only, scoped by the token.
 
-import {
-  Controller,
-  ForbiddenException,
-  Get,
-  Param,
-} from '@nestjs/common';
+import { Controller, Get, Param } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOkResponse,
@@ -24,7 +19,6 @@ import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { Public } from '@common/decorators/public.decorator';
 import {
   LearningPathService,
-  LearningPathView,
   SkillResourcesView,
 } from '../../application/services/learning-path.service';
 import { SkillGapSummaryDto } from '../../application/dtos/skill-gap-summary.dto';
@@ -60,20 +54,9 @@ export class LearningController {
     return this.learningPathService.getSkillGaps(user.id);
   }
 
-  @Get('learning-paths/:userId')
-  @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Skill-gap learning path for a user (own only)' })
-  async learningPath(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('userId') userId: string,
-  ): Promise<LearningPathView> {
-    if (user.id !== userId) {
-      throw new ForbiddenException(
-        'You can only view your own learning path',
-      );
-    }
-    return this.learningPathService.getLearningPath(userId);
-  }
+  // GET learning-paths/:userId is gone. It returned ten hardcoded technology skills as
+  // anyone's learning path, and took a user id in the path only to refuse everybody else's.
+  // GET learning/skill-gaps above replaces it and reads the id from the token.
 
   @Get('skills/:skillId/learning-resources')
   @Public()

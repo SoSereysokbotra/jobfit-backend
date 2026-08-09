@@ -1,7 +1,8 @@
 // src/modules/learning/application/services/learning-path.service.ts
 //
-// Skill-gap learning paths, computed over existing UserSkill data (no external course API).
-// Gaps = in-demand skills the user doesn't have; each comes with curated resources.
+// Skill gaps, computed from the jobs a user actually applied to (no external course API).
+// Gaps = requirements those postings state that the user's CV does not evidence, so the
+// answer follows their field instead of assuming everyone is a software engineer.
 
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@infra/prisma/prisma.service';
@@ -12,23 +13,10 @@ import {
   SkillGapService,
 } from '@modules/matching/application/services/skill-gap.service';
 import { SkillGapSummaryDto } from '../dtos/skill-gap-summary.dto';
-import { ERROR_MESSAGES } from '@common/constants/error-messages';
 import {
-  IN_DEMAND_SKILLS,
   LearningResource,
   resourcesForSkill,
 } from '../../domain/learning-resources.catalog';
-
-export interface SkillGapRecommendation {
-  skill: string;
-  resources: LearningResource[];
-}
-
-export interface LearningPathView {
-  userId: string;
-  currentSkills: string[];
-  gapSkills: SkillGapRecommendation[];
-}
 
 export interface SkillResourcesView {
   skillId: string;
@@ -134,27 +122,10 @@ export class LearningPathService {
     };
   }
 
-  /** Current skills + gap recommendations (in-demand skills the user lacks). */
-  async getLearningPath(userId: string): Promise<LearningPathView> {
-    const user = await this.userRepository.findById(userId);
-    if (!user) throw new NotFoundException(ERROR_MESSAGES.USER_NOT_FOUND);
-
-    const userSkills = await this.userSkillRepository.findByUserId(userId);
-    const currentSkills: string[] = [];
-    for (const userSkill of userSkills) {
-      const skill = await this.userSkillRepository.findSkillById(
-        userSkill.skillId,
-      );
-      if (skill) currentSkills.push(skill.name);
-    }
-    const have = new Set(currentSkills.map((n) => n.toLowerCase()));
-
-    const gapSkills: SkillGapRecommendation[] = IN_DEMAND_SKILLS.filter(
-      (skill) => !have.has(skill.toLowerCase()),
-    ).map((skill) => ({ skill, resources: resourcesForSkill(skill) }));
-
-    return { userId, currentSkills, gapSkills };
-  }
+  // getLearningPath lived here. It returned every one of ten hardcoded technology skills the
+  // user did not have, as their personal learning path — so for anyone outside software it
+  // was wrong ten times out of ten, and it never read a single thing the user had done.
+  // getSkillGaps above replaces it.
 
   /** Learning resources for a single skill. */
   async getSkillLearningResources(

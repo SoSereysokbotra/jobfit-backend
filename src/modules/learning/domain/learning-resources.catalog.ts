@@ -1,8 +1,17 @@
 // src/modules/learning/domain/learning-resources.catalog.ts
 //
 // Curated learning-resource catalog (no external course API). Keyed by lowercased skill
-// name; unknown skills fall back to generic search links. IN_DEMAND_SKILLS drives the
-// skill-gap analysis.
+// name; unknown skills fall back to generic search links.
+//
+// This file used to export IN_DEMAND_SKILLS — the catalog's own keys — and the learning page
+// measured EVERY user against them, so a mathematics teacher was told her skill gaps were
+// Docker and Kubernetes. Ten recommendations, ten of them irrelevant, none derived from
+// anything she had done. Gaps now come from the jobs a user actually applied to
+// (LearningPathService.getSkillGaps).
+//
+// The catalog itself was never the problem and stays: it serves the public
+// GET /skills/:skillId/learning-resources route. Using its KEYS as a universal list of what
+// everyone should learn was the problem.
 
 export interface LearningResource {
   title: string;
@@ -50,9 +59,6 @@ const CATALOG: Record<string, LearningResource[]> = {
     { title: 'Improving Communication Skills', provider: 'Coursera', url: 'https://www.coursera.org/learn/wharton-communication-skills' },
   ],
 };
-
-/** Skills commonly in demand; a user missing these gets them as gap recommendations. */
-export const IN_DEMAND_SKILLS: string[] = Object.keys(CATALOG);
 
 /** Resources for a skill name — curated when known, otherwise generic search links. */
 export function resourcesForSkill(skillName: string): LearningResource[] {
