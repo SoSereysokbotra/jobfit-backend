@@ -275,15 +275,53 @@ bypass. The stale comment is corrected rather than the claim being made true.
 
 ## E7 — Phase D (GPU)
 
-Hardware-blocked. See `docs/RAG_PHASE_D_HANDOFF.md`. Nothing in this phase can unblock it;
-recorded here so the list is complete rather than silently shortened.
+**Confirmed still blocked, not skipped.** `docs/RAG_PHASE_D_HANDOFF.md` §2 and §11: the
+next step is running the existing generation harness against full `qwen3` unchanged, and
+full `qwen3` is unusable on this laptop — it needs the GPU box. Local work is pinned to
+`qwen3:0.6b`. Nothing in this phase can unblock that, and there is no version of it that
+can be done here honestly; running the harness against `qwen3:0.6b` and reporting the
+number as Phase D's would be exactly the rounding-up the project forbids.
+
+`jobfits-ai-service/runpod-worker/` is the staging ground for it when hardware exists.
+
+- [x] Confirmed blocked (checked, not assumed)
 
 ---
 
 ## Verification log
 
-Numbers go here as they are measured, with `n`.
-
 | Item | Claim | Number | n | Caveat |
 |---|---|---|---|---|
-| — | — | — | — | — |
+| E1 | Call sites deciding "is this offer actionable?" from the offer's status alone | 4 → 0 | 4 sites | 1 had been patched (`51636a1`), 3 had not |
+| E1 | Backend specs on the stranded-offer class | 9 new, 27/27 pass | — | Unit only — see the caveat below |
+| E3 | Job postings asserting an employment type nobody set | 55 → 0 | 55 rows | All 55 stay NULL; the API omits the field |
+| E3 | Frontend call sites silently handed a fabricated value | 17 | — | Surfaced by making the type optional |
+| E4 | Publishers of `ApplicationStatusChangedEvent` | 1 | — | And it is the one case needing no notification |
+| E5 | Unusable skill entries, `resume_parse_v4` | 14 of 43 · 6 of 8 runs | n=8 | Synthetic CV, `qwen3:0.6b` |
+| E5 | Unusable skill entries, `resume_parse_v5` | 12 of 45 · 4 of 8 runs | n=8 | **Inside the noise. Prompt is the wrong layer.** |
+| E6 | ESLint baseline, backend | 10 errors → 0 | 8 files | All fixed, none ruled away |
+| E6 | ESLint baseline, frontend | 49 errors → 0 | — | 10 warnings kept visible on purpose |
+| E6 | Real bugs found by ESLint on day one | 2 | — | Unrendered `NotificationBell`; a `useMemo` dep |
+| all | Backend suite | 326 → 380 | — | 54 new specs |
+
+### Live checks against the running app (2026-08-10)
+
+Booted `dist/main`, logged in as `strong@seed.jobfits.test`:
+
+- `GET /notifications` → `[]`, `GET /notifications/unread-count` → `{"unread":0}`. Both
+  routes mapped and answering; the feed is genuinely empty for this user.
+- `GET /jobs` → all three postings **omit** `employmentType` and `experienceLevel`
+  entirely, rather than reporting a default. Including the teaching one.
+
+### ⚠️ E1 could NOT be confirmed against live data, and that matters
+
+§6.3 of the 08-09 handoff describes four offers reading `EXTENDED`/`NEGOTIATING` on
+applications already `ACCEPTED`/`ARCHIVED`, on `soviseth869@gmail.com`. **Those rows no
+longer exist.** Queried directly: that account has **0 offer rows**, and the entire
+database holds **2 offers**, of which **0 are stranded**.
+
+So the `lapsed` behaviour is pinned by 9 unit specs and has **not** been seen working on
+the data that motivated it. The fix is still the right one — the handoff itself argued the
+list-filtering approach because "the second fixes the class" — but nobody should record
+this as verified end-to-end. To see it, strand an offer deliberately: set an application to
+`ACCEPTED` while its `Offer` row still reads `EXTENDED`, then open `/offers`.
