@@ -18,6 +18,7 @@ import { ResumeParsedEvent } from '../../domain/events/resume-parsed.event';
 import { AiClient } from '@infra/ai/ai.client';
 import { FileType, ParseResumeResponse } from '@infra/ai/ai.types';
 import { PositionedTextItem, toReadingOrder } from './pdf-reading-order';
+import { splitSkillEntry } from '@modules/matching/domain/parsed-resume-json';
 
 // pdf.js v3's CommonJS legacy build. Required lazily (and typed loosely) because it is a
 // large browser-oriented bundle with no first-class CJS types; only getDocument is used.
@@ -39,6 +40,25 @@ interface PdfDocument {
 // experiences/educations are JSON-serialized into a single column. Rows written before
 // the heuristic fallback was removed may still hold raw section lines (strings), so the
 // type stays loose for backward compatibility with existing data.
+/**
+ * One skill per entry, deduplicated, or undefined when there are none.
+ *
+ * Dedupe is case-insensitive and keeps the first spelling: a CV listing "Python" both in
+ * a labelled line and on its own would otherwise store it twice, which reads downstream
+ * as more evidence than there is.
+ */
+function normaliseSkills(skills: string[]): string[] | undefined {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const entry of skills.flatMap(splitSkillEntry)) {
+    const key = entry.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(entry);
+  }
+  return out.length > 0 ? out : undefined;
+}
+
 interface ParsedData {
   fullName?: string;
   email?: string;
@@ -175,7 +195,12 @@ export class ResumeParserService {
       educations: ai.educations.length > 0 ? ai.educations : undefined,
       // Optional on the wire so an older AI service (no `projects`) still works.
       projects: ai.projects?.length ? ai.projects : undefined,
-      skills: ai.skills.length > 0 ? ai.skills : undefined,
+      // Split before storing. Résumés group skills on one line behind a label, and the
+      // model returns "Languages: C++, Python, TypeScript" as a SINGLE skill roughly half
+      // the time — three real skills that then evidence nothing, because no employer
+      // writes that string. Measured across two prompt versions; see splitSkillEntry for
+      // why the fix is here and not in the prompt.
+      skills: normaliseSkills(ai.skills),
       promptVersion: ai.promptVersion,
     };
   }

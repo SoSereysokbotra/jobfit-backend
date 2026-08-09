@@ -184,9 +184,51 @@ CV were weak matches (§5.3).
 
 This changes what the matcher is *given*, not how it matches. §5.2 stands.
 
-- [ ] Findings
-- [ ] Change
-- [ ] Test
+### What the measurement actually said — the interesting part
+
+The prompt fix was tried first. `resume_parse_v5.txt` adds explicit rules: no section
+headings, no bare categories, **one skill per entry, split every line**, with worked
+examples. Measured n=8 runs each against `qwen3:0.6b`, on a synthetic CV with a labelled
+skills section (the operator's real CV is not in the repo, so this measures only the
+defect, not the 7-field accuracy axis that chose v4):
+
+| | unusable skill entries | runs with at least one |
+|---|---|---|
+| `v4` | 14 of 43 | 6 of 8 |
+| `v5` | 12 of 45 | 4 of 8 |
+
+**A real improvement, and nowhere near a fix — 6/8 vs 4/8 at n=8 is inside the noise.**
+
+The run output showed the *dominant* defect was not category labels at all (v4 produced
+those in only 1 of 8 runs). It was this:
+
+```
+'Languages: C++, Python, TypeScript'   ← returned as ONE skill
+'Hardware: Arduino, servo motor, PID control'
+```
+
+Three real skills glued into a string no employer writes, which the matcher's whole-word
+test cannot see inside. **v5 states the rule as plainly as it can be stated and still glues
+them together half the time.**
+
+**So the conclusion is that the prompt is the wrong layer.** Splitting on a comma is a
+string operation with a guaranteed outcome; asking a 0.6b model to do it is not.
+`splitSkillEntry` does it in code, applied at **read** time as well as write time so the
+parses already in the database are repaired rather than left behind a fix that only helps
+future uploads. The v5 rules stay — they do no harm and should help a larger model — but
+**the default stays `v4`**, because "best-measured, not newest" is the rule and v5 has not
+been measured on the axis that chose v4.
+
+Writing the splitter's tests found two over-splitting bugs before they shipped: a
+three-word bound on the label (`"Led a team of six: delivered…"` was losing its first
+half) and the decision not to split on `and` at all (`"Health and Safety"` is one skill,
+and nothing distinguishes it from `"Docker and Kubernetes"` — so the safe direction is to
+under-credit).
+
+- [x] Findings — the reported defect was the *second* most common one
+- [x] Change (AI service) — `resume_parse_v5.txt`, default deliberately unchanged
+- [x] Change (backend) — `splitSkillEntry` + widened evidence, read and write paths
+- [x] Test — 24 new specs; backend 380/380; AI service 48/48; both `tsc` clean
 
 ---
 

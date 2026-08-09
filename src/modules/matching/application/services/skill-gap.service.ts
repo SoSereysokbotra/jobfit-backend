@@ -16,7 +16,12 @@
 
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@infra/prisma/prisma.service';
-import { toStringArray } from '../../domain/parsed-resume-json';
+import {
+  splitSkillEntry,
+  toFieldsOfStudy,
+  toProjectTechnologies,
+  toSkillList,
+} from '../../domain/parsed-resume-json';
 
 /** Why a gap analysis may be empty — the UI must not show "0 gaps" as if it were good news. */
 export type SkillGapStatus =
@@ -58,7 +63,11 @@ export interface SkillGapResult {
   /** Requirements with no supporting skill — what the user should act on. */
   missing: string[];
   matchedCount: number;
-  /** Skills read from the user's most recent parsed résumé. */
+  /**
+   * Everything from the user's most recent parse that was compared against the
+   * requirements — the `skills` column plus project technologies and fields of study.
+   * See {@link SkillGapService.latestParsedResume} for why those and not more.
+   */
   skillsConsidered: string[];
 }
 
@@ -145,15 +154,72 @@ export class SkillGapService {
     };
   }
 
-  /** Skills from the user's most recently parsed résumé; empty if none has been parsed. */
+  /**
+   * Everything the user's most recent parse can evidence; empty if none has been parsed.
+   *
+   * NOT just the `skills` column. Résumé extraction produces broad category labels —
+   * the measured example parsed to *Programming, Communication, Technical Skills,
+   * Hardware + Software* — which match a lot of requirement text while evidencing almost
+   * nothing concrete, and left every gap list SHORTER than the truth. Meanwhile the same
+   * parse already held "Arduino", "PID Control" and "Automotive Engineering Technology"
+   * in columns this never read.
+   *
+   * The two extra sources are chosen because they are SPECIFIC BY CONSTRUCTION:
+   *
+   *  - `projects[].technologies` — the parse prompt restricts these to tools named in the
+   *    text, and puts what was BUILT in the description instead.
+   *  - `educations[].fieldOfStudy` — a named discipline.
+   *
+   * EXPERIENCE TITLES ARE DELIBERATELY EXCLUDED, and this is the interesting one. They
+   * look like free evidence, but they are where bare role nouns live — "Intern",
+   * "Assistant", "Manager" — and a bare "Manager" whole-word-matches any requirement
+   * mentioning management. That is precisely the false match §5.3 of the 08-09 handoff was
+   * about ("Effective Time Management" reported as covering "Classroom behaviour
+   * management"). Adding titles would have widened that hole while appearing to help.
+   *
+   * This changes what the matcher is GIVEN. It does not touch how the matcher decides —
+   * see §5.2: `themeWordsOf` and the `management` signal word stay exactly as measured.
+   */
   private async latestParsedResume(userId: string): Promise<string[]> {
     const resume = await this.prisma.resume.findFirst({
       where: { userId, parsingStatus: 'SUCCESS', deletedAt: null },
       orderBy: { createdAt: 'desc' },
-      select: { parsedData: { select: { skills: true } } },
+      select: {
+        parsedData: { select: { skills: true, projects: true, educations: true } },
+      },
     });
-    return toStringArray(resume?.parsedData?.skills ?? null);
+    const parsed = resume?.parsedData;
+    if (!parsed) return [];
+
+    return dedupe([
+      // toSkillList, not toStringArray: the model returns "Languages: C++, Python,
+      // TypeScript" as a single entry often enough that the split has to happen here.
+      // See splitSkillEntry for the measurement that put it in code rather than the prompt.
+      ...toSkillList(parsed.skills),
+      ...toProjectTechnologies(parsed.projects).flatMap(splitSkillEntry),
+      ...toFieldsOfStudy(parsed.educations),
+    ]);
   }
+}
+
+/**
+ * Case-insensitive dedupe, keeping the first spelling seen.
+ *
+ * A CV that lists "Arduino" under skills and again under a project's technologies would
+ * otherwise report it twice in `skillsConsidered` and count it twice in `matchedSkills`,
+ * which reads as more evidence than there is.
+ */
+function dedupe(values: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const v of values) {
+    const trimmed = v.trim();
+    const key = trimmed.toLowerCase();
+    if (trimmed.length === 0 || seen.has(key)) continue;
+    seen.add(key);
+    out.push(trimmed);
+  }
+  return out;
 }
 
 /** Non-empty, trimmed strings only. */

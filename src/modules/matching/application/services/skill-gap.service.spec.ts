@@ -28,6 +28,22 @@ describe('SkillGapService', () => {
     return new SkillGapService(prisma as never);
   };
 
+  /** A parse with the other columns populated, for the widened-evidence tests below. */
+  const buildFromParse = (
+    requirements: string[],
+    parsedData: Record<string, unknown> | null,
+  ) => {
+    const prisma: any = {
+      job: {
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ requirements, extractedRequirements: [] }),
+      },
+      resume: { findFirst: jest.fn().mockResolvedValue(parsedData ? { parsedData } : null) },
+    };
+    return new SkillGapService(prisma as never);
+  };
+
   it('splits requirements into matched and missing', async () => {
     const service = build(
       [
@@ -290,5 +306,98 @@ describe('SkillGapService', () => {
 
     expect(result.requirements).toHaveLength(1);
     expect(result.matchedCount).toBe(1);
+  });
+
+  // Résumé extraction yields broad category labels — the measured CV parsed to
+  // *Programming, Communication, Technical Skills, Hardware + Software* — which match a
+  // lot of requirement text while evidencing almost nothing, leaving every gap list
+  // SHORTER than the truth. The same parse already held the specific terms, in columns
+  // this service never read.
+  describe('what counts as evidence from the résumé', () => {
+    it('reads project technologies, not just the skills column', async () => {
+      const service = buildFromParse(
+        ['Hands-on experience with Arduino microcontrollers'],
+        {
+          skills: JSON.stringify(['Programming', 'Technical Skills']),
+          projects: JSON.stringify([
+            { name: 'Fire detection rig', technologies: ['Arduino', 'servo motor'] },
+          ]),
+          educations: null,
+        },
+      );
+
+      const result = await service.analyse('u1', 'j1');
+
+      // "Programming" would not have matched this; "Arduino" does, and it is something
+      // the candidate demonstrably built with.
+      expect(result.matchedCount).toBe(1);
+      expect(result.requirements[0].matchedSkills).toContain('Arduino');
+      expect(result.requirements[0].matchQuality).toBe('EXACT');
+    });
+
+    it('reads the field of study', async () => {
+      const service = buildFromParse(
+        ['Degree in Automotive Engineering Technology or equivalent'],
+        {
+          skills: JSON.stringify(['Technical Skills']),
+          projects: null,
+          educations: JSON.stringify([
+            { institution: 'NPIC', fieldOfStudy: 'Automotive Engineering Technology' },
+          ]),
+        },
+      );
+
+      const result = await service.analyse('u1', 'j1');
+
+      expect(result.matchedCount).toBe(1);
+      expect(result.skillsConsidered).toContain('Automotive Engineering Technology');
+    });
+
+    it('does NOT read experience titles', async () => {
+      // The interesting exclusion. Titles look like free evidence, but they are where
+      // bare role nouns live, and a bare "Manager" whole-word-matches any requirement
+      // mentioning management — the exact false match that made a software engineer's CV
+      // read as covering "Classroom behaviour management".
+      const service = buildFromParse(['Classroom behaviour management'], {
+        skills: JSON.stringify([]),
+        projects: null,
+        educations: null,
+        experiences: JSON.stringify([{ title: 'Manager', company: 'Acme' }]),
+      });
+
+      const result = await service.analyse('u1', 'j1');
+
+      expect(result.skillsConsidered).not.toContain('Manager');
+      // No skills at all, so this is the "nothing to compare against" answer rather than
+      // a false clean bill of health.
+      expect(result.status).toBe('NO_PARSED_RESUME');
+    });
+
+    it('counts a term listed in two places once', async () => {
+      const service = buildFromParse(['Experience with Arduino'], {
+        skills: JSON.stringify(['Arduino']),
+        projects: JSON.stringify([{ technologies: ['Arduino', 'arduino'] }]),
+        educations: null,
+      });
+
+      const result = await service.analyse('u1', 'j1');
+
+      expect(result.skillsConsidered).toEqual(['Arduino']);
+      expect(result.requirements[0].matchedSkills).toEqual(['Arduino']);
+    });
+
+    it('survives a parse whose extra columns are absent or malformed', async () => {
+      // Rows written before `projects` existed, and rows whose JSON did not survive.
+      const service = buildFromParse(['Experience with Docker'], {
+        skills: JSON.stringify(['Docker']),
+        projects: 'not json at all',
+        educations: undefined,
+      });
+
+      const result = await service.analyse('u1', 'j1');
+
+      expect(result.matchedCount).toBe(1);
+      expect(result.skillsConsidered).toEqual(['Docker']);
+    });
   });
 });
