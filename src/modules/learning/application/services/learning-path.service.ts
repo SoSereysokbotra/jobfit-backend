@@ -9,14 +9,31 @@ import { PrismaService } from '@infra/prisma/prisma.service';
 import { UserRepository } from '@modules/user/infrastructure/repositories/user.repository';
 import { UserSkillRepository } from '@modules/user/infrastructure/repositories/user-skill.repository';
 import {
-  RequirementsSource,
+  RequirementMatch,
   SkillGapService,
 } from '@modules/matching/application/services/skill-gap.service';
-import { SkillGapSummaryDto } from '../dtos/skill-gap-summary.dto';
+import {
+  ApplicationGapsDto,
+  GapCoverage,
+  SkillGapSummaryDto,
+} from '../dtos/skill-gap-summary.dto';
 import {
   LearningResource,
   resourcesForSkill,
 } from '../../domain/learning-resources.catalog';
+
+/**
+ * Worth showing on the learning page: nothing evidences it, or only something adjacent does.
+ *
+ * An EXACT match is genuinely covered and stays off the page. A PARTIAL one is not — it is
+ * the matcher saying "this is weak", and hiding it is what let a CV listing "Effective Time
+ * Management" be reported as covering "Classroom behaviour management".
+ */
+const isGap = (r: RequirementMatch): boolean =>
+  r.matchedSkills.length === 0 || r.matchQuality === 'PARTIAL';
+
+/** MISSING sorts before PARTIAL: a real gap outranks a doubt. */
+const rank = (coverage: GapCoverage): number => (coverage === 'MISSING' ? 0 : 1);
 
 export interface SkillResourcesView {
   skillId: string;
@@ -49,18 +66,25 @@ export class LearningPathService {
   async getSkillGaps(userId: string): Promise<SkillGapSummaryDto> {
     const applications = await this.prisma.application.findMany({
       where: { userId, deletedAt: null },
-      select: { jobId: true, job: { select: { title: true } } },
+      select: { id: true, jobId: true, job: { select: { title: true } } },
     });
 
     if (applications.length === 0) {
-      return { hasApplications: false, hasParsedResume: true, jobsConsidered: 0, gaps: [] };
+      return {
+        hasApplications: false,
+        hasParsedResume: true,
+        jobsConsidered: 0,
+        applications: [],
+      };
     }
 
     // One analysis per application. Applications per user are single digits today, so a loop
     // is honest and readable; batch this if that ever stops being true.
     const analyses = await Promise.all(
       applications.map(async (a) => ({
-        title: a.job.title,
+        applicationId: a.id,
+        jobId: a.jobId,
+        jobTitle: a.job.title,
         result: await this.skillGap.analyse(userId, a.jobId),
       })),
     );
@@ -75,50 +99,63 @@ export class LearningPathService {
         hasApplications: true,
         hasParsedResume: false,
         jobsConsidered: 0,
-        gaps: [],
+        applications: [],
       };
     }
 
     // Postings that state no requirements are evidence of nothing. Counting them would
-    // dilute every "3 of 4" with jobs we know nothing about.
+    // dilute every "2 of 3" with jobs we know nothing about.
     const usable = analyses.filter(({ result }) => result.status === 'OK');
 
-    const byKey = new Map<
-      string,
-      { requirement: string; requiredBy: number; source: RequirementsSource; jobTitles: string[] }
-    >();
-
-    for (const { title, result } of usable) {
-      for (const requirement of result.missing) {
-        // Keyed case-insensitively, but the first spelling seen is what gets displayed —
-        // the employer's own capitalisation, not a normalised one.
-        const key = requirement.trim().toLowerCase();
-        const existing = byKey.get(key);
-        if (existing) {
-          existing.requiredBy += 1;
-          existing.jobTitles.push(title);
-        } else {
-          byKey.set(key, {
-            requirement: requirement.trim(),
-            requiredBy: 1,
-            source: result.requirementsSource,
-            jobTitles: [title],
-          });
+    // Count across ALL applications first. Grouping by job otherwise hides the most useful
+    // signal on the page — the requirement several employers want — so the number has to
+    // mean the same thing inside every group.
+    const requiredBy = new Map<string, number>();
+    for (const { result } of usable) {
+      for (const r of result.requirements) {
+        if (isGap(r)) {
+          const key = r.text.trim().toLowerCase();
+          requiredBy.set(key, (requiredBy.get(key) ?? 0) + 1);
         }
       }
     }
 
-    // Most-required first; alphabetical within a count so the order is stable between loads
-    // rather than following whatever order the database returned.
-    const gaps = [...byKey.values()].sort(
-      (a, b) => b.requiredBy - a.requiredBy || a.requirement.localeCompare(b.requirement),
+    const grouped: ApplicationGapsDto[] = usable.map(
+      ({ applicationId, jobId, jobTitle, result }) => ({
+        applicationId,
+        jobId,
+        jobTitle,
+        source: result.requirementsSource,
+        requirementsTotal: result.requirements.length,
+        gaps: result.requirements
+          .filter(isGap)
+          .map((r) => ({
+            requirement: r.text.trim(),
+            // A PARTIAL match used to be dropped here as if it were covered, which reported
+            // "Effective Time Management" on a CV as covering "Classroom behaviour
+            // management". The matcher had already called it weak; this layer discarded
+            // the label. Now it travels, with the skill that caused it.
+            coverage: (r.matchQuality === 'PARTIAL' ? 'PARTIAL' : 'MISSING') as GapCoverage,
+            matchedSkills: r.matchQuality === 'PARTIAL' ? r.matchedSkills : [],
+            requiredBy: requiredBy.get(r.text.trim().toLowerCase()) ?? 1,
+          }))
+          // A real gap outranks a doubt; then most-wanted; then alphabetical so the order
+          // is stable between loads rather than following whatever the database returned.
+          .sort(
+            (a, b) =>
+              rank(a.coverage) - rank(b.coverage) ||
+              b.requiredBy - a.requiredBy ||
+              a.requirement.localeCompare(b.requirement),
+          ),
+      }),
     );
 
     return {
       hasApplications: true,
       hasParsedResume: true,
       jobsConsidered: usable.length,
-      gaps,
+      // The posting the user is furthest from leads.
+      applications: grouped.sort((a, b) => b.gaps.length - a.gaps.length),
     };
   }
 
