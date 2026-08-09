@@ -9,9 +9,13 @@
 // applications through it, and each of them imports exactly this and nothing else.
 
 import { Module } from '@nestjs/common';
+import { NotificationModule } from '@modules/notification/notification.module';
 import { ApplicationTransitionService } from './domain/services/application-transition.service';
 
 @Module({
+  // The chokepoint writes the counterparty's notification in the same transaction as the
+  // status change. See the note in ApplicationTransitionService.notifyCounterparty.
+  imports: [NotificationModule],
   providers: [ApplicationTransitionService],
   exports: [ApplicationTransitionService],
 })

@@ -69,6 +69,13 @@ const setup = (opts: {
       findMany: jest.fn().mockResolvedValue(opts.others ?? []),
     },
     offerMessage: { create: jest.fn().mockResolvedValue({}) },
+    // Read by notifyEmployerOfMessage: who wrote, and which employer to tell.
+    application: {
+      findUnique: jest.fn().mockResolvedValue({
+        user: { name: 'Dara' },
+        job: { title: 'Backend Engineer', postedByEmployerId: 'emp-1' },
+      }),
+    },
   };
   const prisma = {
     employerProfile: { findUnique: jest.fn().mockResolvedValue({ companyId: 'co-1' }) },
@@ -90,8 +97,13 @@ const setup = (opts: {
     $transaction: jest.fn((cb: (c: typeof tx) => unknown) => cb(tx)),
   };
   const transitions = { transition: jest.fn().mockResolvedValue({}) };
-  const service = new OfferService(prisma as never, transitions as never);
-  return { service, prisma, tx, transitions };
+  const notifications = { create: jest.fn().mockResolvedValue(undefined) };
+  const service = new OfferService(
+    prisma as never,
+    transitions as never,
+    notifications as never,
+  );
+  return { service, prisma, tx, transitions, notifications };
 };
 
 /** The transition calls made, in order, as [status, actor] pairs. */
@@ -281,11 +293,11 @@ describe('OfferService status writes', () => {
     });
 
     it('lets the employer reply without changing the offer', async () => {
-      const { service, prisma, transitions } = setup({ offer: { status: 'NEGOTIATING' } });
+      const { service, tx, transitions } = setup({ offer: { status: 'NEGOTIATING' } });
 
       await service.postEmployerMessage('emp-1', 'app-1', 'We can move to 60k.');
 
-      expect(prisma.offerMessage.create).toHaveBeenCalledWith({
+      expect(tx.offerMessage.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ authorRole: 'EMPLOYER', body: 'We can move to 60k.' }),
       });
       expect(transitions.transition).not.toHaveBeenCalled();
@@ -327,6 +339,77 @@ describe('OfferService status writes', () => {
       expect(movesOf(transitions)).toEqual([
         [ApplicationStatus.NEGOTIATING, TransitionActor.CANDIDATE],
       ]);
+    });
+  });
+
+  // "I can send only one message and the employer isn't alerted." The one-message half was
+  // fixed in 3c613cf; the alert half is this. The unread badge only reaches an employer who
+  // happens to open the pipeline board.
+  describe('telling the other side a message arrived', () => {
+    it('notifies the employer when a candidate writes', async () => {
+      const { service, notifications, tx } = setup({ offer: { status: 'NEGOTIATING' } });
+
+      await service.postCandidateMessage('user-1', 'offer-1', 'Could we revisit base?');
+
+      expect(notifications.create).toHaveBeenCalledTimes(1);
+      expect(notifications.create.mock.calls[0][0]).toMatchObject({
+        userId: 'emp-1',
+        type: 'MESSAGE',
+        body: 'Could we revisit base?',
+      });
+      // On the message's own transaction: an alert about a message that rolled back is a
+      // lie, and this one cannot outlive it.
+      expect(notifications.create.mock.calls[0][1]).toBe(tx);
+    });
+
+    it('notifies on the SECOND message too, not just the one that moves the offer', async () => {
+      // The first message opens the negotiation and the chokepoint notifies about THAT.
+      // Messages two onward move nothing, which is exactly why the employer stopped
+      // hearing about them.
+      const { service, notifications, transitions } = setup({
+        offer: { status: 'NEGOTIATING' },
+      });
+
+      await service.postCandidateMessage('user-1', 'offer-1', 'Any update?');
+
+      expect(transitions.transition).not.toHaveBeenCalled();
+      expect(notifications.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('notifies the candidate when the employer replies', async () => {
+      const { service, notifications } = setup({ offer: { status: 'NEGOTIATING' } });
+
+      await service.postEmployerMessage('emp-1', 'app-1', 'We can move to 60k.');
+
+      expect(notifications.create.mock.calls[0][0]).toMatchObject({
+        userId: 'user-1',
+        type: 'MESSAGE',
+        link: '/offers',
+      });
+      expect(notifications.create.mock.calls[0][0].title).toContain('Acme');
+    });
+
+    it('truncates a long message rather than paraphrasing it', async () => {
+      const { service, notifications } = setup({ offer: { status: 'NEGOTIATING' } });
+      const long = 'x'.repeat(400);
+
+      await service.postCandidateMessage('user-1', 'offer-1', long);
+
+      const { body } = notifications.create.mock.calls[0][0];
+      expect(body.length).toBeLessThanOrEqual(140);
+      expect(body.endsWith('…')).toBe(true);
+    });
+
+    it('stays silent when the posting has no employer in JobFits', async () => {
+      const { service, notifications, tx } = setup({ offer: { status: 'NEGOTIATING' } });
+      tx.application.findUnique.mockResolvedValue({
+        user: { name: 'Dara' },
+        job: { title: 'Ingested role', postedByEmployerId: null },
+      });
+
+      await service.postCandidateMessage('user-1', 'offer-1', 'Hello?');
+
+      expect(notifications.create).not.toHaveBeenCalled();
     });
   });
 

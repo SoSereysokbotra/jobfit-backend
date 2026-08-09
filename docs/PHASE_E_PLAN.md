@@ -129,10 +129,40 @@ no one can fill is not a fix.
 **Root cause.** The whole notification module is stubs — `NotificationService.sendEmail`
 and `.createInAppNotification` are empty bodies, all three listeners are `TODO`, and there
 is no `Notification` model in `schema.prisma`. There is nowhere for a notification to go.
+The frontend already had a bell, a feed and a badge, all reading five invented items from
+a mock, with read state in the React Query cache that reset on reload.
 
-- [ ] Findings
-- [ ] Change
-- [ ] Test
+**Two things found that the handoff did not know:**
+
+1. **`ApplicationStatusChangedEvent` is published from exactly one place** —
+   `ApplicationService.updateStatus`, the candidate changing their OWN application, which
+   is the single case where the candidate needs no telling. Every employer-driven move
+   (screening, interview, offer, rejection) reaches the chokepoint from a different caller
+   and published **nothing at all**. So `ApplicationStatusChangedListener` would not have
+   fired for any status change worth notifying about even if its body were written.
+2. **An `@OnEvent` listener could not be made correct here anyway.** `emitAsync` fires
+   while the transaction is still open, so a listener can notify someone of a hiring
+   decision that then rolls back.
+
+**So notifications are written by the chokepoint, on the caller's transaction**, beside
+the two audit rows it already writes — a third record of the same event, exactly as true
+as the change it describes. The stub listener is deleted rather than filled in, with the
+reasoning recorded in `notification.module.ts`.
+
+**Who gets told: the counterparty, never the actor.** Which side that is follows from
+`actor`, which the chokepoint already demands rather than infers — the same parameter that
+made the entitlement rules work. Telling someone what they just did is noise that trains
+people to ignore the bell.
+
+Offer **messages** are not status transitions after the first, so `OfferService` notifies
+for those itself — which is the reported bug: message two onward moved nothing, so nothing
+told the employer.
+
+- [x] Findings
+- [x] Change — `Notification` model + migration, real service, 4 endpoints, 2 trigger sites
+- [x] Change (frontend) — mock feed deleted, real endpoints, persisted read state,
+      clicking a notification navigates to its `link`
+- [x] Test — 13 new specs; backend suite 350/350; both `tsc` clean
 
 ---
 

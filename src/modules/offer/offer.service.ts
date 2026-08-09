@@ -10,7 +10,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '@infra/prisma/prisma.service';
+import { NotificationService } from '@modules/notification/notification.service';
 // Every status write in this file goes through the chokepoint. This module used to write
 // status straight through Prisma in six places — which is how an employer could skip the
 // interview stage, and why accepting an offer left no audit row anywhere.
@@ -75,6 +77,20 @@ const EMPLOYER_INCLUDE = {
 const DECIDABLE = ['EXTENDED', 'NEGOTIATING'] as const;
 
 /**
+ * The first line of a message, short enough for a notification row.
+ *
+ * Truncated rather than summarised: a notification quoting the sender must quote them,
+ * and anything cleverer risks putting words in their mouth.
+ */
+const PREVIEW_LENGTH = 140;
+function preview(body: string): string {
+  const line = body.trim().replace(/\s+/g, ' ');
+  return line.length <= PREVIEW_LENGTH
+    ? line
+    : `${line.slice(0, PREVIEW_LENGTH - 1).trimEnd()}…`;
+}
+
+/**
  * Is the hiring process behind this offer still open?
  *
  * "Live" means the application can still reach ACCEPTED, which is derived from the
@@ -89,6 +105,7 @@ export class OfferService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly transitions: ApplicationTransitionService,
+    private readonly notifications: NotificationService,
   ) {}
 
   // ── Employer side ───────────────────────────────────────────────────────────
@@ -209,17 +226,39 @@ export class OfferService {
     await this.assertEmployerOwnsApplication(userId, applicationId);
     const offer = await this.prisma.offer.findUnique({
       where: { applicationId },
-      select: { id: true },
+      select: {
+        id: true,
+        // Who to tell, and in whose name. Selected here rather than re-queried below:
+        // one round trip, and the notification cannot be addressed to a stale user.
+        application: {
+          select: { userId: true, job: { select: { company: { select: { name: true } } } } },
+        },
+      },
     });
     if (!offer) throw new NotFoundException('No offer on this application');
 
-    await this.prisma.offerMessage.create({
-      data: {
-        offerId: offer.id,
-        authorRole: 'EMPLOYER',
-        authorUserId: userId,
-        body,
-      },
+    // The message and the candidate's notification commit together. The unread badge on
+    // the offer already existed; what did not was anything that reaches the candidate
+    // when they are not looking at that page.
+    await this.prisma.$transaction(async (tx) => {
+      await tx.offerMessage.create({
+        data: {
+          offerId: offer.id,
+          authorRole: 'EMPLOYER',
+          authorUserId: userId,
+          body,
+        },
+      });
+      await this.notifications.create(
+        {
+          userId: offer.application.userId,
+          type: 'MESSAGE',
+          title: `${offer.application.job.company?.name ?? 'The employer'} replied about your offer`,
+          body: preview(body),
+          link: '/offers',
+        },
+        tx,
+      );
     });
     return this.employerOfferByApplication(applicationId);
   }
@@ -401,6 +440,12 @@ export class OfferService {
         data: { offerId, authorRole: 'CANDIDATE', authorUserId: userId, body },
       });
 
+      // Every message notifies, including the first. The transition below ALSO notifies
+      // the employer (NEGOTIATING is their counterparty event), but only once, and only
+      // on the first message — the whole reason the employer never heard about messages
+      // two onward is that only the first one moved anything.
+      await this.notifyEmployerOfMessage(tx, offer, userId, body);
+
       if (offer.status === 'NEGOTIATING') return; // already open; nothing moves
 
       await tx.offer.update({ where: { id: offerId }, data: { status: 'NEGOTIATING' } });
@@ -446,6 +491,41 @@ export class OfferService {
       ...(dto.startDate !== undefined && { startDate: new Date(dto.startDate) }),
       ...(dto.responseDeadline !== undefined && { responseDeadline: new Date(dto.responseDeadline) }),
     };
+  }
+
+  /**
+   * Tell the employer a candidate has written.
+   *
+   * The employer to tell is whoever posted the job. An ingested posting has none, in which
+   * case there is nobody to notify and this does nothing — an absent employer is not an
+   * error, and inventing a recipient would be worse than silence.
+   */
+  private async notifyEmployerOfMessage(
+    tx: Prisma.TransactionClient,
+    offer: { applicationId: string },
+    candidateUserId: string,
+    body: string,
+  ): Promise<void> {
+    const app = await tx.application.findUnique({
+      where: { id: offer.applicationId },
+      select: {
+        user: { select: { name: true } },
+        job: { select: { title: true, postedByEmployerId: true } },
+      },
+    });
+    if (!app?.job.postedByEmployerId) return;
+    if (app.job.postedByEmployerId === candidateUserId) return;
+
+    await this.notifications.create(
+      {
+        userId: app.job.postedByEmployerId,
+        type: 'MESSAGE',
+        title: `${app.user.name || 'A candidate'} wrote about their offer`,
+        body: preview(body),
+        link: `/employer/applications/${offer.applicationId}`,
+      },
+      tx,
+    );
   }
 
   /** Stamp the other party's unread messages as seen. */

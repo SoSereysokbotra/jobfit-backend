@@ -6,12 +6,15 @@
 import { Module } from '@nestjs/common';
 // Exports ApplicationTransitionService — the one road to a status write.
 import { ApplicationTransitionModule } from '../application/application-transition.module';
+// A message is not a status change, so the chokepoint never sees messages two onward —
+// this module notifies about those itself.
+import { NotificationModule } from '../notification/notification.module';
 import { OfferService } from './offer.service';
 import { OfferController } from './offer.controller';
 import { EmployerOfferController } from './employer-offer.controller';
 
 @Module({
-  imports: [ApplicationTransitionModule],
+  imports: [ApplicationTransitionModule, NotificationModule],
   controllers: [OfferController, EmployerOfferController],
   providers: [OfferService],
 })

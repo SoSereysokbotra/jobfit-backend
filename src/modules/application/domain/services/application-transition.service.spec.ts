@@ -6,6 +6,8 @@
 //  2. SYSTEM is not god mode. It skips entitlement, never TRANSITIONS.
 //  3. Every successful change writes BOTH audit rows. Six of the nine previous write sites
 //     wrote neither, which is why accepting an offer left no trace anywhere.
+//  4. The COUNTERPARTY is notified, on the caller's transaction, so a notification cannot
+//     outlive a rolled-back change — and the actor is never told about themselves.
 
 import {
   BadRequestException,
@@ -23,24 +25,54 @@ type Tx = {
   applicationTimeline: { create: jest.Mock };
 };
 
-const makeTx = (current: ApplicationStatus | null, affected = 1): Tx => ({
+/** The candidate and the employer on the application under test. */
+const CANDIDATE = 'user-candidate';
+const EMPLOYER = 'user-employer';
+
+interface Opts {
+  affected?: number;
+  /** An ingested posting has no employer in JobFits to notify. */
+  postedByEmployerId?: string | null;
+}
+
+const makeTx = (current: ApplicationStatus | null, opts: Opts = {}): Tx => ({
   application: {
-    findUnique: jest
-      .fn()
-      .mockResolvedValue(current ? { status: current } : null),
-    updateMany: jest.fn().mockResolvedValue({ count: affected }),
+    // Called twice per transition: once for the status, once by notifyCounterparty.
+    // One mock answers both, which is also what Prisma would return.
+    findUnique: jest.fn().mockResolvedValue(
+      current
+        ? {
+            status: current,
+            userId: CANDIDATE,
+            job: {
+              title: 'Backend Engineer',
+              postedByEmployerId:
+                opts.postedByEmployerId === undefined
+                  ? EMPLOYER
+                  : opts.postedByEmployerId,
+            },
+          }
+        : null,
+    ),
+    updateMany: jest.fn().mockResolvedValue({ count: opts.affected ?? 1 }),
   },
   applicationStageHistory: { create: jest.fn().mockResolvedValue({}) },
   applicationTimeline: { create: jest.fn().mockResolvedValue({}) },
 });
 
-const setup = (current: ApplicationStatus | null, affected = 1) => {
-  const tx = makeTx(current, affected);
+const setup = (current: ApplicationStatus | null, affectedOrOpts: number | Opts = 1) => {
+  const opts: Opts =
+    typeof affectedOrOpts === 'number' ? { affected: affectedOrOpts } : affectedOrOpts;
+  const tx = makeTx(current, opts);
   const prisma = {
     $transaction: jest.fn((cb: (c: Tx) => unknown) => cb(tx)),
   };
-  const service = new ApplicationTransitionService(prisma as never);
-  return { service, tx, prisma };
+  const notifications = { create: jest.fn().mockResolvedValue(undefined) };
+  const service = new ApplicationTransitionService(
+    prisma as never,
+    notifications as never,
+  );
+  return { service, tx, prisma, notifications };
 };
 
 const move = (
@@ -291,6 +323,85 @@ describe('ApplicationTransitionService', () => {
       await expect(
         move(service, ApplicationStatus.INTERVIEW, TransitionActor.EMPLOYER, 'e1'),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // The notification module was three empty @OnEvent stubs, and the one event that did
+  // exist was published only from ApplicationService.updateStatus — the candidate changing
+  // their OWN application, the single case needing no notification. Every employer-driven
+  // move reaches this service from a different caller and told nobody anything.
+  describe('notifying the counterparty', () => {
+    it('tells the CANDIDATE when the employer moves them', async () => {
+      const { service, notifications } = setup(ApplicationStatus.SCREENING);
+
+      await move(service, ApplicationStatus.INTERVIEW, TransitionActor.EMPLOYER, EMPLOYER);
+
+      expect(notifications.create).toHaveBeenCalledTimes(1);
+      expect(notifications.create.mock.calls[0][0]).toMatchObject({
+        userId: CANDIDATE,
+        type: 'APPLICATION',
+        link: '/applications/app-1',
+      });
+    });
+
+    it('tells the EMPLOYER when the candidate accepts', async () => {
+      const { service, notifications } = setup(ApplicationStatus.OFFER);
+
+      await move(service, ApplicationStatus.ACCEPTED, TransitionActor.CANDIDATE, CANDIDATE);
+
+      expect(notifications.create.mock.calls[0][0]).toMatchObject({ userId: EMPLOYER });
+    });
+
+    it('tells the candidate about a SYSTEM change', async () => {
+      // Automatic screening is a real move in their pipeline, and they are the only party
+      // with a stake in hearing about it.
+      const { service, notifications } = setup(ApplicationStatus.SUBMITTED);
+
+      await move(service, ApplicationStatus.SCREENING, TransitionActor.SYSTEM);
+
+      expect(notifications.create.mock.calls[0][0]).toMatchObject({ userId: CANDIDATE });
+    });
+
+    it('writes the notification on the SAME transaction as the status change', async () => {
+      // The property that makes this correct where an @OnEvent listener could not be:
+      // emitAsync fires while the transaction is still open, so a listener can notify
+      // someone of a hiring decision that then rolls back.
+      const { service, tx, notifications } = setup(ApplicationStatus.SCREENING);
+
+      await move(service, ApplicationStatus.INTERVIEW, TransitionActor.EMPLOYER, EMPLOYER);
+
+      expect(notifications.create.mock.calls[0][1]).toBe(tx);
+    });
+
+    it('never notifies the actor about their own action', async () => {
+      // Seeded demo data can have one user on both sides. Telling someone what they just
+      // did is noise that trains people to ignore the bell.
+      const { service, notifications } = setup(ApplicationStatus.OFFER, {
+        postedByEmployerId: CANDIDATE,
+      });
+
+      await move(service, ApplicationStatus.ACCEPTED, TransitionActor.CANDIDATE, CANDIDATE);
+
+      expect(notifications.create).not.toHaveBeenCalled();
+    });
+
+    it('stays silent when an ingested job has no employer to tell', async () => {
+      const { service, notifications } = setup(ApplicationStatus.OFFER, {
+        postedByEmployerId: null,
+      });
+
+      await move(service, ApplicationStatus.ACCEPTED, TransitionActor.CANDIDATE, CANDIDATE);
+
+      expect(notifications.create).not.toHaveBeenCalled();
+    });
+
+    it('does not notify when the transition is refused', async () => {
+      const { service, notifications } = setup(ApplicationStatus.ACCEPTED);
+
+      await expect(
+        move(service, ApplicationStatus.INTERVIEW, TransitionActor.EMPLOYER, EMPLOYER),
+      ).rejects.toThrow(BadRequestException);
+      expect(notifications.create).not.toHaveBeenCalled();
     });
   });
 });

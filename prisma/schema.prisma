@@ -186,6 +186,8 @@ model User {
   offerMessages          OfferMessage[]            @relation("OfferMessages")
   movedApplicationStages ApplicationStageHistory[] @relation("MovedByUser")
 
+  notifications Notification[]
+
   @@index([email])
   @@index([role])
   @@index([subscriptionTier])
@@ -924,6 +926,53 @@ model JobSkill {
 
   @@id([jobId, skillId])
   @@map("job_skills")
+}
+
+/// What a notification is about. The client picks an icon from this; the sentence itself
+/// is in `title`/`body`, written by whatever raised it.
+enum NotificationType {
+  APPLICATION // a status change on an application you are party to
+  OFFER // an offer extended, revised or rescinded
+  MESSAGE // a message in an offer negotiation
+  MATCH
+  SYSTEM
+}
+
+/// One thing that happened, addressed to one user.
+///
+/// The notification module existed as three empty listener stubs and a service whose two
+/// methods had empty bodies — there was nowhere for a notification to go. The employer
+/// could only discover a candidate's negotiation message by happening to open the board.
+///
+/// Rows are written INSIDE the transaction that causes them (see
+/// ApplicationTransitionService and OfferService), not from an event listener. An
+/// @OnEvent handler fires on emit, which for a status change means it fires from inside an
+/// open transaction that may still roll back — leaving the user notified of something that
+/// never happened. Writing the row beside the audit rows makes the notification exactly as
+/// true as the change it describes.
+model Notification {
+  id     String           @id @default(uuid())
+  userId String
+  user   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type   NotificationType
+
+  title String
+  body  String
+
+  /// In-app path to whatever this is about, e.g. "/offers" or "/applications/{id}".
+  /// Null when there is nowhere useful to send the reader.
+  link String?
+
+  /// Null until read. A timestamp rather than a boolean so "when did they see it?" is
+  /// answerable — the mock feed this replaces could not survive a page reload at all.
+  readAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  /// The feed is always "this user's, newest first", and the badge counts unread.
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
+  @@map("notifications")
 }
 
 model Industry {

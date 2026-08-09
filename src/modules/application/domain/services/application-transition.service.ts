@@ -17,6 +17,7 @@ import {
 } from '@nestjs/common';
 import { $Enums, Prisma } from '@prisma/client';
 import { PrismaService } from '@infra/prisma/prisma.service';
+import { NotificationService } from '@modules/notification/notification.service';
 import { ApplicationStatus } from '@shared/kernel/enums/application-status.enum';
 import { TransitionActor } from '@shared/kernel/enums/transition-actor.enum';
 import {
@@ -73,7 +74,10 @@ export interface TransitionResult {
 
 @Injectable()
 export class ApplicationTransitionService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: NotificationService,
+  ) {}
 
   /**
    * Validate and apply a status change, recording it in both audit tables.
@@ -163,6 +167,82 @@ export class ApplicationTransitionService {
       },
     });
 
+    await this.notifyCounterparty(tx, applicationId, newStatus, params);
+
     return { applicationId, previousStatus, newStatus };
   }
+
+  /**
+   * Tell the OTHER party. A third record of the same event, beside the two audit rows.
+   *
+   * WHY HERE AND NOT IN A LISTENER. `ApplicationStatusChangedEvent` exists, and a
+   * NotificationModule listener was subscribed to it — but the event is published from
+   * exactly one place, `ApplicationService.updateStatus`, which is the candidate changing
+   * their OWN application: the single case where the candidate needs no telling. Every
+   * employer-driven move reaches this method from a different caller and published
+   * nothing at all. On top of that, `emitAsync` fires while this transaction is still
+   * open, so a listener can notify someone of a hiring decision that then rolls back.
+   * Writing the row on `tx` makes the notification exactly as true as the change.
+   *
+   * WHY THE COUNTERPARTY. The actor already knows what they just did; a notification
+   * telling them is noise that trains people to ignore the bell. Which side that is
+   * follows from `actor`, which this service already demands rather than infers.
+   */
+  private async notifyCounterparty(
+    tx: Prisma.TransactionClient,
+    applicationId: string,
+    newStatus: ApplicationStatus,
+    params: TransitionParams,
+  ): Promise<void> {
+    const app = await tx.application.findUnique({
+      where: { id: applicationId },
+      select: {
+        userId: true,
+        job: { select: { title: true, postedByEmployerId: true } },
+      },
+    });
+    if (!app) return;
+
+    const recipient =
+      params.actor === TransitionActor.CANDIDATE
+        ? // An ingested (external) job has no employer here to tell.
+          app.job.postedByEmployerId
+        : app.userId;
+    // SYSTEM changes are addressed to the candidate: automatic screening is a real move
+    // in their pipeline and the only party with a stake in hearing about it.
+    if (!recipient) return;
+    // Belt and braces: an employer acting on their own application (possible in seeded
+    // demo data) must not be told about themselves.
+    if (recipient === params.actorUserId) return;
+
+    await this.notifications.create(
+      {
+        userId: recipient,
+        type: $Enums.NotificationType.APPLICATION,
+        title: NOTIFICATION_TITLES[newStatus] ?? 'Application updated',
+        body:
+          params.description ??
+          `${app.job.title} — now ${newStatus.toLowerCase()}.`,
+        link: `/applications/${applicationId}`,
+      },
+      tx,
+    );
+  }
 }
+
+/**
+ * What the reader is actually being told, per status.
+ *
+ * Deliberately written from the RECIPIENT's side. "Withdrawn" reaches an employer and
+ * means the candidate walked away; "Rejected" reaches a candidate and means the employer
+ * closed them out. A single generic "Status changed to X" would be correct and useless.
+ */
+const NOTIFICATION_TITLES: Partial<Record<ApplicationStatus, string>> = {
+  [ApplicationStatus.SCREENING]: 'Your application is being reviewed',
+  [ApplicationStatus.INTERVIEW]: 'You have moved to interview',
+  [ApplicationStatus.OFFER]: 'You have an offer',
+  [ApplicationStatus.NEGOTIATING]: 'A candidate opened a negotiation',
+  [ApplicationStatus.ACCEPTED]: 'A candidate accepted your offer',
+  [ApplicationStatus.REJECTED]: 'An update on your application',
+  [ApplicationStatus.WITHDRAWN]: 'A candidate withdrew',
+};
