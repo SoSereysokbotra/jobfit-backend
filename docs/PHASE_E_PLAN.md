@@ -273,6 +273,87 @@ bypass. The stale comment is corrected rather than the claim being made true.
 
 ---
 
+## E8 — `/recommendations` was empty (found by looking at the page, 2026-08-10)
+
+Not on the original list. Reported by the operator: the page shows nothing.
+
+### Root cause: 4 of 8 profiles had no embedding
+
+`RecomputeUserMatchesUseCase.execute` returns 0 when retrieval finds nothing, and the
+dense retriever requires `profiles.embedding IS NOT NULL`. Measured before the fix:
+
+| | count |
+|---|---|
+| Published jobs | 61 (54 embedded) |
+| Profiles | 8 (**4 embedded**) |
+| Users with recommendation rows | **1 of 7** (`soviseth869`, 50 rows) |
+
+`MatchingEmbeddingService` degrades gracefully — if the AI service is down when a résumé
+is parsed, the candidate is simply left un-embedded and `false` is returned. **Nothing
+retries.** So a candidate embedded during an AI-service outage is invisible to matching
+forever, silently, and the only symptom is an empty page.
+
+**Fixed by running `scripts/backfill-embeddings.ts`** (Ollama + AI service up):
+62/62 jobs, 8/8 candidates. All four seed candidates went **0 → 50 recommendations**,
+correctly ranked — `strong@` (Senior Full-Stack, React/TS/Node) tops out at
+*Full-Stack Engineer (Demo)* 83, *Full-Stack Engineer* 79, *React Specialist* 77.
+
+- [x] Findings
+- [x] Fix (data) — backfill
+- [x] Verified live — 4 of 4 seed candidates, 50 recommendations each
+
+### Second defect found on the way: the BM25 leg is dead, and the obvious fix is worse
+
+`websearch_to_tsquery` ANDs unquoted terms, and the candidate query is headline + every
+résumé skill + every past job title. Hits against the live corpus, AND vs OR:
+
+| user | queryText | AND (ships) | OR |
+|---|---|---|---|
+| `strong@seed` | 136 ch | **0** | 27 |
+| `junior@seed` | 72 ch | **0** | 39 |
+| `partial@seed` | 80 ch | **0** | 26 |
+| `unrelated@seed` | 82 ch | **0** | 37 |
+| `soviseth869` | 236 ch | **0** | 52 |
+| `lalirima123` | 24 ch | 3 | 25 |
+| `snowrin168` | 24 ch | 3 | 25 |
+
+**Every user with a parsed résumé gets zero** — "hybrid retrieval" is dense-only for them.
+
+**But the OR fix measured worse.** Clean A/B, identical data, k=10:
+
+| BM25 query | Recall@10 | MRR@10 | nDCG@10 |
+|---|---|---|---|
+| AND (ships) | **0.500** | 0.500 | **0.606** |
+| OR (candidate fix) | 0.458 | 0.500 | 0.563 |
+
+On a 61-job corpus an OR of 20+ terms matches 40–85% of everything, so the sparse list
+stops discriminating and RRF blends noise into a dense ranking that was working. **The
+change was reverted.** Trading a retriever that returns nothing for one that returns
+everything is not progress.
+
+**And the harness cannot adjudicate it.** Both labelled candidates have a ~24-character
+`queryText` — they are precisely the two users who never exhibited the bug — and n=2
+cannot resolve a 0.04 difference. Recorded in full at the `sparseCandidates` call site.
+
+**What would unblock it:** label candidates who have parsed résumés. Until then no
+retrieval change here can be honestly validated.
+
+- [x] Findings, with numbers
+- [x] Measured — and reverted on the measurement
+- [ ] **Open:** extend the eval set, then revisit
+
+### Third: the empty state blamed the user
+
+The page rendered "No recommendations match your filters" with a *Clear filters* button
+even when the API returned `[]` and no filter was set — telling four candidates their
+filters were wrong for a backend that had computed nothing. It now distinguishes the two
+cases, and the stale "mock behind interface" comment on `useRecommendations` is corrected
+(that endpoint has been live for some time).
+
+- [x] Fixed
+
+---
+
 ## E7 — Phase D (GPU)
 
 **Confirmed still blocked, not skipped.** `docs/RAG_PHASE_D_HANDOFF.md` §2 and §11: the

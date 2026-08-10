@@ -272,7 +272,41 @@ export class RecomputeUserMatchesUseCase {
     );
   }
 
-  /** Sparse retriever: BM25 keyword match of the candidate's terms against jobs. */
+  /**
+   * Sparse retriever: BM25 keyword match of the candidate's terms against jobs.
+   *
+   * ⚠️ KNOWN DEAD FOR MOST USERS — measured 2026-08-10, deliberately NOT "fixed" yet.
+   *
+   * `websearch_to_tsquery` treats unquoted whitespace as **AND**, and `queryText` is the
+   * headline + every résumé skill + every past job title. So the tsquery is
+   *
+   *   'senior' & 'full-stack' & 'engin' & 'react' & 'typescript' & 'node.js' & …
+   *
+   * — one posting must contain ALL of them. Hits against the live corpus (61 published
+   * jobs), AND (what ships) vs the same terms OR-ed:
+   *
+   *   strong@seed  0 → 27    junior@seed  0 → 39    partial@seed    0 → 26
+   *   unrelated@   0 → 37    soviseth869  0 → 52
+   *   lalirima123  3 → 25    snowrin168   3 → 25   ← the only two labelled candidates
+   *
+   * Every user with a parsed résumé gets zero, so "hybrid retrieval" is dense-only in
+   * production for them.
+   *
+   * BUT THE OBVIOUS FIX MEASURED WORSE. A/B on identical data, k=10, n=2:
+   *
+   *   AND (ships)  Recall 0.500 · MRR 0.500 · nDCG 0.606
+   *   OR  (fix)    Recall 0.458 · MRR 0.500 · nDCG 0.563
+   *
+   * On a 61-job corpus an OR of 20+ résumé terms matches 40-85% of everything, so the
+   * sparse list stops discriminating and RRF just blends noise into a dense ranking that
+   * was doing fine. Trading a retriever that returns nothing for one that returns
+   * everything is not progress.
+   *
+   * AND THE HARNESS CANNOT ADJUDICATE THIS. Both labelled candidates have a ~24-character
+   * `queryText` (no parsed résumé), so they are exactly the two users who never exhibited
+   * the bug — and n=2 cannot resolve a 0.04 difference anyway. Fixing this properly needs
+   * labelled candidates WITH résumés first. See docs/PHASE_E_PLAN.md.
+   */
   private sparseCandidates(
     queryText: string,
     limit: number,
