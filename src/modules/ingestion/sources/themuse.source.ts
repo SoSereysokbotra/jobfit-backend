@@ -7,6 +7,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NormalizedJob } from '../ingestion.types';
+// TheMuse `contents` is HTML. Flattening it while KEEPING paragraph and bullet
+// boundaries is the whole difference between a readable posting and a wall of text.
+import { htmlToText } from '../html-to-text';
 
 const THEMUSE_URL = 'https://www.themuse.com/api/public/jobs';
 const FETCH_TIMEOUT_MS = 15_000;
@@ -84,22 +87,11 @@ export class TheMuseSource {
       externalId: String(job.id),
       title,
       companyName,
-      description: this.stripHtml(job.contents ?? ''),
+      description: htmlToText(job.contents ?? ''),
       location,
       remoteType: remote ? 'REMOTE' : 'ON_SITE',
       externalUrl: job.refs?.landing_page?.trim() || null,
     };
   }
 
-  /** TheMuse `contents` is HTML; flatten it to readable plain text. */
-  private stripHtml(html: string): string {
-    return html
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
 }

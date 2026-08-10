@@ -444,6 +444,60 @@ not more. `fitScore` remains forbidden (ρ 0.137 / −0.065).
 
 ---
 
+## E10 — Ingested job descriptions were one unreadable paragraph
+
+Reported from the page: the Job Summary on an external posting runs headings,
+paragraphs and three bullet lists together into a single block —
+*"…healthy conflict resolution Required Qualifications: 10+ years experience in
+software/game development 6+ years in a production leadership position…"*
+
+**Cause, in one line of `themuse.source.ts`:**
+
+```ts
+.replace(/<[^>]+>/g, ' ')   // every tag -> a space
+.replace(/\s+/g, ' ')       // ...then every newline collapsed away
+```
+
+Every `<p>`, `<br>`, `<li>` and `<h3>` boundary became a single space. Measured:
+**43 of 43 ingested jobs held ZERO newlines.**
+
+**The renderer was never the problem** — the detail page already uses
+`whitespace-pre-line`, so the structure was destroyed at ingest, not at display.
+
+`htmlToText` replaces it: block-closing tags become paragraph breaks, `<li>` becomes a
+bullet on its own line, `<script>`/`<style>` content is dropped, and only *horizontal*
+whitespace is collapsed. Output stays **plain text, never markup** — these postings are
+third-party input rendered into the page.
+
+Three bugs the tests caught before it shipped:
+- `</li>` and `<li>` each emitted a newline, putting a blank line between every bullet.
+- Trimming happens before the empty-bullet check, so the check had to match `•`, not `• `.
+- `&amp;` must decode **last**, or `&amp;lt;` turns into `<` and reintroduces markup.
+
+**Existing rows repaired surgically.** A normal re-ingest would fix them but pulls current
+TheMuse pages, inserting new postings and changing the corpus the retrieval and
+calibration baselines were measured on. `scripts/refresh-ingested-descriptions.ts` fetches
+each stored posting by its own `externalId` and rewrites nothing but `description`:
+
+| | |
+|---|---|
+| Repaired | **34 of 43** (0 → 39–91 newlines each) |
+| Left alone | 9 — HTTP 404, taken down upstream. A stale readable description beats an empty one |
+
+Descriptions feed job embeddings, so those were rebuilt (62/62) and recommendations
+recomputed (400). **Both harnesses confirm the reformat was semantically neutral:**
+
+| | before | after |
+|---|---|---|
+| Retrieval Recall/MRR/nDCG@10 | 0.500 / 0.500 / 0.606 | **0.500 / 0.500 / 0.606** |
+| Calibration TOTAL ρ | 0.669 | 0.669 |
+
+- [x] Root cause
+- [x] Fix + 16 specs
+- [x] Existing rows repaired, embeddings rebuilt, no regression in either harness
+
+---
+
 ## E7 — Phase D (GPU)
 
 **Confirmed still blocked, not skipped.** `docs/RAG_PHASE_D_HANDOFF.md` §2 and §11: the
