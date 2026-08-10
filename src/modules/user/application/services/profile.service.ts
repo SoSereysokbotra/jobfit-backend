@@ -17,6 +17,8 @@ import { Location } from '@shared/kernel/value-objects/location.vo';
 import { SalaryRange } from '@shared/kernel/value-objects/salary-range.vo';
 import { CreateProfileDto, LocationDto } from '../dtos/create-profile.dto';
 import { UpdateProfileDto } from '../dtos/update-profile.dto';
+import { ProfileResponseDto } from '../dtos/profile-response.dto';
+import { assertVersionMatches } from '@common/conflict/version-conflict.exception';
 import { ProfileCreatedEvent } from '../../domain/events/profile-created.event';
 import { ProfileUpdatedEvent } from '../../domain/events/profile-updated.event';
 import { PreferencesUpdatedEvent } from '../../domain/events/preferences-updated.event';
@@ -72,7 +74,18 @@ export class ProfileService {
     userId: string,
     dto: UpdateProfileDto,
   ): Promise<Profile> {
+    // Already user-scoped (getProfile filters by userId), so no ownership check is needed
+    // here — unlike experience/education, which look up by bare id.
     const existing = await this.getProfile(userId);
+
+    // Optimistic concurrency (PWA offline, Phase 4): refuse a stale edit instead of
+    // overwriting whatever another device wrote in the meantime.
+    assertVersionMatches({
+      serverUpdatedAt: existing.updatedAt,
+      clientExpectedUpdatedAt: dto.expectedUpdatedAt,
+      serverVersion: () => new ProfileResponseDto(existing),
+      clientAttempted: dto,
+    });
 
     let updated: Profile;
     try {

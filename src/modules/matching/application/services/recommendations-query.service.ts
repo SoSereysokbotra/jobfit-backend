@@ -2,6 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import { RecomputeUserMatchesUseCase } from '../use-cases/recompute-user-matches.use-case';
 import { RecommendedJobDto } from '../../presentation/dtos/recommended-job.dto';
+import {
+  RECOMMENDATION_JOB_INCLUDE,
+  toRecommendedJobDto,
+} from '../../presentation/dtos/recommended-job.mapper';
 
 const DEFAULT_LIMIT = 50;
 
@@ -23,48 +27,18 @@ export class RecommendationsQueryService {
       await this.recompute.execute(userId, limit);
       rows = await this.read(userId, limit);
     }
-    return rows.map((r) => this.toDto(r));
+    return rows.map((r) => toRecommendedJobDto(r));
   }
 
   private read(userId: string, limit: number) {
     return this.prisma.recommendation.findMany({
       where: { userId },
-      orderBy: { score: 'desc' },
+      // jobId breaks score ties — without it, equally-scored rows come back in arbitrary
+      // order between calls, which defeats any client-side change detection.
+      orderBy: [{ score: 'desc' }, { jobId: 'asc' }],
       take: limit,
-      include: {
-        job: {
-          include: {
-            company: { select: { name: true } },
-            skills: { select: { skillId: true } },
-          },
-        },
-      },
+      include: RECOMMENDATION_JOB_INCLUDE,
     });
   }
 
-  private toDto(
-    r: Awaited<ReturnType<RecommendationsQueryService['read']>>[number],
-  ): RecommendedJobDto {
-    const job = r.job;
-    const hasSalary = job.minSalary != null || job.maxSalary != null;
-    return {
-      id: job.id,
-      companyId: job.companyId,
-      companyName: job.company?.name,
-      title: job.title,
-      description: job.description,
-      status: job.status,
-      remoteType: job.remoteType,
-      location: job.location ?? undefined,
-      salaryRange: hasSalary
-        ? { min: job.minSalary ?? 0, max: job.maxSalary ?? 0, currency: 'USD' }
-        : undefined,
-      skillIds: job.skills.map((s) => s.skillId),
-      createdAt: job.createdAt.toISOString(),
-      updatedAt: job.updatedAt.toISOString(),
-      match: Math.round(r.score),
-      reason: r.reasonExplanation ?? undefined,
-      breakdown: (r.breakdown as Record<string, number> | null) ?? undefined,
-    };
-  }
 }

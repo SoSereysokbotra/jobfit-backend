@@ -27,6 +27,7 @@ import { ContactPersonRepository } from './infrastructure/repositories/contact-p
     ApplicationTimelineRepository,
     ContactPersonRepository,
   ],
-  exports: [ApplicationService],
+  // ApplicationRepository is exported for SyncModule's delta query (PWA offline, Phase 2).
+  exports: [ApplicationService, ApplicationRepository],
 })
 export class ApplicationModule {}

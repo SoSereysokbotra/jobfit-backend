@@ -25,6 +25,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Request, Response } from 'express';
 import { PinoLogger } from 'nestjs-pino';
+import { isVersionConflictBody } from '../conflict/version-conflict.exception';
 import { redactString } from '../logging/redaction';
 import { toReportedErrorEvent } from '../logging/error-reporting';
 import { AlertingService } from '@modules/alerting/alerting.service';
@@ -52,6 +53,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
     // Client-facing message. Defaults to the generic 500 text; only HttpExceptions
     // (whose messages are intended for the client) override it.
     let clientMessage: string | string[] = 'Internal server error';
+    // Extra fields merged into the response body. This filter otherwise normalises every
+    // error down to { statusCode, timestamp, path, message }, which would silently discard
+    // the two versions a 409 version-conflict has to carry (PWA offline, Phase 4).
+    let extra: Record<string, unknown> | undefined;
 
     if (exception instanceof HttpException) {
       status = exception.getStatus();
@@ -60,6 +65,14 @@ export class AllExceptionsFilter implements ExceptionFilter {
         typeof res === 'string'
           ? res
           : ((res as Record<string, any>).message ?? exception.message);
+
+      if (isVersionConflictBody(res)) {
+        extra = {
+          conflict: true,
+          serverVersion: res.serverVersion,
+          clientAttempted: res.clientAttempted,
+        };
+      }
     }
 
     const isServerError = status >= 500;
@@ -117,6 +130,9 @@ export class AllExceptionsFilter implements ExceptionFilter {
       timestamp: new Date().toISOString(),
       path: request.url,
       message: clientMessage,
+      // Spread last, but the standard fields above are never overwritten — `extra` only
+      // ever carries conflict-specific keys.
+      ...extra,
     });
   }
 }

@@ -9,6 +9,13 @@ import { PrismaService } from '@infra/prisma/prisma.service';
 import { IRepository } from '@common/abstracts/repository';
 import { Application } from '../../domain/entities/application.entity';
 import { ApplicationStatus } from '@shared/kernel/enums/application-status.enum';
+import {
+  DELTA_ORDER_BY,
+  DeltaOptions,
+  DeltaPage,
+  deltaWhere,
+  splitDelta,
+} from '@modules/sync/delta';
 
 @Injectable()
 export class ApplicationRepository implements IRepository<Application> {
@@ -120,6 +127,26 @@ export class ApplicationRepository implements IRepository<Application> {
       where: { id },
       data: { deletedAt: new Date() },
     });
+  }
+
+  /**
+   * Delta sync (PWA offline, Phase 2). Applications for this user changed since the
+   * watermark, INCLUDING soft-deleted ones, which splitDelta turns into tombstones.
+   *
+   * Unlike findByUserId this does NOT hide candidate-archived rows: archiving is a view
+   * preference the client renders itself, and withholding those rows would make an
+   * archive look like a deletion to anything syncing.
+   */
+  async findChangedSince(
+    userId: string,
+    options: DeltaOptions,
+  ): Promise<DeltaPage<Application>> {
+    const rows = await this.prisma.application.findMany({
+      where: deltaWhere(userId, options),
+      orderBy: DELTA_ORDER_BY,
+      take: options.limit + 1,
+    });
+    return splitDelta(rows, options.limit, (row) => this.mapToDomain(row));
   }
 
   private mapToDomain(raw: PrismaApplication): Application {

@@ -13,5 +13,15 @@
     "transformIgnorePatterns": [
         "/node_modules/(?!uuid/)",
         "\\.pnp\\.[^\\/]+$"
-    ]
+    ],
+    "moduleNameMapper": {
+        "^@modules/(.*)$": "<rootDir>/../src/modules/$1",
+        "^@common/(.*)$": "<rootDir>/../src/common/$1",
+        "^@config/(.*)$": "<rootDir>/../src/config/$1",
+        "^@infra/(.*)$": "<rootDir>/../src/infra/$1",
+        "^@events/(.*)$": "<rootDir>/../src/events/$1",
+        "^@core/(.*)$": "<rootDir>/../src/core/$1",
+        "^@shared-kernel/(.*)$": "<rootDir>/../src/shared-kernel/$1",
+        "^@shared/(.*)$": "<rootDir>/../src/shared/$1"
+    }
 }

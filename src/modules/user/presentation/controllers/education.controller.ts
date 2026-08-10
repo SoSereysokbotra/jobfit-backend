@@ -19,9 +19,17 @@ import {
   Patch,
   Post,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiConflictResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { Public } from '@common/decorators/public.decorator';
+import { HttpCache } from '@common/decorators/http-cache.decorator';
+import { HttpCacheInterceptor } from '@common/interceptors/http-cache.interceptor';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import {
   AuthenticatedUser,
@@ -54,7 +62,15 @@ export class EducationController {
 
   @Get()
   @Public()
-  @ApiOperation({ summary: 'List a user’s education (public)' })
+  // Same reasoning as the experience list: read far more often than written.
+  @UseInterceptors(HttpCacheInterceptor)
+  @HttpCache({ maxAge: 60, staleWhileRevalidate: 300 })
+  @ApiOperation({
+    summary: 'List a user’s education (public)',
+    description:
+      'Returns a content-hash ETag over the list. Send it back as `If-None-Match` for a ' +
+      '304 with no body when nothing has changed.',
+  })
   async list(
     @Param('userId') userId: string,
   ): Promise<EducationResponseDto[]> {
@@ -64,7 +80,17 @@ export class EducationController {
 
   @Patch(':eduId')
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Update own education record' })
+  @ApiOperation({
+    summary: 'Update own education record',
+    description:
+      'Requires `expectedUpdatedAt` — the `updatedAt` you last saw. If the record changed ' +
+      'server-side since then the update is refused with 409 and both versions are returned.',
+  })
+  @ApiConflictResponse({
+    description:
+      'Version conflict. Body carries { conflict: true, serverVersion, clientAttempted } ' +
+      'so the client can show both and let the user choose. Nothing was written.',
+  })
   async update(
     @CurrentUser() user: AuthenticatedUser,
     @Param('userId') userId: string,
@@ -72,7 +98,11 @@ export class EducationController {
     @Body() dto: UpdateEducationDto,
   ): Promise<EducationResponseDto> {
     assertOwner(user, userId);
-    const education = await this.educationService.updateEducation(eduId, dto);
+    const education = await this.educationService.updateEducation(
+      eduId,
+      dto,
+      user.id,
+    );
     return new EducationResponseDto(education);
   }
 

@@ -5,14 +5,24 @@
 
 import { Type } from 'class-transformer';
 import {
+  IsISO8601,
   IsOptional,
   IsString,
   ValidateNested,
 } from 'class-validator';
-import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { LocationDto } from './create-profile.dto';
 
 export class UpdateProfileDto {
+  @ApiProperty({
+    description:
+      'The `updatedAt` you last saw for this profile. A stale value is refused with 409 ' +
+      'and both versions are returned rather than overwriting a newer server change.',
+    example: '2026-08-10T09:00:00.000Z',
+  })
+  @IsISO8601()
+  expectedUpdatedAt: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()

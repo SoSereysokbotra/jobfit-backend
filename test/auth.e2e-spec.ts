@@ -8,8 +8,11 @@
 import 'dotenv/config';
 import { INestApplication, Logger, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import cookieParser from 'cookie-parser';
-import request, { Response as SupertestResponse } from 'supertest';
+// Namespace imports, not default imports: this project's tsconfig has esModuleInterop off,
+// so `import x from 'cjs-module'` compiles but is undefined at runtime.
+import * as cookieParser from 'cookie-parser';
+import * as request from 'supertest';
+import type { Response as SupertestResponse } from 'supertest';
 import { PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 

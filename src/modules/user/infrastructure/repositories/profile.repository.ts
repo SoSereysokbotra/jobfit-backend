@@ -14,6 +14,13 @@ import { SalaryRange } from '@shared/kernel/value-objects/salary-range.vo';
 import { JobLevel } from '@shared/kernel/enums/job-level.enum';
 import { RemoteType } from '@shared/kernel/enums/remote-type.enum';
 import { EmploymentType } from '@shared/kernel/enums/employment-type.enum';
+import {
+  DELTA_ORDER_BY,
+  DeltaOptions,
+  DeltaPage,
+  deltaWhere,
+  splitDelta,
+} from '@modules/sync/delta';
 
 @Injectable()
 export class ProfileRepository {
@@ -82,6 +89,23 @@ export class ProfileRepository {
       where: { id },
       data: { deletedAt: new Date() },
     });
+  }
+
+  /**
+   * Delta sync (PWA offline, Phase 2). Profile is 1:1 with User, so this page holds at
+   * most one row — it still goes through the shared delta path so the envelope, the
+   * tombstone handling and the watermark semantics are identical to every other resource.
+   */
+  async findChangedSince(
+    userId: string,
+    options: DeltaOptions,
+  ): Promise<DeltaPage<Profile>> {
+    const rows = await this.prisma.profile.findMany({
+      where: deltaWhere(userId, options),
+      orderBy: DELTA_ORDER_BY,
+      take: options.limit + 1,
+    });
+    return splitDelta(rows, options.limit, (row) => this.mapToDomain(row));
   }
 
   private mapToDomain(raw: PrismaProfile): Profile {

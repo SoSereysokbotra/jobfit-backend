@@ -9,6 +9,13 @@ import { $Enums, Education as PrismaEducation } from '@prisma/client';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import { Education } from '../../domain/entities/education.entity';
 import { DegreeLevel } from '@shared/kernel/enums/degree-level.enum';
+import {
+  DELTA_ORDER_BY,
+  DeltaOptions,
+  DeltaPage,
+  deltaWhere,
+  splitDelta,
+} from '@modules/sync/delta';
 
 @Injectable()
 export class EducationRepository {
@@ -59,6 +66,19 @@ export class EducationRepository {
       where: { id },
       data: { deletedAt: new Date() },
     });
+  }
+
+  /** Delta sync (PWA offline, Phase 2). Includes soft-deleted rows as tombstones. */
+  async findChangedSince(
+    userId: string,
+    options: DeltaOptions,
+  ): Promise<DeltaPage<Education>> {
+    const rows = await this.prisma.education.findMany({
+      where: deltaWhere(userId, options),
+      orderBy: DELTA_ORDER_BY,
+      take: options.limit + 1,
+    });
+    return splitDelta(rows, options.limit, (row) => this.mapToDomain(row));
   }
 
   private mapToDomain(raw: PrismaEducation): Education {

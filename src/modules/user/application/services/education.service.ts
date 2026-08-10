@@ -17,6 +17,8 @@ import {
   EducationProps,
 } from '../../domain/entities/education.entity';
 import { AddEducationDto } from '../dtos/add-education.dto';
+import { EducationResponseDto } from '../dtos/education-response.dto';
+import { assertVersionMatches } from '@common/conflict/version-conflict.exception';
 import { EducationAddedEvent } from '../../domain/events/education-added.event';
 import { ERROR_MESSAGES } from '@common/constants/error-messages';
 
@@ -70,12 +72,30 @@ export class EducationService {
     return this.educationRepository.findByUserId(userId);
   }
 
+  /**
+   * @param ownerUserId the authenticated caller. Required: findById is not user-scoped, so
+   *   without this check any caller knowing an id could edit another user's education.
+   */
   async updateEducation(
     id: string,
-    dto: Partial<EducationProps>,
+    dto: Partial<EducationProps> & { expectedUpdatedAt: string },
+    ownerUserId: string,
   ): Promise<Education> {
     const existing = await this.educationRepository.findById(id);
     if (!existing) throw new NotFoundException('Education not found');
+
+    // Same 404 as a missing row — see the note in ExperienceService.
+    if (existing.userId !== ownerUserId) {
+      throw new NotFoundException('Education not found');
+    }
+
+    // Optimistic concurrency (PWA offline, Phase 4).
+    assertVersionMatches({
+      serverUpdatedAt: existing.updatedAt,
+      clientExpectedUpdatedAt: dto.expectedUpdatedAt,
+      serverVersion: () => new EducationResponseDto(existing),
+      clientAttempted: dto,
+    });
 
     let updated: Education;
     try {

@@ -8,6 +8,13 @@ import { Injectable } from '@nestjs/common';
 import { UserSkill as PrismaUserSkill } from '@prisma/client';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import { UserSkill } from '../../domain/entities/user-skill.entity';
+import {
+  DELTA_ORDER_BY,
+  DeltaOptions,
+  DeltaPage,
+  deltaWhere,
+  splitDelta,
+} from '@modules/sync/delta';
 
 @Injectable()
 export class UserSkillRepository {
@@ -67,6 +74,19 @@ export class UserSkillRepository {
       where: { id },
       data: { deletedAt: new Date() },
     });
+  }
+
+  /** Delta sync (PWA offline, Phase 2). Includes soft-deleted rows as tombstones. */
+  async findChangedSince(
+    userId: string,
+    options: DeltaOptions,
+  ): Promise<DeltaPage<UserSkill>> {
+    const rows = await this.prisma.userSkill.findMany({
+      where: deltaWhere(userId, options),
+      orderBy: DELTA_ORDER_BY,
+      take: options.limit + 1,
+    });
+    return splitDelta(rows, options.limit, (row) => this.mapToDomain(row));
   }
 
   /** Look up a Skill (shared kernel) by id — validates the FK and reads its name. */

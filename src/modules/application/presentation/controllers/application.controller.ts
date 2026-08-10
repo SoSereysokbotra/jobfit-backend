@@ -26,6 +26,7 @@ import {
   JwtAuthGuard,
 } from '@common/guards/jwt-auth.guard';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
+import { Idempotent } from '@common/idempotency/idempotent.decorator';
 import { ApplicationService } from '../../application.service';
 import { SubmitApplicationDto } from '../../dto/submit-application.dto';
 import { AddContactPersonDto } from '../../dto/add-contact-person.dto';
@@ -43,7 +44,13 @@ export class ApplicationController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Submit an application to a job' })
+  @Idempotent()
+  @ApiOperation({
+    summary: 'Submit an application to a job',
+    description:
+      'Send an `Idempotency-Key` header to make a retry safe: the replay returns the ' +
+      'original response instead of submitting twice.',
+  })
   async submit(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: SubmitApplicationDto,

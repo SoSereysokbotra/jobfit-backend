@@ -8,6 +8,7 @@ import { MatchExternalJobUseCase } from './application/use-cases/match-external-
 import { RecomputeUserMatchesUseCase } from './application/use-cases/recompute-user-matches.use-case';
 import { MatchingEmbeddingService } from './application/services/matching-embedding.service';
 import { RecommendationsQueryService } from './application/services/recommendations-query.service';
+import { RecommendationDismissService } from './application/services/recommendation-dismiss.service';
 import { SkillGapService } from './application/services/skill-gap.service';
 import { JobMatchService } from './application/services/job-match.service';
 import { ApplicationScreeningService } from './application/services/application-screening.service';
@@ -27,6 +28,7 @@ import { UserProfileUpdatedListener } from './listeners/user-profile-updated.lis
     MatchExternalJobUseCase,
     RecomputeUserMatchesUseCase,
     RecommendationsQueryService,
+    RecommendationDismissService,
     SkillGapService,
     JobMatchService,
     ApplicationScreeningService,
@@ -37,6 +39,12 @@ import { UserProfileUpdatedListener } from './listeners/user-profile-updated.lis
   ],
   // ApplicationScreeningService is consumed by ApplicationModule's apply flow.
   // SkillGapService is consumed by LearningModule to build job-driven skill gaps.
-  exports: [MatchingEmbeddingService, ApplicationScreeningService, SkillGapService],
+  // RecommendationDismissService is consumed by SyncModule's offline batch flush.
+  exports: [
+    MatchingEmbeddingService,
+    ApplicationScreeningService,
+    SkillGapService,
+    RecommendationDismissService,
+  ],
 })
 export class MatchingModule {}

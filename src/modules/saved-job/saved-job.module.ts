@@ -7,6 +7,7 @@ import { SavedJobRepository } from './infrastructure/repositories/saved-job.repo
 @Module({
   controllers: [SavedJobController],
   providers: [SavedJobService, SavedJobRepository],
-  exports: [SavedJobService],
+  // SavedJobRepository is exported for SyncModule's full-replace sync (PWA offline, Phase 2).
+  exports: [SavedJobService, SavedJobRepository],
 })
 export class SavedJobModule {}

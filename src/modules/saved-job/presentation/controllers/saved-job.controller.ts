@@ -28,6 +28,7 @@ import {
   JwtAuthGuard,
 } from '@common/guards/jwt-auth.guard';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
+import { Idempotent } from '@common/idempotency/idempotent.decorator';
 import { SavedJobService } from '../../saved-job.service';
 import { SaveJobDto } from '../../dto/save-job.dto';
 import { SavedJobsResponseDto } from '../../dto/saved-jobs-response.dto';
@@ -50,7 +51,14 @@ export class SavedJobController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Save a job' })
+  @Idempotent()
+  @ApiOperation({
+    summary: 'Save a job',
+    description:
+      'Send an `Idempotency-Key` header to make a retry safe. Saving is already ' +
+      'idempotent at the repository level; the key additionally replays the original ' +
+      'response body rather than recomputing the id list.',
+  })
   async save(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: SaveJobDto,
@@ -70,7 +78,13 @@ export class SavedJobController {
   }
 
   @Delete(':jobId')
-  @ApiOperation({ summary: 'Remove a job from the saved list' })
+  @Idempotent()
+  @ApiOperation({
+    summary: 'Remove a job from the saved list',
+    description:
+      'Send an `Idempotency-Key` header to make a retry safe. The key is scoped to ' +
+      'this exact path, so reusing one across two different jobs is a 409.',
+  })
   async remove(
     @CurrentUser() user: AuthenticatedUser,
     @Param('jobId') jobId: string,
