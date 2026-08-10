@@ -16,7 +16,14 @@ export interface JobContext {
   location: string | null;
   minSalary: number | null;
   maxSalary: number | null;
-  industry: string | null; // company.industry
+  /**
+   * The company's industry NAME, already resolved from the `companies.industry` id.
+   *
+   * Passing the raw column here is a bug: it holds an Industry id while
+   * `CandidateContext.desiredIndustries` holds names, so the two can never match. See
+   * scoreOther.
+   */
+  industry: string | null;
 }
 
 export interface SubScores {

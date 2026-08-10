@@ -35,6 +35,10 @@ describe('RecomputeUserMatchesUseCase', () => {
             { id: 'jobB', title: 'Frontend Engineer', remoteType: 'ON_SITE', location: 'NYC', minSalary: 100, maxSalary: 200, company: { industry: 'tech' } },
           ]),
         },
+        // `companies.industry` is an id, so execute() resolves it to a NAME before
+        // scoring. Empty here: this candidate states no desired industries, so the
+        // sub-score is the neutral 50 either way and the payloads below are unchanged.
+        industry: { findMany: jest.fn().mockResolvedValue([]) },
         recommendation: { upsert: jest.fn().mockResolvedValue(undefined) },
       };
       service = new RecomputeUserMatchesUseCase(prisma as never, new ComputeMatchScoreUseCase(), aiClient as never);

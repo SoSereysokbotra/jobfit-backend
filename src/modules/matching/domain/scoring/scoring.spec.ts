@@ -115,6 +115,48 @@ describe('scoring', () => {
     it('no preference or unknown industry -> 50', () => {
       expect(scoreOther(candidate(), job({ industry: 'tech' }))).toBe(50);
     });
+
+    // The 100 branch was UNREACHABLE in production. `companies.industry` holds an
+    // Industry id and `Profile.desiredIndustries` holds names, and the scorer compared
+    // them directly — measured across the whole database, 0 of 35 companies had an
+    // industry value appearing in any profile's desired list. Worse than useless: jobs
+    // WITH industry data got the mismatch score (40) and jobs missing it got the neutral
+    // 50, and in the labelled set the jobs with data are the good ones. Calibration
+    // measured ρ = -0.667 against human grades, flipping to +0.518 once names met names.
+    it('matches on the industry NAME, which is what callers must now pass', () => {
+      expect(
+        scoreOther(
+          candidate({ desiredIndustries: ['Technology'] }),
+          job({ industry: 'Technology' }),
+        ),
+      ).toBe(100);
+    });
+
+    it('does not match a raw Industry id against a name', () => {
+      // The exact production shape before the fix. It must score as "unknown industry"
+      // (50), never as a mismatch (40) — we do not know that it is not Technology.
+      expect(
+        scoreOther(
+          candidate({ desiredIndustries: ['Technology'] }),
+          job({ industry: '8449fe51-8c66-4c0f-ab46-9e4f4466c83a' }),
+        ),
+      ).toBe(40);
+    });
+
+    it('compares case-insensitively, because the two sides are authored separately', () => {
+      expect(
+        scoreOther(
+          candidate({ desiredIndustries: ['technology'] }),
+          job({ industry: 'Technology' }),
+        ),
+      ).toBe(100);
+    });
+
+    it('treats a blank preference entry as no preference', () => {
+      expect(
+        scoreOther(candidate({ desiredIndustries: ['  '] }), job({ industry: 'Technology' })),
+      ).toBe(50);
+    });
   });
 
   describe('weightedMatch', () => {

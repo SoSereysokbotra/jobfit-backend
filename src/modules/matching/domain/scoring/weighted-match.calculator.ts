@@ -11,15 +11,37 @@ export const MATCH_WEIGHTS = {
   other: 0.1,
 } as const;
 
-/** "Other" (weight 10%): industry alignment between candidate and job. */
+/**
+ * "Other" (weight 10%): industry alignment between candidate and job.
+ *
+ * `job.industry` is the RESOLVED INDUSTRY NAME, never the raw `companies.industry`
+ * column — that column stores an Industry **id**, and `Profile.desiredIndustries` stores
+ * **names**. Comparing them directly is what this used to do, and the two sides could
+ * never be equal: measured across the whole database, **0 of 35 companies** had an
+ * industry value appearing in any profile's desired list, so `return 100` was unreachable
+ * and this sub-score could only ever be 40 or 50.
+ *
+ * That was not merely useless, it was BACKWARDS. Jobs that have an industry recorded got
+ * the mismatch score (40) while jobs missing the data got the neutral one (50) — and in
+ * the labelled set the jobs with industry data are disproportionately the GOOD ones
+ * (12 of 18 GREAT vs 2 of 76 BAD). Calibration measured **ρ = −0.667** against human
+ * grades: the one sub-score actively arguing against the right answer.
+ *
+ * Comparison is case-insensitive because the two sides are authored independently — the
+ * industries table says "Technology", a profile could carry "technology".
+ */
 export function scoreOther(
   candidate: CandidateContext,
   job: JobContext,
 ): number {
-  if (job.industry && candidate.desiredIndustries.includes(job.industry)) {
-    return 100;
-  }
-  if (candidate.desiredIndustries.length === 0 || !job.industry) return 50;
+  const desired = candidate.desiredIndustries
+    .filter((i) => typeof i === 'string' && i.trim().length > 0)
+    .map((i) => i.trim().toLowerCase());
+  const jobIndustry = job.industry?.trim().toLowerCase();
+
+  if (jobIndustry && desired.includes(jobIndustry)) return 100;
+  // Nothing to compare on one side or the other — neutral, not a penalty.
+  if (desired.length === 0 || !jobIndustry) return 50;
   return 40;
 }
 

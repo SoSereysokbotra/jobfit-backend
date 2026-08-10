@@ -354,6 +354,96 @@ cases, and the stale "mock behind interface" comment on `useRecommendations` is 
 
 ---
 
+## E9 — The match breakdown: "make it touch AI, don't hardcode"
+
+Asked after seeing a card reading *Industry 40 · Salary 100 · Skills 58 · Location 100 ·
+Experience 90*. Only `skills` came from the AI service (BGE-M3 cosine); the rest are
+deterministic. The request was to make them AI-backed.
+
+### First: build the harness, because none existed
+
+`eval-retrieval.ts` measures WHICH jobs come back. The breakdown is computed **after**
+retrieval, so no retrieval metric moves when a sub-score changes — **nothing measured the
+sub-scores at all.** `scripts/eval-score-calibration.ts` now does, using the same method
+that condemned the LLM `fitScore` in Phase C: Spearman ρ against the 100 hand-graded
+`match_labels`, reported **per sub-score** as well as for the total.
+
+The first run paid for itself immediately:
+
+| signal | ρ vs human grade | spread |
+|---|---|---|
+| TOTAL | 0.671 | 39–63 |
+| skills | 0.573 | 32–62 |
+| **experience** | **0.000** | **constant 40** |
+| location | 0.455 | 40–100 |
+| salary | **0.684** | 50–100 |
+| **other** (industry) | **−0.667** | 40–50 |
+
+### The industry sub-score was comparing UUIDs to names
+
+`companies.industry` stores an Industry **id**; `Profile.desiredIndustries` stores
+**names** ("Technology"). The scorer compared them directly. Measured: **0 of 35 companies**
+had an industry value appearing in any profile's desired list — so `return 100` was
+**unreachable dead code** and the sub-score could only ever be 40 or 50.
+
+Worse, it was backwards. Jobs *with* an industry recorded got the mismatch score (40)
+while jobs missing the data got the neutral 50 — and in the labelled set the jobs with
+data are disproportionately the good ones (**12 of 18 GREAT** have an industry vs **2 of
+76 BAD**). Hence ρ = −0.667: the one sub-score arguing against the right answer.
+
+**Fixed** by resolving the id to a name before scoring, with case-insensitive comparison:
+
+| | ρ before | ρ after |
+|---|---|---|
+| `other` (industry) | −0.667 | **+0.518** |
+| TOTAL | 0.671 | 0.669 |
+
+The sub-score is repaired; **the total is unchanged** (Δ −0.002 on n=100 with heavy ties
+— noise). Kept anyway, because comparing a UUID to a name is a defect regardless of what a
+correlation does, and the 100 branch being unreachable is not a tuning opinion. Verified in
+stored data: the industry score now reaches 100 (7 recommendations each for the users who
+state a preference) where it was structurally impossible before.
+
+- [x] Harness built
+- [x] Bug found, fixed, measured, tested (4 new specs pinning the id-vs-name case)
+- [x] `scripts/recompute-recommendations.ts` — `recommendations` is a CACHE, and
+      `RecommendationsQueryService` only recomputes when a user has **zero** rows, so any
+      scorer change is invisible to existing users until this runs. 400 rows recomputed.
+
+### ⛔ The experience sub-score CANNOT be validated here — do not build blind
+
+The approved plan was to make `experience` AI-backed. The calibration run says that cannot
+be measured on the current eval set:
+
+- `experience` is a **constant 40 across all 100 labelled pairs**, contributing a fixed
+  10 points (25% weight × 40) to every score and correlating with nothing.
+- Both labelled candidates have **0 `Experience` rows and no parsed résumé at all**.
+
+So `experienceCount` is 0 for both, and **any** experience scorer — AI-backed or not —
+returns "unknown" for them. The number cannot move. This is the same structural trap as
+the BM25 case in E8: **the labelled users lack the very data the change reads.**
+
+A related landmine found while scoping it: a naive "N years" regex over requirement text
+matches *"Must be at least 18 years of age"*. Coverage is 25 of 60 jobs stating explicit
+years, 18 implying seniority by word, 32 with any signal — which is the case FOR using the
+model (reading a posting is its measured-reliable skill, 0.937 groundedness) rather than a
+pattern. But that build is unmeasurable until the eval set changes.
+
+**Unblock:** label pairs for a candidate who has a parsed résumé —
+`eval-export-worksheet.ts` → label → `eval-load-labels.ts`. Until then no experience-scorer
+change can be honestly validated.
+
+- [x] Findings, with numbers
+- [ ] **Blocked:** extend the eval set to candidates with résumés, then build
+
+### Not touched, deliberately
+
+`salary` (ρ 0.684, the strongest signal) and `location` (ρ 0.455) are arithmetic over facts
+— band overlap and geography. Routing them through a model would make them less correct,
+not more. `fitScore` remains forbidden (ρ 0.137 / −0.065).
+
+---
+
 ## E7 — Phase D (GPU)
 
 **Confirmed still blocked, not skipped.** `docs/RAG_PHASE_D_HANDOFF.md` §2 and §11: the

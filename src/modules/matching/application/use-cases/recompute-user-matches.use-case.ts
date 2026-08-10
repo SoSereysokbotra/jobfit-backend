@@ -108,6 +108,13 @@ export class RecomputeUserMatchesUseCase {
       },
     });
     const jobById = new Map(jobs.map((j) => [j.id, j]));
+    // `companies.industry` is an Industry ID; the candidate's desiredIndustries are
+    // NAMES. Resolving here is what makes scoreOther's match branch reachable at all —
+    // comparing the raw id could never equal a name, and measured 0 matches across the
+    // whole database.
+    const industryNameById = await this.industryNames(
+      jobs.map((j) => j.company?.industry).filter((i): i is string => !!i),
+    );
 
     let written = 0;
     for (const row of near) {
@@ -119,7 +126,9 @@ export class RecomputeUserMatchesUseCase {
         location: job.location,
         minSalary: job.minSalary,
         maxSalary: job.maxSalary,
-        industry: job.company?.industry ?? null,
+        industry: job.company?.industry
+          ? (industryNameById.get(job.company.industry) ?? null)
+          : null,
       };
       const { score, breakdown } = this.compute.execute({
         candidate,
@@ -372,6 +381,22 @@ export class RecomputeUserMatchesUseCase {
       // Only a hard remote requirement (wants remote, nothing else) triggers the filter.
       remoteOnly: remoteTypes.length > 0 && remoteTypes.every((t) => t === 'REMOTE'),
     };
+  }
+
+  /**
+   * Resolve Industry ids to names, for the industry sub-score.
+   *
+   * An id with no row (stale reference — the database has one) simply stays unresolved,
+   * and the scorer treats an unknown industry as neutral rather than as a mismatch.
+   */
+  async industryNames(ids: string[]): Promise<Map<string, string>> {
+    const unique = [...new Set(ids)];
+    if (unique.length === 0) return new Map();
+    const rows = await this.prisma.industry.findMany({
+      where: { id: { in: unique } },
+      select: { id: true, name: true },
+    });
+    return new Map(rows.map((r) => [r.id, r.name]));
   }
 
   /** Best-known experience count: structured Experience rows, else résumé-derived. */
