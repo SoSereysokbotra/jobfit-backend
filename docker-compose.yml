@@ -1,0 +1,32 @@
+# Local dev infrastructure for jobfit-backend.
+#
+# Only Redis is containerized here. The rest of the stack runs outside Docker:
+#   - Postgres  : Supabase (remote, via DATABASE_URL)
+#   - Backend   : `npm run start:dev`
+#   - AI service: `uvicorn app.main:app --port 8000` in ../jobfits-ai-service
+#
+# Redis backs the BullMQ 'resume-parsing' queue. Without it, résumé parsing
+# silently never runs (the queue has no inline fallback).
+#
+# Usage:  docker compose up -d      # start Redis (survives reboots)
+#         docker compose down       # stop it (data kept in the named volume)
+
+services:
+  redis:
+    image: redis:alpine
+    container_name: jobfit-redis
+    # appendonly = persist queue state across restarts (data in the named volume).
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - jobfit-redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  jobfit-redis-data:

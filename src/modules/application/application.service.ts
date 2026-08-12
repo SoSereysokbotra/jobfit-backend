@@ -27,6 +27,7 @@ import { ApplicationTimeline } from './domain/entities/application-timeline.enti
 import { ContactPerson } from './domain/entities/contact-person.entity';
 import { ApplicationStatus } from '@shared/kernel/enums/application-status.enum';
 import { SubmitApplicationDto } from './dto/submit-application.dto';
+import { DuplicateApplicationDto } from './dto/similar-application.dto';
 import { ApplicationScreeningService } from '@modules/matching/application/services/application-screening.service';
 import { AddContactPersonDto } from './dto/add-contact-person.dto';
 import { ERROR_MESSAGES } from '@common/constants/error-messages';
@@ -146,6 +147,23 @@ export class ApplicationService {
       skip,
       take,
       includeArchived,
+    );
+  }
+
+  /**
+   * Duplicate-application detector for the extension: the user's most recent
+   * prior application to the same company + a matching title, or null.
+   */
+  async findSimilarApplication(
+    userId: string,
+    jobTitle: string,
+    companyName: string,
+  ): Promise<DuplicateApplicationDto | null> {
+    if (!jobTitle.trim() || !companyName.trim()) return null;
+    return this.applicationRepository.findSimilarForUser(
+      userId,
+      jobTitle.trim(),
+      companyName.trim(),
     );
   }
 

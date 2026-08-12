@@ -13,6 +13,7 @@ import {
 } from '../dtos/external-job-match.dto';
 import { SkillGapDto, SkillGapQueryDto } from '../dtos/skill-gap.dto';
 import { JobMatchDto, JobMatchQueryDto } from '../dtos/job-match.dto';
+import { ScoutMatchDto, ScoutQueryDto } from '../dtos/scout.dto';
 
 @ApiTags('Matching')
 @ApiBearerAuth()
@@ -33,6 +34,21 @@ export class MatchingController {
   })
   async list(@CurrentUser() user: AuthenticatedUser): Promise<RecommendedJobDto[]> {
     return this.recommendations.getForUser(user.id);
+  }
+
+  @Get('scout')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'New high-match jobs for the extension’s passive background scout: the ' +
+      'user’s recommendations at/above minScore, optionally newer than `since`.',
+  })
+  @ApiResponse({ status: 200, type: [ScoutMatchDto] })
+  async scout(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ScoutQueryDto,
+  ): Promise<ScoutMatchDto[]> {
+    return this.recommendations.getScout(user.id, query.minScore ?? 0, query.since);
   }
 
   @Get('for-job')
@@ -88,15 +104,17 @@ export class MatchingController {
   async byJob(
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: ExternalJobMatchQueryDto,
-  ): Promise<ExternalJobMatchDto | undefined> {
+  ): Promise<ExternalJobMatchDto | null> {
     const result = await this.matchExternalJob.execute(user.id, {
       title: query.title,
       company: query.company ?? null,
       location: query.location ?? null,
       remoteType: query.remoteType ?? null,
     });
-    // No profile yet: return an empty body (204) rather than a fabricated score.
-    if (!result) return undefined;
+    // No profile yet: return `data: null` (not undefined) so the envelope keeps a
+    // `data` key and the extension resolves it to its empty state instead of
+    // mis-reading the whole envelope as a match.
+    if (!result) return null;
 
     return {
       externalId: query.externalId,

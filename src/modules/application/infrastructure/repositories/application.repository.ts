@@ -58,6 +58,50 @@ export class ApplicationRepository implements IRepository<Application> {
   }
 
   /**
+   * Most recent prior application by this user to the same company + a matching
+   * title. Company is matched exactly (case-insensitive); title uses `contains`
+   * (v1 — precise, low false-positive). Returns a flat projection for the
+   * extension's duplicate detector, or null.
+   */
+  async findSimilarForUser(
+    userId: string,
+    jobTitle: string,
+    companyName: string,
+  ): Promise<{
+    applicationId: string;
+    jobTitle: string;
+    companyName: string | null;
+    status: ApplicationStatus;
+    appliedAt: string;
+  } | null> {
+    const row = await this.prisma.application.findFirst({
+      where: {
+        userId,
+        deletedAt: null,
+        job: {
+          title: { contains: jobTitle, mode: 'insensitive' },
+          company: { name: { equals: companyName, mode: 'insensitive' } },
+        },
+      },
+      orderBy: { appliedAt: 'desc' },
+      select: {
+        id: true,
+        status: true,
+        appliedAt: true,
+        job: { select: { title: true, company: { select: { name: true } } } },
+      },
+    });
+    if (!row) return null;
+    return {
+      applicationId: row.id,
+      jobTitle: row.job.title,
+      companyName: row.job.company?.name ?? null,
+      status: row.status as unknown as ApplicationStatus,
+      appliedAt: row.appliedAt.toISOString(),
+    };
+  }
+
+  /**
    * A user's applications, newest first, paginated.
    *
    * Hides the ones THEY archived. The employer's own archiving is a different column and

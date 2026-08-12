@@ -59,8 +59,16 @@ export class ExternalJobMatchDto {
   @ApiProperty() externalId!: string;
   @ApiProperty() source!: string;
 
-  @ApiProperty({ description: 'Weighted total, 0-100' })
-  overall!: number;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'Weighted total, 0-100 — or NULL when it could not be computed. Null means the ' +
+      'skills comparison did not run (see `semantic`), and skills is the only ' +
+      'component that measures fit to THIS role: experience and location alone would ' +
+      'score a wildly unrelated job in the 90s, so no total is emitted at all.',
+  })
+  overall!: number | null;
 
   @ApiProperty({ type: ExternalJobSubScoresDto })
   subScores!: ExternalJobSubScoresDto;
@@ -68,8 +76,9 @@ export class ExternalJobMatchDto {
   @ApiProperty({
     description:
       'False when the semantic (skills) component could not be computed — no ' +
-      'candidate embedding or the AI service was unreachable — and a neutral ' +
-      'value was used instead. Surface this so the score is not over-trusted.',
+      'candidate embedding, or the AI service was unreachable. When false, `overall` ' +
+      'is null and `subScores.skills` is a placeholder that must be rendered as ' +
+      '"not computed" rather than as a score.',
   })
   semantic!: boolean;
 }

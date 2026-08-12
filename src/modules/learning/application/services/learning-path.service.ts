@@ -21,6 +21,23 @@ import {
   LearningResource,
   resourcesForSkill,
 } from '../../domain/learning-resources.catalog';
+import { ExternalSkillGapReportDto } from '../dtos/external-skill-gap.dto';
+
+/** Seniority words carry no domain signal — drop them so similar-role matching
+ *  keys on the field ("Backend Engineer"), not "Senior". */
+const TITLE_STOPWORDS = new Set([
+  'senior',
+  'junior',
+  'lead',
+  'staff',
+  'principal',
+  'mid',
+  'entry',
+  'level',
+  'the',
+  'and',
+  'for',
+]);
 
 /**
  * Worth showing on the learning page: nothing evidences it, or only something adjacent does.
@@ -63,6 +80,79 @@ export class LearningPathService {
    * reports which, and matches with the distinctive-word approach that was measured. A
    * second comparison here would be a weaker copy of a solved problem.
    */
+  /**
+   * Skill gaps for the extension, scoped to PUBLISHED jobs SIMILAR to the one the
+   * user is viewing (matched on distinctive title words). Field-aware by design:
+   * a "Backend Engineer" page yields backend gaps, not a universal tech list.
+   * Returns an empty list (never flags "everything") when the user has no skills,
+   * no title is given, or no similar roles exist.
+   */
+  async getExternalJobGaps(
+    userId: string,
+    jobExternalId: string,
+    source: string,
+    title: string | undefined,
+  ): Promise<ExternalSkillGapReportDto> {
+    const empty: ExternalSkillGapReportDto = { jobExternalId, source, gaps: [] };
+    const tokens = (title ?? '')
+      .split(/[^A-Za-z0-9+#.]+/)
+      .map((w) => w.toLowerCase())
+      .filter((w) => w.length > 3 && !TITLE_STOPWORDS.has(w))
+      .slice(0, 6);
+    if (tokens.length === 0) return empty;
+
+    const userSkillRows = await this.prisma.userSkill.findMany({
+      where: { userId },
+      select: { skillId: true },
+    });
+    const userSkillIds = new Set(userSkillRows.map((r) => r.skillId));
+    // No skills on file → every requirement would look like a gap. Don't guess.
+    if (userSkillIds.size === 0) return empty;
+
+    const similar = await this.prisma.job.findMany({
+      where: {
+        status: 'PUBLISHED',
+        OR: tokens.map((t) => ({
+          title: { contains: t, mode: 'insensitive' as const },
+        })),
+      },
+      select: { skills: { select: { skillId: true } } },
+      take: 200,
+    });
+    if (similar.length === 0) return empty;
+
+    const demand = new Map<string, number>();
+    for (const job of similar) {
+      for (const s of job.skills) {
+        if (!userSkillIds.has(s.skillId)) {
+          demand.set(s.skillId, (demand.get(s.skillId) ?? 0) + 1);
+        }
+      }
+    }
+    if (demand.size === 0) return empty;
+
+    const top = [...demand.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4);
+    const names = await this.prisma.skill.findMany({
+      where: { id: { in: top.map(([id]) => id) } },
+      select: { id: true, name: true },
+    });
+    const nameById = new Map(names.map((s) => [s.id, s.name]));
+
+    return {
+      jobExternalId,
+      source,
+      gaps: top
+        .filter(([id]) => nameById.has(id))
+        .map(([id, count]) => ({
+          skill: nameById.get(id)!,
+          demandCount: count,
+          jobsWithoutSkill: Math.max(0, similar.length - count),
+          // No LearningPath table in the schema; the catalog is a separate route.
+          learningPath: null,
+        })),
+    };
+  }
+
   async getSkillGaps(userId: string): Promise<SkillGapSummaryDto> {
     const applications = await this.prisma.application.findMany({
       where: { userId, deletedAt: null },

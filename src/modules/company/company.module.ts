@@ -1,6 +1,11 @@
-﻿import { Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { CompanyController } from './company.controller';
 import { CompanyService } from './company.service';
+import { CompanyRepository } from './infrastructure/repositories/company.repository';
 
-@Module({ controllers: [CompanyController], providers: [CompanyService], exports: [CompanyService] })
+@Module({
+  controllers: [CompanyController],
+  providers: [CompanyService, CompanyRepository],
+  exports: [CompanyService],
+})
 export class CompanyModule {}

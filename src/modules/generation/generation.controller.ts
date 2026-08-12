@@ -20,6 +20,21 @@ import { UserRepository } from '../user/infrastructure/repositories/user.reposit
 import { GenerationService } from './generation.service';
 import { GenerateCoverLetterDto } from './dto/generate-cover-letter.dto';
 import { GenerateInterviewDto } from './dto/generate-interview.dto';
+import {
+  ExtCoverLetterDto,
+  ExtCoverLetterResponseDto,
+  ExtInterviewDto,
+  ExtInterviewResponseDto,
+} from './dto/extension-generation.dto';
+
+/** "system design" → "System Design" for the extension's question-type labels. */
+function titleCase(s: string): string {
+  return s
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
 
 @ApiTags('AI Generation')
 @ApiBearerAuth()
@@ -57,6 +72,54 @@ export class GenerationController {
   ) {
     await this.assertPremium(user.id);
     return this.generation.interview(dto.jobId, dto.level, dto.kind, dto.answer);
+  }
+
+  // ── Browser extension: UNGATED, job-context generation (no premium tier) ──────
+
+  @Post('generate/cover-letter')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Generate a cover letter for an external job (browser extension). Ungated; ' +
+      'composed from the user’s résumé + the job’s title/company (no stored application).',
+  })
+  async extensionCoverLetter(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: ExtCoverLetterDto,
+  ): Promise<ExtCoverLetterResponseDto> {
+    const result = await this.generation.coverLetterForExternalJob(
+      user.id,
+      dto.role ?? '',
+      dto.company ?? null,
+    );
+    return { text: result.coverLetter, model: result.generatedBy };
+  }
+
+  @Post('generate/interview-prep')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Interview prep for an external job (browser extension). Ungated; questions ' +
+      'from the job title, mapped to question-type shares + a top-questions list.',
+  })
+  async extensionInterview(
+    @CurrentUser() _user: AuthenticatedUser,
+    @Body() dto: ExtInterviewDto,
+  ): Promise<ExtInterviewResponseDto> {
+    const result = await this.generation.interviewForExternalJob(dto.role ?? '');
+    const total = result.questions.length || 1;
+    const byCategory = new Map<string, number>();
+    for (const q of result.questions) {
+      byCategory.set(q.category, (byCategory.get(q.category) ?? 0) + 1);
+    }
+    return {
+      questionTypes: [...byCategory.entries()].map(([label, n]) => ({
+        label: titleCase(label),
+        pct: Math.round((n / total) * 100),
+      })),
+      topQuestions: result.questions.map((q) => q.question),
+      model: result.generatedBy,
+    };
   }
 
   /** Gate AI generation behind PREMIUM/PROFESSIONAL — enforced server-side. */

@@ -46,6 +46,13 @@ import { ResumeScorerService } from './application/services/resume-scorer.servic
     ResumeScorerService,
     ResumeParsingProcessor,
   ],
-  exports: [ResumeService, ResumeRepository],
+  // ResumeScorerService + ParsedResumeDataRepository are consumed by
+  // MatchReportModule, which scores the user's résumé as part of a match report.
+  exports: [
+    ResumeService,
+    ResumeRepository,
+    ResumeScorerService,
+    ParsedResumeDataRepository,
+  ],
 })
 export class ResumeModule {}

@@ -85,6 +85,62 @@ export class GenerationService {
     return result;
   }
 
+  /**
+   * Cover letter for an EXTERNAL job (browser extension) — composed from the
+   * user's résumé + the job's displayed title/company, with no stored application
+   * and no premium gate. The posting description is never scraped, so it's empty
+   * and the model works from identifiers + résumé (same graceful template fallback).
+   */
+  async coverLetterForExternalJob(
+    userId: string,
+    jobTitle: string,
+    companyName: string | null,
+  ): Promise<CoverLetterResult> {
+    const input: CoverLetterRequest = {
+      resumeSummary:
+        (await this.resumeSummary(userId, null)) ||
+        'A motivated candidate applying for this role.',
+      jobTitle: jobTitle || 'this role',
+      companyName: companyName || 'the company',
+      jobDescription: '',
+      tone: 'professional',
+    };
+    try {
+      const ai = await this.aiClient.generateCoverLetter(input);
+      return { coverLetter: ai.coverLetter, generatedBy: 'ai' };
+    } catch (err) {
+      if (!(err instanceof AiServiceError)) throw err;
+      this.logger.warn(
+        `AI cover letter unavailable (${err.code}); using template fallback`,
+      );
+      return { coverLetter: this.templateCoverLetter(input), generatedBy: 'template' };
+    }
+  }
+
+  /**
+   * Interview prep questions for an EXTERNAL job (browser extension) — from the
+   * displayed title only, no stored job and no premium gate. Static-question
+   * fallback when the AI service is down.
+   */
+  async interviewForExternalJob(jobTitle: string): Promise<InterviewResult> {
+    const title = jobTitle || 'this role';
+    try {
+      const ai = await this.aiClient.generateInterview({
+        jobTitle: title,
+        jobDescription: '',
+        level: 'mid',
+        kind: 'questions',
+      });
+      return { questions: ai.questions ?? [], feedback: ai.feedback ?? null, generatedBy: 'ai' };
+    } catch (err) {
+      if (!(err instanceof AiServiceError)) throw err;
+      this.logger.warn(
+        `AI interview prep unavailable (${err.code}); using static fallback`,
+      );
+      return { questions: this.staticQuestions(title), feedback: null, generatedBy: 'static' };
+    }
+  }
+
   // ── Interview coaching ──────────────────────────────────────────────────────
 
   async interview(

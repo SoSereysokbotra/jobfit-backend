@@ -47,6 +47,17 @@ export class CompanyRepository implements IRepository<Company> {
     return row ? this.mapToDomain(row) : null;
   }
 
+  /**
+   * Case-insensitive exact-name lookup. Used by the browser extension, which
+   * passes the company's displayed name (casing may differ from our row).
+   */
+  async findByNameInsensitive(name: string): Promise<Company | null> {
+    const row = await this.prisma.company.findFirst({
+      where: { name: { equals: name, mode: 'insensitive' }, deletedAt: null },
+    });
+    return row ? this.mapToDomain(row) : null;
+  }
+
   async findAll(skip = 0, take = 20): Promise<Company[]> {
     const rows = await this.prisma.company.findMany({
       where: { deletedAt: null },
@@ -89,6 +100,13 @@ export class CompanyRepository implements IRepository<Company> {
   /** Number of jobs posted by a company. */
   async countJobs(companyId: string): Promise<number> {
     return this.prisma.job.count({ where: { companyId } });
+  }
+
+  /** Number of currently-open (PUBLISHED) roles at a company. */
+  async countOpenJobs(companyId: string): Promise<number> {
+    return this.prisma.job.count({
+      where: { companyId, status: 'PUBLISHED' },
+    });
   }
 
   private toPersistence(

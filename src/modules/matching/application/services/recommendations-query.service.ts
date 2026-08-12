@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import { RecomputeUserMatchesUseCase } from '../use-cases/recompute-user-matches.use-case';
 import { RecommendedJobDto } from '../../presentation/dtos/recommended-job.dto';
+import { ScoutMatchDto } from '../../presentation/dtos/scout.dto';
 
 const DEFAULT_LIMIT = 50;
 
@@ -24,6 +25,39 @@ export class RecommendationsQueryService {
       rows = await this.read(userId, limit);
     }
     return rows.map((r) => this.toDto(r));
+  }
+
+  /**
+   * New high-match jobs for the extension's passive scout: the user's existing
+   * recommendations at/above `minScore`, optionally limited to jobs created after
+   * `since`. Maps to the extension's ScoutMatch (with a click-through URL).
+   */
+  async getScout(
+    userId: string,
+    minScore: number,
+    since?: string,
+  ): Promise<ScoutMatchDto[]> {
+    const rows = await this.prisma.recommendation.findMany({
+      where: {
+        userId,
+        score: { gte: minScore },
+        ...(since ? { job: { createdAt: { gte: new Date(since) } } } : {}),
+      },
+      orderBy: { score: 'desc' },
+      take: 50,
+      include: { job: { include: { company: { select: { name: true } } } } },
+    });
+
+    // Internal jobs have no external apply URL — link to the web app job page.
+    const base = (process.env.CORS_ORIGIN ?? '').split(',')[0]?.trim() ?? '';
+    return rows.map((r) => ({
+      externalId: r.job.externalId ?? r.job.id,
+      source: (r.job.source ?? 'jobfit').toLowerCase(),
+      title: r.job.title,
+      company: r.job.company?.name ?? null,
+      score: Math.round(r.score),
+      url: r.job.externalUrl ?? (base ? `${base}/jobs/${r.job.id}` : ''),
+    }));
   }
 
   private read(userId: string, limit: number) {

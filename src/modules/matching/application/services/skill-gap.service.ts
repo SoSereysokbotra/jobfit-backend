@@ -127,22 +127,7 @@ export class SkillGapService {
       };
     }
 
-    // Words that recur across this job's requirements describe the job's SUBJECT, not any
-    // particular requirement, so they cannot carry a partial match on their own.
-    const themeWords = themeWordsOf(requirements);
-
-    const matches = requirements.map((text) => {
-      const exact = skills.filter((skill) => mentionsExactly(text, skill));
-      if (exact.length > 0) {
-        return { text, matchedSkills: exact, matchQuality: 'EXACT' as const };
-      }
-      const partial = skills.filter((skill) =>
-        mentionsPartially(text, skill, themeWords),
-      );
-      return partial.length > 0
-        ? { text, matchedSkills: partial, matchQuality: 'PARTIAL' as const }
-        : { text, matchedSkills: [] };
-    });
+    const matches = matchRequirements(requirements, skills);
 
     return {
       status: 'OK',
@@ -179,6 +164,11 @@ export class SkillGapService {
    *
    * This changes what the matcher is GIVEN. It does not touch how the matcher decides —
    * see §5.2: `themeWordsOf` and the `management` signal word stay exactly as measured.
+   *
+   * WHICH parse to read lives here; WHAT to read out of it lives in
+   * {@link resumeEvidence}, so the match report can apply the same reading to a
+   * different résumé (the user's default one) without a second definition of "what the
+   * CV shows".
    */
   private async latestParsedResume(userId: string): Promise<string[]> {
     const resume = await this.prisma.resume.findFirst({
@@ -188,18 +178,64 @@ export class SkillGapService {
         parsedData: { select: { skills: true, projects: true, educations: true } },
       },
     });
-    const parsed = resume?.parsedData;
-    if (!parsed) return [];
-
-    return dedupe([
-      // toSkillList, not toStringArray: the model returns "Languages: C++, Python,
-      // TypeScript" as a single entry often enough that the split has to happen here.
-      // See splitSkillEntry for the measurement that put it in code rather than the prompt.
-      ...toSkillList(parsed.skills),
-      ...toProjectTechnologies(parsed.projects).flatMap(splitSkillEntry),
-      ...toFieldsOfStudy(parsed.educations),
-    ]);
+    return resume?.parsedData ? resumeEvidence(resume.parsedData) : [];
   }
+}
+
+/** The columns {@link resumeEvidence} reads — a subset of ParsedResumeData. */
+export interface ParsedResumeEvidence {
+  skills: string | null;
+  projects: string | null;
+  educations: string | null;
+}
+
+/**
+ * Everything one parse can evidence, deduped.
+ *
+ * See {@link SkillGapService.latestParsedResume} for why these three columns and not
+ * more — in particular why experience titles are excluded.
+ */
+export function resumeEvidence(parsed: ParsedResumeEvidence): string[] {
+  return dedupe([
+    // toSkillList, not toStringArray: the model returns "Languages: C++, Python,
+    // TypeScript" as a single entry often enough that the split has to happen here.
+    // See splitSkillEntry for the measurement that put it in code rather than the prompt.
+    ...toSkillList(parsed.skills),
+    ...toProjectTechnologies(parsed.projects).flatMap(splitSkillEntry),
+    ...toFieldsOfStudy(parsed.educations),
+  ]);
+}
+
+/**
+ * Compare a list of requirements against a list of CV skills.
+ *
+ * Split out of {@link SkillGapService.analyse} so the match report can run the same
+ * comparison over requirements the AI read out of a job description, instead of the
+ * employer-authored `Job.requirements` the service loads. Same decisions, same
+ * EXACT/PARTIAL distinction, same theme-word guard — a second implementation would let
+ * the badge and the report disagree about the same résumé.
+ */
+export function matchRequirements(
+  requirements: string[],
+  skills: string[],
+): RequirementMatch[] {
+  const usable = skills.filter((s) => s.trim().length >= MIN_SKILL_LENGTH);
+  // Words that recur across this job's requirements describe the job's SUBJECT, not any
+  // particular requirement, so they cannot carry a partial match on their own.
+  const themeWords = themeWordsOf(requirements);
+
+  return requirements.map((text) => {
+    const exact = usable.filter((skill) => mentionsExactly(text, skill));
+    if (exact.length > 0) {
+      return { text, matchedSkills: exact, matchQuality: 'EXACT' as const };
+    }
+    const partial = usable.filter((skill) =>
+      mentionsPartially(text, skill, themeWords),
+    );
+    return partial.length > 0
+      ? { text, matchedSkills: partial, matchQuality: 'PARTIAL' as const }
+      : { text, matchedSkills: [] };
+  });
 }
 
 /**

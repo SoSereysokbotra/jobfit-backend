@@ -37,6 +37,12 @@ import { UserProfileUpdatedListener } from './listeners/user-profile-updated.lis
   ],
   // ApplicationScreeningService is consumed by ApplicationModule's apply flow.
   // SkillGapService is consumed by LearningModule to build job-driven skill gaps.
-  exports: [MatchingEmbeddingService, ApplicationScreeningService, SkillGapService],
+  // MatchExternalJobUseCase is consumed by MatchReportModule for the report's match rate.
+  exports: [
+    MatchingEmbeddingService,
+    ApplicationScreeningService,
+    SkillGapService,
+    MatchExternalJobUseCase,
+  ],
 })
 export class MatchingModule {}

@@ -40,6 +40,7 @@ import { IndustryModule } from './shared-kernel/industries/industry.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UserModule } from './modules/user/user.module';
 import { CompanyModule } from './modules/company/company.module';
+import { SalaryModule } from './modules/salary/salary.module';
 import { JobModule } from './modules/job/job.module';
 import { ResumeModule } from './modules/resume/resume.module';
 import { ApplicationModule } from './modules/application/application.module';
@@ -53,6 +54,7 @@ import { PaymentModule } from './modules/payment/payment.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { EmployerModule } from './modules/employer/employer.module';
 import { LearningModule } from './modules/learning/learning.module';
+import { MatchReportModule } from './modules/match-report/match-report.module';
 
 // Observability (Phase 3) — health probes + Prometheus metrics.
 import { HealthModule } from './modules/health/health.module';
@@ -101,6 +103,7 @@ import { AlertingModule } from './modules/alerting/alerting.module';
     AuthModule,
     UserModule,
     CompanyModule,
+    SalaryModule,
     JobModule,
     ResumeModule,
     ApplicationModule,
@@ -114,6 +117,7 @@ import { AlertingModule } from './modules/alerting/alerting.module';
     AdminModule,
     EmployerModule,
     LearningModule,
+    MatchReportModule,
 
     // ── Observability (Phase 3) ──────────────────────────────────────────────
     HealthModule,

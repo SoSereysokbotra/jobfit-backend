@@ -31,6 +31,10 @@ import { SubmitApplicationDto } from '../../dto/submit-application.dto';
 import { AddContactPersonDto } from '../../dto/add-contact-person.dto';
 import { UpdateApplicationStatusDto } from '../../dto/update-status.dto';
 import { ApplicationResponseDto } from '../../dto/application-response.dto';
+import {
+  DuplicateApplicationDto,
+  SimilarApplicationQueryDto,
+} from '../../dto/similar-application.dto';
 import { Application } from '../../domain/entities/application.entity';
 import { ApplicationStatus } from '@shared/kernel/enums/application-status.enum';
 
@@ -101,6 +105,24 @@ export class ApplicationController {
   ): Promise<void> {
     await this.assertOwned(id, user);
     await this.applicationService.setArchived(id, false);
+  }
+
+  // MUST be declared before `@Get(':id')` so "/applications/similar" matches this
+  // static route instead of being read as an application id.
+  @Get('similar')
+  @ApiOperation({
+    summary:
+      'Find a prior application to the same company + role (extension duplicate detector).',
+  })
+  async similar(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: SimilarApplicationQueryDto,
+  ): Promise<DuplicateApplicationDto | null> {
+    return this.applicationService.findSimilarApplication(
+      user.id,
+      query.jobTitle,
+      query.companyName,
+    );
   }
 
   @Get(':id')

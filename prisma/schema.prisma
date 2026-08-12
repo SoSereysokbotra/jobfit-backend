@@ -172,6 +172,7 @@ model User {
   savedJobs      SavedJob[]
   recommendations Recommendation[]
   matchLabels     MatchLabel[]
+  matchReports    MatchReport[]
 
   // ── Admin module (Admin MVP) ───────────────────────────────────────────────
   // Admin actions this user performed / system alerts this admin acknowledged.
@@ -864,6 +865,35 @@ model Recommendation {
   @@unique([userId, jobId])
   @@index([userId, score])
   @@map("recommendations")
+}
+
+// Full-page résumé↔job match report, generated from the browser extension and
+// rendered by the web app at /match-report/{id}.
+//
+// `payload` holds the WHOLE rendered report rather than ids to recompute from:
+// the scores are a snapshot of the moment the user scanned, so revisiting the
+// link shows what they were shown, not a different answer produced by a résumé
+// they have since edited.
+//
+// PRIVACY: the description the extension captured is used once to extract
+// requirements; only the DERIVED report is stored, on the user's own row. This
+// is deliberately not a job-listing store.
+model MatchReport {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  externalId String // the source's job id, e.g. a LinkedIn posting id
+  source     String // "linkedin", …
+  title      String
+  company    String?
+
+  payload Json // the full report — see MatchReportPayload
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("match_reports")
 }
 
 // ── Evaluation (RAG plan Phase A) ─────────────────────────────────────────────

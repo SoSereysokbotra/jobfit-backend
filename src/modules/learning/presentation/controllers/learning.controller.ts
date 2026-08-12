@@ -3,7 +3,7 @@
 // Learning endpoints. The global JwtAuthGuard secures by default; the skill-resources route
 // is @Public (generic catalog data). Skill gaps are own-only, scoped by the token.
 
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOkResponse,
@@ -22,6 +22,10 @@ import {
   SkillResourcesView,
 } from '../../application/services/learning-path.service';
 import { SkillGapSummaryDto } from '../../application/dtos/skill-gap-summary.dto';
+import {
+  ExternalGapQueryDto,
+  ExternalSkillGapReportDto,
+} from '../../application/dtos/external-skill-gap.dto';
 
 @ApiTags('Learning')
 @ApiBearerAuth()
@@ -57,6 +61,26 @@ export class LearningController {
   // GET learning-paths/:userId is gone. It returned ten hardcoded technology skills as
   // anyone's learning path, and took a user id in the path only to refuse everybody else's.
   // GET learning/skill-gaps above replaces it and reads the id from the token.
+
+  @Get('learning/gap')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({
+    summary:
+      'Skill gaps for the extension, scoped to roles similar to the viewed job ' +
+      '(by title). Field-aware; not a market-wide in-demand-skills list.',
+  })
+  @ApiOkResponse({ type: ExternalSkillGapReportDto })
+  async externalGap(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ExternalGapQueryDto,
+  ): Promise<ExternalSkillGapReportDto> {
+    return this.learningPathService.getExternalJobGaps(
+      user.id,
+      query.jobExternalId,
+      query.source,
+      query.title,
+    );
+  }
 
   @Get('skills/:skillId/learning-resources')
   @Public()
