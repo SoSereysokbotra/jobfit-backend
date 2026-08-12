@@ -15,6 +15,8 @@ import { DomainEventBus } from '@events/domain-event-bus.service';
 import { Experience } from '../../domain/entities/experience.entity';
 import { AddExperienceDto } from '../dtos/add-experience.dto';
 import { UpdateExperienceDto } from '../dtos/update-experience.dto';
+import { ExperienceResponseDto } from '../dtos/experience-response.dto';
+import { assertVersionMatches } from '@common/conflict/version-conflict.exception';
 import { ExperienceAddedEvent } from '../../domain/events/experience-added.event';
 import { ERROR_MESSAGES } from '@common/constants/error-messages';
 
@@ -71,12 +73,32 @@ export class ExperienceService {
     return this.experienceRepository.findByUserId(userId);
   }
 
+  /**
+   * @param ownerUserId the authenticated caller. Required: findById is not user-scoped, so
+   *   without this check any caller knowing an id could edit another user's experience.
+   */
   async updateExperience(
     id: string,
     dto: UpdateExperienceDto,
+    ownerUserId: string,
   ): Promise<Experience> {
     const existing = await this.experienceRepository.findById(id);
     if (!existing) throw new NotFoundException('Experience not found');
+
+    // Same 404 as a missing row — telling a stranger "this exists but is not yours"
+    // confirms the id for them.
+    if (existing.userId !== ownerUserId) {
+      throw new NotFoundException('Experience not found');
+    }
+
+    // Optimistic concurrency (PWA offline, Phase 4): refuse a stale edit instead of
+    // overwriting whatever another device wrote in the meantime.
+    assertVersionMatches({
+      serverUpdatedAt: existing.updatedAt,
+      clientExpectedUpdatedAt: dto.expectedUpdatedAt,
+      serverVersion: () => new ExperienceResponseDto(existing),
+      clientAttempted: dto,
+    });
 
     // Rebuild via the constructor so invariants are re-validated, preserving id/createdAt.
     const updated = new Experience(

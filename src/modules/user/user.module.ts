@@ -60,6 +60,8 @@ import { UserAnalyticsService } from './application/services/user-analytics.serv
     UserSkillRepository,
     ExperienceRepository,
     EducationRepository,
+    // Read by SyncModule for the profile-bundle delta (PWA offline, Phase 2).
+    ProfileRepository,
   ],
 })
 // NOTE: the docs' provider list also names CertificationService/CertificationRepository,

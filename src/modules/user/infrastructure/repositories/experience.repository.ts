@@ -10,6 +10,13 @@ import { PrismaService } from '@infra/prisma/prisma.service';
 import { Experience } from '../../domain/entities/experience.entity';
 import { JobLevel } from '@shared/kernel/enums/job-level.enum';
 import { EmploymentType } from '@shared/kernel/enums/employment-type.enum';
+import {
+  DELTA_ORDER_BY,
+  DeltaOptions,
+  DeltaPage,
+  deltaWhere,
+  splitDelta,
+} from '@modules/sync/delta';
 
 @Injectable()
 export class ExperienceRepository {
@@ -63,6 +70,23 @@ export class ExperienceRepository {
       where: { id },
       data: { deletedAt: new Date() },
     });
+  }
+
+  /**
+   * Delta sync (PWA offline, Phase 2). Experiences for this user changed since the
+   * watermark, INCLUDING soft-deleted ones — splitDelta separates the tombstones, which
+   * is how the client learns to drop rows it already cached.
+   */
+  async findChangedSince(
+    userId: string,
+    options: DeltaOptions,
+  ): Promise<DeltaPage<Experience>> {
+    const rows = await this.prisma.experience.findMany({
+      where: deltaWhere(userId, options),
+      orderBy: DELTA_ORDER_BY,
+      take: options.limit + 1,
+    });
+    return splitDelta(rows, options.limit, (row) => this.mapToDomain(row));
   }
 
   private mapToDomain(raw: PrismaExperience): Experience {

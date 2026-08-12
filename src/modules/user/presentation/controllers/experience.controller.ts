@@ -19,9 +19,17 @@ import {
   Patch,
   Post,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiConflictResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { Public } from '@common/decorators/public.decorator';
+import { HttpCache } from '@common/decorators/http-cache.decorator';
+import { HttpCacheInterceptor } from '@common/interceptors/http-cache.interceptor';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import {
   AuthenticatedUser,
@@ -54,7 +62,17 @@ export class ExperienceController {
 
   @Get()
   @Public()
-  @ApiOperation({ summary: 'List a user’s work experience (public)' })
+  // Public profile data: edited occasionally, read on every profile view. Short freshness
+  // so an edit surfaces quickly, with the ETag doing the real work — an unchanged list
+  // revalidates to a 304 instead of re-sending every record.
+  @UseInterceptors(HttpCacheInterceptor)
+  @HttpCache({ maxAge: 60, staleWhileRevalidate: 300 })
+  @ApiOperation({
+    summary: 'List a user’s work experience (public)',
+    description:
+      'Returns a content-hash ETag over the list. Send it back as `If-None-Match` for a ' +
+      '304 with no body when nothing has changed.',
+  })
   async list(
     @Param('userId') userId: string,
   ): Promise<ExperienceResponseDto[]> {
@@ -64,7 +82,17 @@ export class ExperienceController {
 
   @Patch(':expId')
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Update own work experience' })
+  @ApiOperation({
+    summary: 'Update own work experience',
+    description:
+      'Requires `expectedUpdatedAt` — the `updatedAt` you last saw. If the record changed ' +
+      'server-side since then the update is refused with 409 and both versions are returned.',
+  })
+  @ApiConflictResponse({
+    description:
+      'Version conflict. Body carries { conflict: true, serverVersion, clientAttempted } ' +
+      'so the client can show both and let the user choose. Nothing was written.',
+  })
   async update(
     @CurrentUser() user: AuthenticatedUser,
     @Param('userId') userId: string,
@@ -72,9 +100,12 @@ export class ExperienceController {
     @Body() dto: UpdateExperienceDto,
   ): Promise<ExperienceResponseDto> {
     assertOwner(user, userId);
+    // user.id, not the path param: assertOwner already ties them together, and passing the
+    // authenticated id keeps the service's ownership check independent of the URL.
     const experience = await this.experienceService.updateExperience(
       expId,
       dto,
+      user.id,
     );
     return new ExperienceResponseDto(experience);
   }

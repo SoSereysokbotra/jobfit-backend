@@ -20,7 +20,12 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiConflictResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { Public } from '@common/decorators/public.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import {
@@ -63,7 +68,17 @@ export class ProfileController {
 
   @Patch(':userId')
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Update own profile' })
+  @ApiOperation({
+    summary: 'Update own profile',
+    description:
+      'Requires `expectedUpdatedAt` — the `updatedAt` you last saw. If the profile changed ' +
+      'server-side since then the update is refused with 409 and both versions are returned.',
+  })
+  @ApiConflictResponse({
+    description:
+      'Version conflict. Body carries { conflict: true, serverVersion, clientAttempted } ' +
+      'so the client can show both and let the user choose. Nothing was written.',
+  })
   async update(
     @CurrentUser() user: AuthenticatedUser,
     @Param('userId') userId: string,

@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { APP_FILTER, APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
 
@@ -31,6 +31,8 @@ import { RolesGuard } from './common/guards/roles.guard';
 
 // Global catch-all exception filter (DI-provided so it can inject PinoLogger).
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { IdempotencyModule } from './common/idempotency/idempotency.module';
+import { IdempotencyInterceptor } from './common/idempotency/idempotency.interceptor';
 
 // Shared kernel
 import { SkillModule } from './shared-kernel/skills/skill.module';
@@ -55,6 +57,7 @@ import { AdminModule } from './modules/admin/admin.module';
 import { EmployerModule } from './modules/employer/employer.module';
 import { LearningModule } from './modules/learning/learning.module';
 import { MatchReportModule } from './modules/match-report/match-report.module';
+import { SyncModule } from './modules/sync/sync.module';
 
 // Observability (Phase 3) — health probes + Prometheus metrics.
 import { HealthModule } from './modules/health/health.module';
@@ -94,6 +97,7 @@ import { AlertingModule } from './modules/alerting/alerting.module';
     EventBusModule,
     SharedModule,
     AiModule,
+    IdempotencyModule,
 
     // ── Shared Kernel ────────────────────────────────────────────────────────
     SkillModule,
@@ -119,6 +123,9 @@ import { AlertingModule } from './modules/alerting/alerting.module';
     LearningModule,
     MatchReportModule,
 
+    // ── PWA offline mode (Phase 2) — delta sync + bootstrap ──────────────────
+    SyncModule,
+
     // ── Observability (Phase 3) ──────────────────────────────────────────────
     HealthModule,
     MetricsModule,
@@ -133,6 +140,9 @@ import { AlertingModule } from './modules/alerting/alerting.module';
     { provide: APP_GUARD, useClass: RolesGuard },
     // Catch-all exception filter (structured logging + redaction, Phase 1).
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
+    // Idempotency-key replay protection. Global, but inert unless a route is marked
+    // @Idempotent() AND the caller sends an Idempotency-Key header (PWA offline, Phase 1).
+    { provide: APP_INTERCEPTOR, useClass: IdempotencyInterceptor },
   ],
 })
 export class AppModule {}

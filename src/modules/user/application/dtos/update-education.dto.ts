@@ -7,16 +7,26 @@ import { Type } from 'class-transformer';
 import {
   IsDate,
   IsEnum,
+  IsISO8601,
   IsNumber,
   IsOptional,
   IsString,
   Max,
   Min,
 } from 'class-validator';
-import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { DegreeLevel } from '@shared/kernel/enums/degree-level.enum';
 
 export class UpdateEducationDto {
+  @ApiProperty({
+    description:
+      'The `updatedAt` you last saw for this record. A stale value is refused with 409 ' +
+      'and both versions are returned rather than overwriting a newer server change.',
+    example: '2026-08-10T09:00:00.000Z',
+  })
+  @IsISO8601()
+  expectedUpdatedAt: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()

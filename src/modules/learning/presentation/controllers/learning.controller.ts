@@ -3,7 +3,7 @@
 // Learning endpoints. The global JwtAuthGuard secures by default; the skill-resources route
 // is @Public (generic catalog data). Skill gaps are own-only, scoped by the token.
 
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseInterceptors } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOkResponse,
@@ -17,6 +17,8 @@ import {
 import { UseGuards } from '@nestjs/common';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { Public } from '@common/decorators/public.decorator';
+import { HttpCache } from '@common/decorators/http-cache.decorator';
+import { HttpCacheInterceptor } from '@common/interceptors/http-cache.interceptor';
 import {
   LearningPathService,
   SkillResourcesView,
@@ -84,7 +86,16 @@ export class LearningController {
 
   @Get('skills/:skillId/learning-resources')
   @Public()
-  @ApiOperation({ summary: 'Learning resources for a skill (public)' })
+  // Generic catalogue data keyed on a skill — the most static thing the API serves. A day
+  // fresh, then servable stale for a week; a curriculum change is not time-critical.
+  @UseInterceptors(HttpCacheInterceptor)
+  @HttpCache({ maxAge: 86400, staleWhileRevalidate: 604800 })
+  @ApiOperation({
+    summary: 'Learning resources for a skill (public)',
+    description:
+      'Returns a content-hash ETag (this view is composed, so it has no single ' +
+      '`updatedAt`). Send it back as `If-None-Match` for a 304 with no body.',
+  })
   async skillResources(
     @Param('skillId') skillId: string,
   ): Promise<SkillResourcesView> {

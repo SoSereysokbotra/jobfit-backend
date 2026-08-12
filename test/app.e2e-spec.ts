@@ -1,6 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
-import request from 'supertest';
+// Namespace import, not a default import: this project's tsconfig has esModuleInterop off,
+// so `import request from 'supertest'` compiles but is undefined at runtime.
+import * as request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
 

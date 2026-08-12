@@ -23,6 +23,7 @@ import { SystemEventSeverity } from '@prisma/client';
 
 import { Roles } from '@common/decorators/roles.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
+import { IdempotencyService } from '@common/idempotency/idempotency.service';
 import { SystemHealthService } from '../../application/services/system-health.service';
 import { MetricsQueryDto } from '../../application/dtos/metrics-query.dto';
 import {
@@ -36,7 +37,10 @@ import {
 @Roles('ADMIN')
 @Controller('admin/system')
 export class AdminSystemController {
-  constructor(private readonly systemHealth: SystemHealthService) {}
+  constructor(
+    private readonly systemHealth: SystemHealthService,
+    private readonly idempotency: IdempotencyService,
+  ) {}
 
   @Get('health')
   @ApiOperation({ summary: 'Current platform health snapshot' })
@@ -80,6 +84,27 @@ export class AdminSystemController {
     @CurrentUser('id') adminId: string,
   ): Promise<AlertDto> {
     return this.systemHealth.acknowledgeAlert(id, adminId);
+  }
+
+  // ── Idempotency-key cleanup (PWA offline mode, Phase 1) ────────────────────
+  // TRIGGERED, not a background timer — the same reasoning as HeartbeatService: on
+  // Cloud Run the container scales to zero and CPU is throttled outside of requests,
+  // so an in-process setInterval/@Cron silently stops running. Point Cloud Scheduler
+  // at this route (daily is ample for a 24h TTL).
+  //
+  // Safe to call at any time and as often as you like: it only ever deletes rows whose
+  // expiresAt has already passed, and expired keys are treated as absent on read anyway.
+  @Post('idempotency-keys/cleanup')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Delete expired idempotency keys',
+    description:
+      'Maintenance sweep for the idempotency_keys table. Intended to be driven by an ' +
+      'external scheduler; deletes only rows past their 24h TTL.',
+  })
+  async cleanupIdempotencyKeys(): Promise<{ deleted: number }> {
+    const deleted = await this.idempotency.deleteExpired();
+    return { deleted };
   }
 }
 

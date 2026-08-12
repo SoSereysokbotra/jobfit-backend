@@ -189,6 +189,9 @@ model User {
 
   notifications Notification[]
 
+  // ── Idempotency (PWA offline mode, Phase 1) ────────────────────────────────
+  idempotencyKeys IdempotencyKey[]
+
   @@index([email])
   @@index([role])
   @@index([subscriptionTier])
@@ -1072,4 +1075,41 @@ model AuditLog {
   @@index([adminId])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+// ── Idempotency (PWA offline mode, Phase 1) ───────────────────────────────────
+// A record of "this client already performed this action", so a queued offline
+// mutation replayed after a reconnect returns the ORIGINAL response instead of
+// running the handler a second time.
+//
+// `key` is client-generated (one per logical action) and globally unique. It is
+// scoped to a user and an endpoint on read: a key that turns up against a
+// different user, a different route, or a different body is a client bug, and is
+// rejected with 409 rather than quietly served the wrong cached response.
+//
+// `requestHash` is a SHA-256 over the canonicalised request body. It is what
+// distinguishes "the same action, retried" from "a different action that reused
+// the key by mistake".
+model IdempotencyKey {
+  id     String @id @default(uuid())
+  key    String @unique
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// "POST /api/v1/saved-jobs" — method + path, so one key cannot straddle routes.
+  endpoint    String
+  requestHash String
+
+  responseStatus Int
+  /// Null for handlers that return no body (e.g. a 204).
+  responseBody Json?
+
+  createdAt DateTime @default(now())
+  /// createdAt + 24h. Indexed because the only query that reads it is the
+  /// cleanup sweep's `deleteMany({ where: { expiresAt: { lt: now } } })`.
+  expiresAt DateTime
+
+  @@index([expiresAt])
+  @@index([userId])
+  @@map("idempotency_keys")
 }
