@@ -161,15 +161,15 @@ model User {
   refreshTokens    RefreshToken[]
 
   // ── User module (Phase 3) ──────────────────────────────────────────────────
-  profile        Profile?
-  experiences    Experience[]
-  educations     Education[]
-  certifications Certification[]
-  skills         UserSkill[]
-  analytics      UserAnalytics?
-  resumes        Resume[]
-  applications   Application[]
-  savedJobs      SavedJob[]
+  profile         Profile?
+  experiences     Experience[]
+  educations      Education[]
+  certifications  Certification[]
+  skills          UserSkill[]
+  analytics       UserAnalytics?
+  resumes         Resume[]
+  applications    Application[]
+  savedJobs       SavedJob[]
   recommendations Recommendation[]
   matchLabels     MatchLabel[]
 
@@ -190,6 +190,9 @@ model User {
 
   // ── Idempotency (PWA offline mode, Phase 1) ────────────────────────────────
   idempotencyKeys IdempotencyKey[]
+
+  // ── Resume Builder ─────────────────────────────────────────────────────────
+  resumeDocuments ResumeDocument[]
 
   @@index([email])
   @@index([role])
@@ -483,13 +486,13 @@ model Job {
   // employer-authored `requirements` (43 of 52 ingested jobs). Cached rather than derived
   // per request: extraction is an LLM call (~7s), far too slow to sit in a page load.
   // Never overwrites `requirements` — employer-authored text stays authoritative.
-  extractedRequirements   String[]  @default([])
-  requirementsExtractedAt DateTime?
+  extractedRequirements    String[]  @default([])
+  requirementsExtractedAt  DateTime?
   // Grounded share of the model's raw output at extraction time. Persisted so a batch that
   // silently started inventing is visible afterwards instead of being invisible.
   requirementsGroundedness Float?
-  benefits         String[] @default([])
-  bonusPct         Int? // target annual bonus, % of base
+  benefits                 String[]  @default([])
+  bonusPct                 Int? // target annual bonus, % of base
 
   // Can this job be applied to inside JobFits?
   //   INTERNAL — posted here; applications are received and tracked here.
@@ -506,8 +509,8 @@ model Job {
   externalUrl String? // apply / landing page on the source
   lastSeenAt  DateTime? // last ingestion run that saw this posting (freshness)
 
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // ── Employer module (Employer Phase 2) ──────────────────────────────────────
   // Employer (user) who posted this job. NULL = external/ingested job (no employer).
@@ -584,6 +587,10 @@ model Resume {
   parsedData   ParsedResumeData?
   applications Application[]
 
+  /// Builder documents whose most recent export produced THIS résumé. Normally
+  /// 0 or 1 — the document repoints its FK on re-export.
+  builderDocuments ResumeDocument[] @relation("ResumeBuilderExport")
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
@@ -655,7 +662,7 @@ model Application {
   screenMatchScore          Float? // 0-100, DETERMINISTIC scorer (never the LLM fitScore)
   screenRequirementsTotal   Int?
   screenRequirementsCovered Int?
-  screenMissingRequirements String[] @default([])
+  screenMissingRequirements String[]  @default([])
   // EMPLOYER when the employer wrote the requirements, AI_EXTRACTED when they were read
   // out of the description. The employer is entitled to know which they are judging on.
   screenRequirementsSource  String?
@@ -716,7 +723,7 @@ model Offer {
 
   // Compensation
   baseSalary     Int
-  currency       String  @default("USD")
+  currency       String @default("USD")
   signingBonus   Int?
   annualBonusPct Float?
   equityShares   Int?
@@ -760,11 +767,11 @@ model OfferMessage {
   offerId String
   offer   Offer  @relation(fields: [offerId], references: [id], onDelete: Cascade)
 
-  authorRole OfferMessageAuthor
+  authorRole   OfferMessageAuthor
   // Nullable so a deleted account does not take the conversation with it. authorRole is
   // what the UI attributes by, and it survives independently.
   authorUserId String?
-  authorUser   User?   @relation("OfferMessages", fields: [authorUserId], references: [id], onDelete: SetNull)
+  authorUser   User?              @relation("OfferMessages", fields: [authorUserId], references: [id], onDelete: SetNull)
 
   body String
 
@@ -1072,7 +1079,7 @@ model IdempotencyKey {
 
   responseStatus Int
   /// Null for handlers that return no body (e.g. a 204).
-  responseBody Json?
+  responseBody   Json?
 
   createdAt DateTime @default(now())
   /// createdAt + 24h. Indexed because the only query that reads it is the
@@ -1082,4 +1089,231 @@ model IdempotencyKey {
   @@index([expiresAt])
   @@index([userId])
   @@map("idempotency_keys")
+}
+
+// ── Resume Builder ────────────────────────────────────────────────────────────
+// An in-app, structured résumé the user composes from our templates, distinct
+// from the uploaded-file `Resume`. Exporting one renders a PDF, stores it, and
+// creates a normal `Resume` row so the document flows into ATS scoring and the
+// "select résumé when applying" picker.
+//
+// Full rationale, field-by-field: docs/RESUME_BUILDER_DATA_MODEL.md
+
+enum ResumeLineSpacing {
+  SINGLE // 1.0
+  DEFAULT // 1.15
+  WIDE // 1.5
+}
+
+enum ResumeMargin {
+  NARROW // 0.5"
+  NORMAL // 0.75"
+  WIDE // 1.0"
+}
+
+enum ResumeDocumentStatus {
+  DRAFT
+  FINALIZED
+}
+
+/// A résumé design WE author and seed. Internal reference data: no owner column,
+/// nothing here is user-writable, and there is no user-facing create/update route.
+/// `layoutConfig` is authored by us and read by the renderer.
+model ResumeTemplate {
+  id            String  @id @default(uuid())
+  name          String  @unique
+  category      String // "ats-friendly" | "modern" | "creative"
+  thumbnailUrl  String?
+  isAtsFriendly Boolean @default(true)
+  layoutConfig  Json // section order + styling rules the renderer reads
+  isActive      Boolean @default(true)
+
+  documents ResumeDocument[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, category])
+  @@map("resume_templates")
+}
+
+model ResumeDocument {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  title      String
+  templateId String
+  template   ResumeTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+
+  // Presentation controls (the reference screenshot's knobs).
+  /// A PRESET KEY from a known set (e.g. "default" | "navy" | "forest"), NOT a
+  /// free-form hex value. The DTO validates membership; the column deliberately
+  /// stays a plain String so the preset list can grow, or its hex values change,
+  /// without a migration.
+  colorScheme String            @default("default")
+  lineSpacing ResumeLineSpacing @default(DEFAULT)
+  margin      ResumeMargin      @default(NORMAL)
+  fontFamily  String?
+
+  status ResumeDocumentStatus @default(DRAFT)
+
+  // ── Résumé header ─────────────────────────────────────────────────────────
+  // SNAPSHOTTED from Profile/User at creation, then owned by the document and
+  // independently editable — a résumé tailored for one application must be able
+  // to differ from the master profile. Never re-read from Profile afterwards.
+  fullName     String?
+  email        String?
+  phone        String?
+  location     String?
+  linkedinUrl  String?
+  portfolioUrl String?
+
+  /// The `Resume` row produced by the MOST RECENT export, if any — a single FK,
+  /// not a history. Re-exporting soft-deletes the previously linked `Resume` and
+  /// repoints this, so the user's résumé picker only ever shows one current file
+  /// per document.
+  ///
+  /// SetNull, NOT Cascade, and the direction matters: deleting the `Resume`
+  /// leaves the document intact and merely unlinked. Deleting the DOCUMENT does
+  /// NOT touch the exported `Resume`. There is no cascade in either direction
+  /// between a document and its exported résumé.
+  exportedResumeId String?
+  exportedResume   Resume? @relation("ResumeBuilderExport", fields: [exportedResumeId], references: [id], onDelete: SetNull)
+
+  summary        ResumeDocumentSummary?
+  experiences    ResumeDocumentExperience[]
+  educations     ResumeDocumentEducation[]
+  skills         ResumeDocumentSkill[]
+  certifications ResumeDocumentCertification[]
+  projects       ResumeDocumentProject[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([userId])
+  @@index([templateId])
+  @@map("resume_documents")
+}
+
+/// 1:1 with the document. A single block of text, so no `order`.
+model ResumeDocumentSummary {
+  id               String         @id @default(uuid())
+  resumeDocumentId String         @unique
+  resumeDocument   ResumeDocument @relation(fields: [resumeDocumentId], references: [id], onDelete: Cascade)
+
+  content String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("resume_document_summaries")
+}
+
+model ResumeDocumentExperience {
+  id               String         @id @default(uuid())
+  resumeDocumentId String
+  resumeDocument   ResumeDocument @relation(fields: [resumeDocumentId], references: [id], onDelete: Cascade)
+
+  order Int
+
+  company      String
+  title        String
+  /// Not importable — `Experience` has no location column. User-entered.
+  location     String?
+  startDate    DateTime
+  endDate      DateTime?
+  isCurrentJob Boolean   @default(false)
+  description  String?
+  technologies String[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([resumeDocumentId, order])
+  @@map("resume_document_experiences")
+}
+
+model ResumeDocumentEducation {
+  id               String         @id @default(uuid())
+  resumeDocumentId String
+  resumeDocument   ResumeDocument @relation(fields: [resumeDocumentId], references: [id], onDelete: Cascade)
+
+  order Int
+
+  institution  String
+  degreeLevel  DegreeLevel
+  fieldOfStudy String
+  startDate    DateTime
+  endDate      DateTime?
+  gpa          Float?
+  description  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([resumeDocumentId, order])
+  @@map("resume_document_educations")
+}
+
+/// Denormalized on purpose: the display name is copied, not FK'd to `Skill`, so
+/// the document is a stable snapshot and stays editable off-catalogue.
+model ResumeDocumentSkill {
+  id               String         @id @default(uuid())
+  resumeDocumentId String
+  resumeDocument   ResumeDocument @relation(fields: [resumeDocumentId], references: [id], onDelete: Cascade)
+
+  order Int
+
+  name             String
+  proficiencyLevel String? // BEGINNER | INTERMEDIATE | ADVANCED | EXPERT
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([resumeDocumentId, order])
+  @@map("resume_document_skills")
+}
+
+model ResumeDocumentCertification {
+  id               String         @id @default(uuid())
+  resumeDocumentId String
+  resumeDocument   ResumeDocument @relation(fields: [resumeDocumentId], references: [id], onDelete: Cascade)
+
+  order Int
+
+  name           String
+  issuer         String
+  issueDate      DateTime
+  expirationDate DateTime?
+  credentialId   String?
+  credentialUrl  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([resumeDocumentId, order])
+  @@map("resume_document_certifications")
+}
+
+/// Builder-only: there is no `Project` model to import from, so this section is
+/// manual-entry until a profile-side equivalent exists.
+model ResumeDocumentProject {
+  id               String         @id @default(uuid())
+  resumeDocumentId String
+  resumeDocument   ResumeDocument @relation(fields: [resumeDocumentId], references: [id], onDelete: Cascade)
+
+  order Int
+
+  name         String
+  description  String?
+  technologies String[]
+  url          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([resumeDocumentId, order])
+  @@map("resume_document_projects")
 }

@@ -56,6 +56,7 @@ import { AdminModule } from './modules/admin/admin.module';
 import { EmployerModule } from './modules/employer/employer.module';
 import { LearningModule } from './modules/learning/learning.module';
 import { SyncModule } from './modules/sync/sync.module';
+import { ResumeBuilderModule } from './modules/resume-builder/resume-builder.module';
 
 // Observability (Phase 3) — health probes + Prometheus metrics.
 import { HealthModule } from './modules/health/health.module';
@@ -107,6 +108,7 @@ import { AlertingModule } from './modules/alerting/alerting.module';
     CompanyModule,
     JobModule,
     ResumeModule,
+    ResumeBuilderModule,
     ApplicationModule,
     OfferModule,
     SavedJobModule,
