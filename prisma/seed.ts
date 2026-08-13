@@ -276,6 +276,12 @@ async function main() {
   // "visual" variants stay single-column with real text (no tables, no columns,
   // no text-in-images) — anything a parser cannot read defeats the point.
   //
+  // thumbnailUrl is a ROOT-RELATIVE path served by the FRONTEND (jobfit-frontend/
+  // public/templates/). This backend serves no static assets at all — no
+  // ServeStaticModule, no useStaticAssets, no public/ dir — so hosting them here
+  // would mean adding static-serving infrastructure for three placeholder images.
+  // These SVGs are PLACEHOLDERS, not designed thumbnails; each says so on its face.
+  //
   // `layoutConfig` is the contract the Phase 5 renderer reads. Shape is
   // provisional and owned by that phase; `sections` is the print order and
   // `rules` the per-template styling knobs.
@@ -283,7 +289,7 @@ async function main() {
     {
       name: 'Classic ATS',
       category: 'ats-friendly',
-      thumbnailUrl: '/templates/classic-ats.png', // placeholder until designed
+      thumbnailUrl: '/templates/classic-ats.svg',
       layoutConfig: {
         sections: [
           'header',
@@ -305,7 +311,7 @@ async function main() {
     {
       name: 'Modern Accent',
       category: 'modern',
-      thumbnailUrl: '/templates/modern-accent.png',
+      thumbnailUrl: '/templates/modern-accent.svg',
       layoutConfig: {
         sections: [
           'header',
@@ -327,7 +333,7 @@ async function main() {
     {
       name: 'Compact Professional',
       category: 'modern',
-      thumbnailUrl: '/templates/compact-professional.png',
+      thumbnailUrl: '/templates/compact-professional.svg',
       layoutConfig: {
         sections: [
           'header',

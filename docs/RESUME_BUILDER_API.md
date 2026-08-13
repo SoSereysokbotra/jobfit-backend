@@ -1,14 +1,13 @@
 # JobFits — Resume Builder API
 
 **Audience:** whoever builds the builder UI.
-**Status:** backend Phases 1, 3, 4, 5 complete. **Phase 2 was never run** — there is
-no `GET /resume-builder/templates` endpoint yet (see
-`RESUME_BUILDER_KNOWN_GAPS.md`).
+**Status:** backend Phases 1–5 complete, including the template catalogue.
 **Base URL:** every path is relative to the global `/api/v1` prefix (`src/main.ts`).
 **Interactive:** `/api/docs` (Swagger UI) · `/api/docs-json` (raw OpenAPI).
 
-**Auth:** every endpoint below requires a Bearer JWT and is **self-scoped** — the
-user comes from the token, never from the path. There is no `:userId` parameter.
+**Auth:** `GET /resume-builder/templates` is **public**. Every other endpoint
+requires a Bearer JWT and is **self-scoped** — the user comes from the token, never
+from the path. There is no `:userId` parameter anywhere.
 
 ---
 
@@ -23,7 +22,59 @@ creates a normal `Resume` row — so a built résumé flows into ATS scoring and
 
 ---
 
-## 2. Documents
+## 2. Templates
+
+### `GET /resume-builder/templates` → 200 · **public, no auth**
+
+Backs the template picker. Returns **only active** templates, ordered by category
+then name so the list does not reshuffle between loads.
+
+| Query param | Type | Meaning |
+|---|---|---|
+| `atsOnly` | boolean | `true` narrows to ATS-friendly templates. **`false` means "do not filter", not "show the non-ATS ones"** — it's a picker toggle, not a tri-state. Anything other than `true`/`false`/`1`/`0` is a **400**. |
+| `category` | string | e.g. `ats-friendly`, `modern`, `creative`. Unknown category → empty array, not an error. |
+
+```jsonc
+[
+  {
+    "id": "…",
+    "name": "Classic ATS",
+    "category": "ats-friendly",
+    "thumbnailUrl": "/templates/classic-ats.svg",
+    "isAtsFriendly": true,
+    "layoutConfig": {
+      "sections": ["header", "summary", "experience", "education", "skills",
+                   "certifications", "projects"],
+      "rules": { "columns": 1, "headingStyle": "uppercase-rule",
+                 "bullet": "•", "accent": "none" }
+    }
+  }
+]
+```
+
+`layoutConfig` is exposed so a client can preview the section order. It is authored
+by us and is **never writable**. `isActive` is not exposed — everything returned is
+active by definition.
+
+> ### ⚠️ Thumbnails are placeholders, and the frontend serves them
+> `thumbnailUrl` is a **root-relative path**, not an absolute URL, and it resolves
+> against the **frontend** origin — this API serves no static assets at all (no
+> `ServeStaticModule`, no `useStaticAssets`, no `public/` directory). The files live
+> in `jobfit-frontend/public/templates/`.
+>
+> The current images are **generated placeholders**, not designed thumbnails. Each
+> one says `PLACEHOLDER` on its face so nobody mistakes it for final art. Replacing
+> them is a design task; the API contract does not change when they are.
+
+> ### Templates are ours, not the user's
+> This is the **only** template route. There is no create, update, delete or upload
+> endpoint, and `layoutConfig` is never accepted from a client. Templates enter the
+> system through `prisma/seed.ts` and nothing else. Any future management API belongs
+> under `/admin/*` behind `@Roles('ADMIN')`.
+
+---
+
+## 3. Documents
 
 ### `POST /resume-builder/documents` → 201
 
@@ -90,7 +141,7 @@ Deep-copies settings, header and every content row as `"{title} (Copy)"`, with
 
 ---
 
-## 3. Content sections — bulk replace
+## 4. Content sections — bulk replace
 
 ```
 PUT /resume-builder/documents/:id/summary          → 204
@@ -149,7 +200,7 @@ section, and `order` is taken from the array index.
 
 ---
 
-## 4. Import from profile
+## 5. Import from profile
 
 ### `POST /resume-builder/documents/:id/import-from-profile` → 200
 
@@ -189,7 +240,7 @@ display name. **Experience `location` is left empty on import** — the profile
 
 ---
 
-## 5. Export
+## 6. Export
 
 ### `POST /resume-builder/documents/:id/export` → 201
 
@@ -249,7 +300,15 @@ the only scorer call sites are the four `resume` controller routes).
 
 ---
 
-## 6. Worked example — full lifecycle
+## 7. Worked example — full lifecycle
+
+### Step 0 — pick a template (public, no token needed)
+
+```http
+GET /api/v1/resume-builder/templates?atsOnly=true
+```
+Returns the active ATS-friendly templates with their placeholder `thumbnailUrl`s;
+the user picks one and you carry its `id` into the next call.
 
 ### Step 1 — create the document
 
