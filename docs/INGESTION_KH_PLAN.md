@@ -339,3 +339,44 @@ Software Engineer graded against US postings.
 **Do not tune anything on the post-ingestion retrieval number.** It is reported below for
 the record and is not a baseline worth defending. The baseline to rebuild is a label set
 that includes Cambodian jobs.
+
+### 7.6 — What happened, and the measurement that actually answers the question
+
+All 367 jobs embedded; 500 recommendations recomputed across 10 profiles.
+
+| | before ingestion | after |
+|---|---|---|
+| Recall@10 | 0.500 | **0.333** |
+| MRR@10 | 0.500 | 0.500 |
+| nDCG@10 | 0.606 | **0.425** |
+
+The predicted fall, for the predicted reason: 12 labelled-relevant jobs now compete with
+~305 candidates the eval set has never seen. **This is not a regression** and must not be
+treated as one.
+
+**So the real question was asked directly instead: what does a user actually get?**
+
+`strong@seed.jobfits.test` (Senior Full-Stack Engineer), top 10:
+
+```
+83  internal  Full-Stack Engineer (Demo)
+79  internal  Full-Stack Engineer
+77  internal  React Specialist Developer
+69  JOBNET    Platform Engineer                          ← new
+69  JOBNET    Junior Data Engineer                       ← new
+69  internal  Senior Frontend Engineer
+68  internal  Backend Engineer (Phase7)
+68  internal  Software Engineer – Platforms
+67  JOBNET    Senior Officer (Lead), Native Mobile Dev    ← new
+67  JOBNET    Senior Officer, Android Development         ← new
+```
+
+**Four real Cambodian software jobs in the top ten, where there were none.** That is the
+outcome the retrieval metric cannot express.
+
+**And the dilution worry did not materialise.** bongthom is 276 of 367 jobs (75% of the
+corpus) and appears **zero times** in either checked user's top 10 — 22 of 81 in
+`strong@`'s full list, none near the top. Thin title-only text produces a weak embedding
+and ranks low, which is exactly correct behaviour: the postings are reachable when relevant
+without displacing richer matches. Feed-only cost bongthom its ranking power, not its
+presence — which is the trade §7.1 accepted, now confirmed rather than assumed.
