@@ -5,11 +5,26 @@
 // employer dashboard. A scheduled 6-hour cron can call IngestionService directly
 // later. (Ingested jobs stay employer-less — pulled into the shared pool.)
 
-import { Controller, Get, HttpCode, HttpStatus, Post, Query } from '@nestjs/common';
+import {
+  BadRequestException,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Roles } from '@common/decorators/roles.decorator';
 import { IngestionService } from '../../ingestion.service';
-import { ImportedJob, IngestionResult } from '../../ingestion.types';
+import { ImportedJob, IngestionResult, JobSource } from '../../ingestion.types';
+
+/**
+ * Boards this route may trigger. A literal list rather than a cast of whatever the caller
+ * sends, so an unknown source is a 400 instead of an undefined lookup at runtime.
+ */
+const INGESTABLE: JobSource[] = ['THEMUSE', 'BONGTHOM', 'JOBNET'];
 
 @ApiTags('Employer - Ingestion')
 @ApiBearerAuth()
@@ -30,6 +45,31 @@ export class IngestionController {
     const parsed = Number.parseInt(pages ?? '1', 10);
     const n = Math.min(Math.max(Number.isNaN(parsed) ? 1 : parsed, 1), 10);
     return this.ingestion.ingestFromTheMuse(n);
+  }
+
+  @Post(':source')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Trigger an ingestion run for one board',
+    description:
+      'source = THEMUSE | BONGTHOM | JOBNET. `limit` (1–300, default 50) caps how many ' +
+      'postings the run pulls. BONGTHOM is read from its own RSS feed only — the site ' +
+      'marks its descriptions user-select:none and omits them from the feed, so we take ' +
+      'the listing it syndicates and nothing more. See docs/INGESTION_KH_PLAN.md.',
+  })
+  run(
+    @Param('source') source: string,
+    @Query('limit') limit?: string,
+  ): Promise<IngestionResult> {
+    const key = source.toUpperCase();
+    if (!INGESTABLE.includes(key as JobSource)) {
+      throw new BadRequestException(
+        `Unknown source "${source}". Expected one of: ${INGESTABLE.join(', ')}.`,
+      );
+    }
+    const parsed = Number.parseInt(limit ?? '50', 10);
+    const n = Math.min(Math.max(Number.isNaN(parsed) ? 50 : parsed, 1), 300);
+    return this.ingestion.ingest(key as JobSource, n);
   }
 
   @Get('jobs')

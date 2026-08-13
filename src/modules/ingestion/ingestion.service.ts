@@ -8,21 +8,48 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import { TheMuseSource } from './sources/themuse.source';
-import { ImportedJob, IngestionResult, NormalizedJob } from './ingestion.types';
+import { BongThomSource } from './sources/bongthom.source';
+import { JobNetSource } from './sources/jobnet.source';
+import {
+  ImportedJob,
+  IngestionResult,
+  JobBoardSource,
+  JobSource,
+  NormalizedJob,
+} from './ingestion.types';
+
+/** Default ceiling for a run when the caller does not say. */
+const DEFAULT_LIMIT = 50;
 
 @Injectable()
 export class IngestionService {
   private readonly logger = new Logger(IngestionService.name);
 
+  /** Every board we can pull from, keyed by its source token. */
+  private readonly sources: Record<JobSource, JobBoardSource>;
+
   constructor(
     private readonly prisma: PrismaService,
-    private readonly theMuse: TheMuseSource,
-  ) {}
+    theMuse: TheMuseSource,
+    bongThom: BongThomSource,
+    jobNet: JobNetSource,
+  ) {
+    this.sources = {
+      THEMUSE: theMuse,
+      BONGTHOM: bongThom,
+      JOBNET: jobNet,
+    };
+  }
 
-  /** Run a TheMuse ingestion over `pages` pages. */
-  async ingestFromTheMuse(pages: number): Promise<IngestionResult> {
+  /**
+   * Run one board's ingestion.
+   *
+   * One method for every source rather than one per source: the only thing that differed
+   * between them was which adapter to call and which name to put in the log line.
+   */
+  async ingest(source: JobSource, limit = DEFAULT_LIMIT): Promise<IngestionResult> {
     const result: IngestionResult = {
-      source: 'THEMUSE',
+      source,
       fetched: 0,
       created: 0,
       updated: 0,
@@ -33,11 +60,11 @@ export class IngestionService {
 
     let jobs: NormalizedJob[];
     try {
-      jobs = await this.theMuse.fetch(pages);
+      jobs = await this.sources[source].fetchJobs(limit);
     } catch (err) {
       // FR-JOBS-001: ingestion failures must be logged (and alerted, later).
       const message = err instanceof Error ? err.message : 'Unknown fetch error';
-      this.logger.error(`TheMuse ingestion fetch failed: ${message}`);
+      this.logger.error(`${source} ingestion fetch failed: ${message}`);
       result.errors.push(message);
       return result;
     }
@@ -56,10 +83,20 @@ export class IngestionService {
     }
 
     this.logger.log(
-      `TheMuse ingestion done — fetched ${result.fetched}, created ${result.created}, ` +
+      `${source} ingestion done — fetched ${result.fetched}, created ${result.created}, ` +
         `updated ${result.updated}, skipped ${result.skipped}, errors ${result.errors.length}`,
     );
     return result;
+  }
+
+  /**
+   * Run a TheMuse ingestion over `pages` pages.
+   *
+   * Kept because the existing route and its clients are expressed in PAGES, not a job
+   * count. Delegates to {@link ingest} so there is still only one ingestion path.
+   */
+  async ingestFromTheMuse(pages: number): Promise<IngestionResult> {
+    return this.ingest('THEMUSE', pages * 20);
   }
 
   /** Stored externally-ingested jobs (source != NULL), most-recently-seen first. */
@@ -101,6 +138,20 @@ export class IngestionService {
 
     const now = new Date();
 
+    /**
+     * Only what the source actually stated.
+     *
+     * Spreading a conditional rather than writing `?? null` on purpose: a source that is
+     * silent about salary must leave the column ALONE, not overwrite a value some other
+     * run or an employer put there. Same rule as employmentType/experienceLevel — a
+     * fabricated value is indistinguishable from a real one once it is in the column.
+     */
+    const stated = {
+      ...(job.minSalary != null && { minSalary: job.minSalary }),
+      ...(job.maxSalary != null && { maxSalary: job.maxSalary }),
+      ...(job.employmentType != null && { employmentType: job.employmentType }),
+    };
+
     // Dedup on (source, externalId): refresh if seen before, else insert.
     const existing = await this.prisma.job.findFirst({
       where: { source: job.source, externalId: job.externalId },
@@ -118,6 +169,7 @@ export class IngestionService {
           externalUrl: job.externalUrl,
           companyId: company.id,
           lastSeenAt: now,
+          ...stated,
         },
       });
       result.updated += 1;
@@ -133,7 +185,11 @@ export class IngestionService {
           source: job.source,
           externalId: job.externalId,
           externalUrl: job.externalUrl,
+          // Ingested postings are applied to on the source site, never here. The server
+          // refuses in-app applications to EXTERNAL jobs and sends the user onward.
+          sourceType: 'EXTERNAL',
           lastSeenAt: now,
+          ...stated,
         },
       });
       result.created += 1;
