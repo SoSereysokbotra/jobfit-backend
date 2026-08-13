@@ -4,25 +4,41 @@
 for done.
 **Date:** 2026-08-12 · **Scope covered:** backend only.
 
-> **The headline:** the backend can create, edit, prefill and export a résumé to
-> PDF. **There is no builder UI**, and **Phase 2 was skipped** — the templates
-> endpoint the picker needs does not exist yet.
+> **The headline:** the backend is feature-complete for MVP — templates, document
+> CRUD, content sections, profile import and PDF export all work. **There is no
+> builder UI**, and the **template thumbnails are placeholders, not designs**.
 
 ---
 
-## 1. Skipped outright
+## 1. Template thumbnails are placeholders ⚠️
 
-### 1.1 Phase 2 — `GET /resume-builder/templates` was never built ⚠️
+`GET /resume-builder/templates` returns a working `thumbnailUrl` for every template,
+but the images behind them are **generated placeholders** — a tinted panel, some
+grey bars suggesting the layout, the template name, and the word `PLACEHOLDER`
+across the face so nobody mistakes them for final art.
 
-Work went Phase 0 → 1 → 3 → 4 → 5. Phase 2 was never run, so **there is no
-endpoint for listing templates**. `src/modules/resume-builder/` was scaffolded in
-Phase 3 as a prerequisite, but it has no templates controller.
+They live in **`jobfit-frontend/public/templates/`**, not in this repo:
 
-Consequence: a client can create a document only if it already knows a valid
-`templateId`. Templates are reachable today solely through the internal
-active-template check on create/update. **The template picker cannot be built until
-this exists.** It is purely additive to the module: read-only,
-`@Public()`, filterable by `atsOnly` and `category`, returning active templates.
+```
+jobfit-frontend/public/templates/classic-ats.svg
+jobfit-frontend/public/templates/modern-accent.svg
+jobfit-frontend/public/templates/compact-professional.svg
+```
+
+**Why the frontend:** this backend serves no static assets at all — no
+`ServeStaticModule`, no `useStaticAssets`, no `public/` directory, and
+`@nestjs/serve-static` is not installed. Hosting three placeholder images here would
+have meant adding static-serving infrastructure and copying assets into the runtime
+Docker image. The frontend already serves images from `public/`, and the seeded
+`thumbnailUrl` values were already root-relative paths that resolve against the
+frontend origin.
+
+**Still to do:** real thumbnails. Ideally rendered from the actual PDF output so the
+preview cannot drift from what a user gets. The API contract does not change when
+they are replaced — only the files and the seed's `thumbnailUrl` values.
+
+Related: the three templates have no visual design beyond heading style, bullet
+glyph and accent usage (see §4).
 
 ---
 
@@ -91,7 +107,7 @@ All of it remains to do:
 | **Builder UI** | No template picker, no section editors, no settings controls. |
 | **Live preview** | The backend renders only on export; there is no preview endpoint and no client-side renderer. Deciding how preview works (server round-trip vs. a client re-implementation of the layout) is an open design question — a client-side one risks drifting from the PDF. |
 | **Drag-to-reorder** | Backend is ready: every section PUT takes `order` from array index, so reordering is a reordered array. Nothing renders it. |
-| **Template thumbnails** | Seeded with placeholder paths (`/templates/classic-ats.png` etc.). **No images exist**, and the three templates have no visual design beyond heading style, bullet glyph and accent usage. |
+| **Template thumbnails** | Placeholder SVGs exist and render (§1), but they are not designed thumbnails. The three templates also have no visual design beyond heading style, bullet glyph and accent usage. |
 | **Conflict/refresh handling** | Sections are bulk-replace with no optimistic-concurrency check, so two tabs editing one document will silently clobber each other (last write wins). Unlike the profile endpoints, there is no `expectedUpdatedAt` here. |
 
 ---
@@ -121,10 +137,10 @@ All of it remains to do:
 
 ## 5. Test and tooling caveats
 
-- **`pnpm test` is green: 47 suites, 539 tests.** All Phase 1–5 work passes together.
+- **`pnpm test` is green: 48 suites, 555 tests.** All Phase 1–5 work passes together.
 - **`src/infra/ai/ai.client.spec.ts` is flaky under full-suite load.** It failed once
   at ~48s and passed 8/8 in isolation and on re-run — a timing-sensitive
-  retry/timeout spec starved by 47 parallel suites. Pre-existing, unrelated to this
+  retry/timeout spec starved by the parallel suites. Pre-existing, unrelated to this
   feature.
 - **`pnpm test:e2e` fails, and not because of this feature.** The specs in `test/`
   call unprefixed URLs (`/auth/register`) while `main.ts` sets a global `api/v1`
@@ -151,14 +167,13 @@ All of it remains to do:
 
 ## 6. Suggested order for what's next
 
-1. **Phase 2 — the templates endpoint** (§1.1). Small, additive, and it blocks the
-   template picker.
-2. **Export one real résumé and read it** — check the PDF looks right and note what
-   the ATS scorer gives it (§2.4).
-3. **Template thumbnails + visual design** — placeholders today.
-4. **Frontend builder UI**, with live preview last, once the preview approach is
+1. **Export one real résumé and read it** — check the PDF looks right and note what
+   the ATS scorer gives it (§2.4). Cheapest way to find out whether the renderer's
+   output is actually good, as opposed to merely valid.
+2. **Template thumbnails + visual design** — placeholders today (§1).
+3. **Frontend builder UI**, with live preview last, once the preview approach is
    decided.
-5. **Schema drift reconciliation** (§5) — unrelated to this feature but it blocks
+4. **Schema drift reconciliation** (§5) — unrelated to this feature but it blocks
    safe use of Prisma's own tooling.
 
 ---

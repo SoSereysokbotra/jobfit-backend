@@ -3,18 +3,21 @@
 // In-app résumé builder: structured documents the user composes from templates WE
 // author, distinct from the uploaded-file `Resume` flow.
 //
-// ⚠️ SCOPE: this module currently contains Phase 3 (document CRUD + content
-// sections) only. **Phase 2 (GET /resume-builder/templates) was never run**, so
-// there is no templates controller yet — templates are reachable only indirectly,
-// via the active-template check when a document is created. Adding that read-only
-// endpoint is Phase 2's job and is purely additive to this module.
+// Contains the read-only template catalogue (Phase 2), document CRUD + content
+// sections (Phase 3), import-from-profile (Phase 4) and PDF export (Phase 5).
 //
-// Templates remain internal reference data: no create/update/delete/upload route
-// exists for them, and none should be added here (see RESUME_BUILDER_BACKEND_PLAN.md).
+// Templates are internal reference data: the ONLY template route is a public,
+// read-only GET. No create/update/delete/upload route exists for them, and none
+// should be added here — they enter the system through prisma/seed.ts. If
+// management is ever needed it belongs under /admin/* behind @Roles('ADMIN')
+// (see RESUME_BUILDER_BACKEND_PLAN.md).
 
 import { Module } from '@nestjs/common';
 
 import { ResumeDocumentController } from './presentation/controllers/resume-document.controller';
+import { ResumeTemplateController } from './presentation/controllers/resume-template.controller';
+import { ResumeTemplateService } from './application/services/resume-template.service';
+import { ResumeTemplateRepository } from './infrastructure/repositories/resume-template.repository';
 import { ResumeDocumentService } from './application/services/resume-document.service';
 import { ResumeDocumentRepository } from './infrastructure/repositories/resume-document.repository';
 // Read-only projections of the user's Experience/Education/Certification/UserSkill
@@ -31,11 +34,13 @@ import { SupabaseClientService } from '@infra/supabase/supabase.client';
 import { StorageService } from '@infra/storage/storage.service';
 
 @Module({
-  controllers: [ResumeDocumentController],
+  controllers: [ResumeDocumentController, ResumeTemplateController],
   providers: [
     ResumeDocumentService,
     ResumeDocumentRepository,
     ProfileContentRepository,
+    ResumeTemplateService,
+    ResumeTemplateRepository,
     ResumeExportService,
     ResumePdfRenderer,
     SupabaseClientService,
