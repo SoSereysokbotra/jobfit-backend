@@ -55,9 +55,17 @@ const PRESET_COLORS: Record<string, string> = {
   slate: '#3A4450',
 };
 
-const BODY_SIZE = 10;
-const HEADING_SIZE = 12;
-const NAME_SIZE = 20;
+/**
+ * Point sizes. Body sits at 11 rather than 10 because 10 reads cramped on screen
+ * and in print, and 11 is still inside the 10–12pt band the app's own ATS guidance
+ * recommends — parsers handle it, and it costs roughly 10% more vertical space.
+ *
+ * `lineGap` below is derived from BODY_SIZE, so line spacing scales with these
+ * automatically; nothing else in the renderer hardcodes a size.
+ */
+const BODY_SIZE = 11;
+const HEADING_SIZE = 13;
+const NAME_SIZE = 22;
 
 /** Serif only when the document explicitly asks; otherwise the ATS-safest default. */
 function fontFamily(fontFamily: string | null): { regular: string; bold: string } {
