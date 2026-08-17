@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import { AiClient } from '@infra/ai/ai.client';
 import { AiServiceError } from '@infra/ai/ai.errors';
+import { ActiveResumeService } from '../../../resume/application/services/active-resume.service';
 import { ComputeMatchScoreUseCase } from './compute-match-score.use-case';
 import { CandidateContext, JobContext, SubScores } from '../../domain/scoring/types';
 import { reciprocalRankFusion } from '../../domain/rrf';
@@ -55,6 +56,7 @@ export class RecomputeUserMatchesUseCase {
     private readonly prisma: PrismaService,
     private readonly compute: ComputeMatchScoreUseCase,
     private readonly aiClient: AiClient,
+    private readonly activeResume: ActiveResumeService,
     configService?: ConfigService,
   ) {
     // Optional so the many places that construct this directly in tests keep working;
@@ -361,17 +363,19 @@ export class RecomputeUserMatchesUseCase {
       where: { userId },
       select: { headline: true, minSalary: true, desiredRemoteTypes: true },
     });
-    const resume = await this.prisma.resume.findFirst({
-      where: { userId, parsingStatus: 'SUCCESS' },
-      orderBy: { updatedAt: 'desc' },
-      select: { parsedData: { select: { skills: true, experiences: true } } },
-    });
+    const resumeId = await this.activeResume.findActiveResumeId(userId);
+    const parsed = resumeId
+      ? await this.prisma.parsedResumeData.findUnique({
+          where: { resumeId },
+          select: { skills: true, experiences: true },
+        })
+      : null;
 
     const parts: string[] = [];
     if (profile?.headline) parts.push(profile.headline);
-    const skills = toStringArray(resume?.parsedData?.skills ?? null);
+    const skills = toStringArray(parsed?.skills ?? null);
     if (skills.length > 0) parts.push(skills.join(' '));
-    const titles = toExperienceTitles(resume?.parsedData?.experiences ?? null);
+    const titles = toExperienceTitles(parsed?.experiences ?? null);
     if (titles.length > 0) parts.push(titles.join(' '));
 
     const remoteTypes = profile?.desiredRemoteTypes ?? [];
@@ -404,12 +408,13 @@ export class RecomputeUserMatchesUseCase {
     const structured = await this.prisma.experience.count({ where: { userId } });
     if (structured > 0) return structured;
 
-    const resume = await this.prisma.resume.findFirst({
-      where: { userId, parsingStatus: 'SUCCESS' },
-      orderBy: { updatedAt: 'desc' },
-      select: { parsedData: { select: { experiences: true } } },
+    const resumeId = await this.activeResume.findActiveResumeId(userId);
+    if (!resumeId) return 0;
+    const parsed = await this.prisma.parsedResumeData.findUnique({
+      where: { resumeId },
+      select: { experiences: true },
     });
-    const json = resume?.parsedData?.experiences;
+    const json = parsed?.experiences;
     if (!json) return 0;
     try {
       const v: unknown = JSON.parse(json);

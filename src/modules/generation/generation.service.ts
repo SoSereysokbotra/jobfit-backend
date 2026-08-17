@@ -11,6 +11,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '@infra/prisma/prisma.service';
+import { ActiveResumeService } from '../resume/application/services/active-resume.service';
 import { AiClient } from '@infra/ai/ai.client';
 import { AiServiceError } from '@infra/ai/ai.errors';
 import {
@@ -36,6 +37,7 @@ export class GenerationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly aiClient: AiClient,
+    private readonly activeResume: ActiveResumeService,
   ) {}
 
   // ── Cover letter ────────────────────────────────────────────────────────────
@@ -199,12 +201,13 @@ export class GenerationService {
       });
       if (parsed?.summary) return parsed.summary;
     }
-    const resume = await this.prisma.resume.findFirst({
-      where: { userId, parsingStatus: 'SUCCESS' },
-      orderBy: { updatedAt: 'desc' },
-      select: { parsedData: { select: { summary: true } } },
+    const activeId = await this.activeResume.findActiveResumeId(userId);
+    if (!activeId) return null;
+    const active = await this.prisma.parsedResumeData.findUnique({
+      where: { resumeId: activeId },
+      select: { summary: true },
     });
-    return resume?.parsedData?.summary ?? null;
+    return active?.summary ?? null;
   }
 
   private templateCoverLetter(input: CoverLetterRequest): string {

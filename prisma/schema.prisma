@@ -173,6 +173,7 @@ model User {
   recommendations Recommendation[]
   matchLabels     MatchLabel[]
   matchReports    MatchReport[]
+  savedExternalJobs SavedExternalJob[]
 
   // ── Admin module (Admin MVP) ───────────────────────────────────────────────
   // Admin actions this user performed / system alerts this admin acknowledged.
@@ -553,6 +554,42 @@ model SavedJob {
   @@index([userId])
   @@index([jobId])
   @@map("saved_jobs")
+}
+
+/// A job the user saved from the browser extension, on a site we don't ingest.
+///
+/// SEPARATE FROM SavedJob ON PURPOSE. That table's `jobId` is a foreign key to our own
+/// `Job` rows, and a LinkedIn posting has none. The alternatives were both worse:
+/// inserting fake `Job` rows would feed invented postings into recommendations and the
+/// matching batch, and making `jobId` nullable would break `@@unique([userId, jobId])`
+/// (Postgres treats every NULL as distinct, so the same posting could be saved twice).
+///
+/// PRIVACY: this is the user's own bookmark, captured on their click, and `description`
+/// is the text THEY chose to save from the page they were reading. It is scoped to their
+/// row and is not a job board — nothing reads across users, and no background job writes
+/// here.
+model SavedExternalJob {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  source     String // "linkedin", …
+  externalId String // the source's job id, from the page URL
+
+  title       String
+  company     String?
+  description String? // what the user saved from the posting
+  url         String? // where to go back to
+  salary      String? // free text — postings write "$70k–90k", "1,200 USD/month", …
+  notes       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Re-saving the same posting updates it rather than making a duplicate.
+  @@unique([userId, source, externalId])
+  @@index([userId])
+  @@map("saved_external_jobs")
 }
 
 enum ResumeParsingStatus {

@@ -2,8 +2,9 @@
 //
 // Builds and persists BGE-M3 (1024-dim) embeddings for jobs and candidates.
 // - Job vector  = title + description + skills.
-// - Candidate vector = profile (headline/bio/industries) + latest parsed résumé
-//   (summary/skills/experience titles).
+// - Candidate vector = profile (headline/bio/industries) + the user's active parsed
+//   résumé (summary/skills/experience titles) — their default one where they set it,
+//   see ActiveResumeService.
 // Vectors are written via raw SQL (Prisma can't read/write the pgvector type).
 // Every embed call degrades gracefully: if the AI service is down the item is
 // simply left un-embedded (returns false) rather than throwing.
@@ -12,6 +13,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import { AiClient } from '@infra/ai/ai.client';
 import { AiServiceError } from '@infra/ai/ai.errors';
+import { ActiveResumeService } from '../../../resume/application/services/active-resume.service';
 import { toExperienceTitles, toStringArray } from '../../domain/parsed-resume-json';
 
 type EmbeddableTable = 'jobs' | 'profiles';
@@ -40,6 +42,7 @@ export class MatchingEmbeddingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly aiClient: AiClient,
+    private readonly activeResume: ActiveResumeService,
   ) {}
 
   // ── Single-item embedding (event-driven) ───────────────────────────────────
@@ -67,12 +70,12 @@ export class MatchingEmbeddingService {
     return resume ? this.embedCandidate(resume.userId) : false;
   }
 
-  /** Embed one candidate (profile + latest parsed résumé). Returns false if not embedded. */
+  /** Embed one candidate (profile + active parsed résumé). Returns false if not embedded. */
   async embedCandidate(userId: string): Promise<boolean> {
     const profile = await this.prisma.profile.findUnique({ where: { userId } });
     if (!profile) return false;
 
-    const resume = await this.latestParsedResume(userId);
+    const resume = await this.activeParsedResume(userId);
     const [vec] = await this.embedTexts([this.buildCandidateText(profile, resume)]);
     if (!vec) return false;
     await this.storeEmbedding('profiles', profile.id, vec);
@@ -192,16 +195,12 @@ export class MatchingEmbeddingService {
     return parts.join('\n').slice(0, MAX_EMBED_CHARS);
   }
 
-  private async latestParsedResume(userId: string): Promise<CandidateResume | null> {
-    const resume = await this.prisma.resume.findFirst({
-      where: { userId, parsingStatus: 'SUCCESS' },
-      orderBy: { updatedAt: 'desc' },
-      select: { id: true },
-    });
-    if (!resume) return null;
+  private async activeParsedResume(userId: string): Promise<CandidateResume | null> {
+    const resumeId = await this.activeResume.findActiveResumeId(userId);
+    if (!resumeId) return null;
 
     const parsed = await this.prisma.parsedResumeData.findUnique({
-      where: { resumeId: resume.id },
+      where: { resumeId },
     });
     if (!parsed) return null;
 

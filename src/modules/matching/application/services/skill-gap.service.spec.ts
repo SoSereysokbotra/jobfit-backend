@@ -8,6 +8,11 @@
 import { SkillGapService } from './skill-gap.service';
 
 describe('SkillGapService', () => {
+  /** Stands in for ActiveResumeService: `has` false means the user has no readable CV. */
+  const activeResume = (has: boolean) => ({
+    findActiveResumeId: jest.fn().mockResolvedValue(has ? 'r1' : null),
+  });
+
   const build = (
     requirements: string[] | null,
     skills: string[] | null,
@@ -19,13 +24,13 @@ describe('SkillGapService', () => {
           requirements === null ? null : { requirements, extractedRequirements },
         ),
       },
-      resume: {
-        findFirst: jest.fn().mockResolvedValue(
-          skills === null ? null : { parsedData: { skills: JSON.stringify(skills) } },
+      parsedResumeData: {
+        findUnique: jest.fn().mockResolvedValue(
+          skills === null ? null : { skills: JSON.stringify(skills) },
         ),
       },
     };
-    return new SkillGapService(prisma as never);
+    return new SkillGapService(prisma as never, activeResume(skills !== null) as never);
   };
 
   /** A parse with the other columns populated, for the widened-evidence tests below. */
@@ -39,9 +44,9 @@ describe('SkillGapService', () => {
           .fn()
           .mockResolvedValue({ requirements, extractedRequirements: [] }),
       },
-      resume: { findFirst: jest.fn().mockResolvedValue(parsedData ? { parsedData } : null) },
+      parsedResumeData: { findUnique: jest.fn().mockResolvedValue(parsedData) },
     };
-    return new SkillGapService(prisma as never);
+    return new SkillGapService(prisma as never, activeResume(parsedData !== null) as never);
   };
 
   it('splits requirements into matched and missing', async () => {

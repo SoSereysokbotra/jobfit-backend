@@ -73,6 +73,29 @@ describe('scoring', () => {
         ),
       ).toBe(80);
     });
+    it('does not match a country code inside a longer place name', () => {
+      // Measured 2026-08-12: a profile with country "CA" (San Francisco, CA) scored a
+      // "country match" against every Cambodian job, because "cambodia" contains "ca".
+      expect(
+        scoreLocation(
+          candidate({ city: 'San Francisco', country: 'CA' }),
+          job({ location: 'Phnom Penh, Cambodia' }),
+        ),
+      ).not.toBe(80);
+    });
+    it('still matches a standalone country code', () => {
+      expect(
+        scoreLocation(
+          candidate({ country: 'CA' }),
+          job({ location: 'San Francisco, CA' }),
+        ),
+      ).toBe(80);
+    });
+    it('does not match a city name inside a longer word', () => {
+      expect(
+        scoreLocation(candidate({ city: 'Bath' }), job({ location: 'Bathurst, Australia' })),
+      ).not.toBe(100);
+    });
     it('wants remote but job is on-site -> 40', () => {
       expect(
         scoreLocation(

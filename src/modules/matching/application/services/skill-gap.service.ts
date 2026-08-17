@@ -16,6 +16,7 @@
 
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@infra/prisma/prisma.service';
+import { ActiveResumeService } from '../../../resume/application/services/active-resume.service';
 import {
   splitSkillEntry,
   toFieldsOfStudy,
@@ -66,7 +67,7 @@ export interface SkillGapResult {
   /**
    * Everything from the user's most recent parse that was compared against the
    * requirements — the `skills` column plus project technologies and fields of study.
-   * See {@link SkillGapService.latestParsedResume} for why those and not more.
+   * See {@link SkillGapService.activeParsedResume} for why those and not more.
    */
   skillsConsidered: string[];
 }
@@ -82,7 +83,10 @@ const MIN_SKILL_LENGTH = 2;
 
 @Injectable()
 export class SkillGapService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly activeResume: ActiveResumeService,
+  ) {}
 
   async analyse(userId: string, jobId: string): Promise<SkillGapResult> {
     const [job, parsed] = await Promise.all([
@@ -90,7 +94,7 @@ export class SkillGapService {
         where: { id: jobId },
         select: { requirements: true, extractedRequirements: true },
       }),
-      this.latestParsedResume(userId),
+      this.activeParsedResume(userId),
     ]);
 
     // Employer-authored requirements always win. The AI-extracted list is a fallback for
@@ -170,15 +174,14 @@ export class SkillGapService {
    * different résumé (the user's default one) without a second definition of "what the
    * CV shows".
    */
-  private async latestParsedResume(userId: string): Promise<string[]> {
-    const resume = await this.prisma.resume.findFirst({
-      where: { userId, parsingStatus: 'SUCCESS', deletedAt: null },
-      orderBy: { createdAt: 'desc' },
-      select: {
-        parsedData: { select: { skills: true, projects: true, educations: true } },
-      },
+  private async activeParsedResume(userId: string): Promise<string[]> {
+    const resumeId = await this.activeResume.findActiveResumeId(userId);
+    if (!resumeId) return [];
+    const parsed = await this.prisma.parsedResumeData.findUnique({
+      where: { resumeId },
+      select: { skills: true, projects: true, educations: true },
     });
-    return resume?.parsedData ? resumeEvidence(resume.parsedData) : [];
+    return parsed ? resumeEvidence(parsed) : [];
   }
 }
 
@@ -192,7 +195,7 @@ export interface ParsedResumeEvidence {
 /**
  * Everything one parse can evidence, deduped.
  *
- * See {@link SkillGapService.latestParsedResume} for why these three columns and not
+ * See {@link SkillGapService.activeParsedResume} for why these three columns and not
  * more — in particular why experience titles are excluded.
  */
 export function resumeEvidence(parsed: ParsedResumeEvidence): string[] {

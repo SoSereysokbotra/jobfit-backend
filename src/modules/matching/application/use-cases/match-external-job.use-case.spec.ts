@@ -35,7 +35,7 @@ function build(opts: { embedFails?: boolean; profileVector?: boolean } = {}) {
       }),
     },
     experience: { count: jest.fn().mockResolvedValue(2) },
-    resume: { findFirst: jest.fn().mockResolvedValue(null) },
+    parsedResumeData: { findUnique: jest.fn().mockResolvedValue(null) },
     company: { findFirst: jest.fn().mockResolvedValue(null) },
     job: { aggregate: jest.fn() },
     $queryRaw: jest
@@ -49,7 +49,9 @@ function build(opts: { embedFails?: boolean; profileVector?: boolean } = {}) {
       return { embeddings: [[0, 1, 0]] };
     }),
   };
-  return new MatchExternalJobUseCase(prisma, aiClient);
+  // Structured Experience rows win here (count 2), so no résumé lookup is reached.
+  const activeResume: any = { findActiveResumeId: jest.fn().mockResolvedValue(null) };
+  return new MatchExternalJobUseCase(prisma, aiClient, activeResume);
 }
 
 describe('MatchExternalJobUseCase', () => {
