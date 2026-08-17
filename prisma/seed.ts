@@ -267,8 +267,116 @@ async function main() {
   });
   console.log('   🛡️   Admin login: admin@jobfit.com / Admin123! (role ADMIN)');
 
+  // ── Seed Resume Builder templates ──────────────────────────────────────────
+  // These are designs WE author and control. The seed is the ONLY way templates
+  // enter the system: there is no user-facing create/upload route and no admin
+  // management API (deliberately out of scope — see RESUME_BUILDER_BACKEND_PLAN.md).
+  //
+  // All three are isAtsFriendly for MVP: ATS-safety is the priority, so even the
+  // "visual" variants stay single-column with real text (no tables, no columns,
+  // no text-in-images) — anything a parser cannot read defeats the point.
+  //
+  // thumbnailUrl is a ROOT-RELATIVE path served by the FRONTEND (jobfit-frontend/
+  // public/templates/). This backend serves no static assets at all — no
+  // ServeStaticModule, no useStaticAssets, no public/ dir — so hosting them here
+  // would mean adding static-serving infrastructure for three placeholder images.
+  // These SVGs are PLACEHOLDERS, not designed thumbnails; each says so on its face.
+  //
+  // `layoutConfig` is the contract the Phase 5 renderer reads. Shape is
+  // provisional and owned by that phase; `sections` is the print order and
+  // `rules` the per-template styling knobs.
+  const resumeTemplates = [
+    {
+      name: 'Classic ATS',
+      category: 'ats-friendly',
+      thumbnailUrl: '/templates/classic-ats.svg',
+      layoutConfig: {
+        sections: [
+          'header',
+          'summary',
+          'experience',
+          'education',
+          'skills',
+          'certifications',
+          'projects',
+        ],
+        rules: {
+          columns: 1,
+          headingStyle: 'uppercase-rule',
+          bullet: '•',
+          accent: 'none',
+        },
+      },
+    },
+    {
+      name: 'Modern Accent',
+      category: 'modern',
+      thumbnailUrl: '/templates/modern-accent.svg',
+      layoutConfig: {
+        sections: [
+          'header',
+          'summary',
+          'skills',
+          'experience',
+          'projects',
+          'education',
+          'certifications',
+        ],
+        rules: {
+          columns: 1,
+          headingStyle: 'accent-bar',
+          bullet: '▸',
+          accent: 'colorScheme',
+        },
+      },
+    },
+    {
+      name: 'Compact Professional',
+      category: 'modern',
+      thumbnailUrl: '/templates/compact-professional.svg',
+      layoutConfig: {
+        sections: [
+          'header',
+          'summary',
+          'experience',
+          'projects',
+          'education',
+          'skills',
+          'certifications',
+        ],
+        rules: {
+          columns: 1,
+          headingStyle: 'small-caps',
+          bullet: '–',
+          accent: 'heading-only',
+        },
+      },
+    },
+  ];
+
+  for (const template of resumeTemplates) {
+    // `name` is @unique, so upsert-by-name is idempotent across re-seeds.
+    // `update` deliberately refreshes layoutConfig/category/thumbnail so editing a
+    // template here and re-seeding actually takes effect, while isActive is left
+    // alone — deactivating a template in the database should survive a re-seed.
+    await prisma.resumeTemplate.upsert({
+      where: { name: template.name },
+      update: {
+        category: template.category,
+        thumbnailUrl: template.thumbnailUrl,
+        layoutConfig: template.layoutConfig,
+        isAtsFriendly: true,
+      },
+      create: { ...template, isAtsFriendly: true, isActive: true },
+    });
+  }
   console.log(
-    `✅  Seed complete — ${companies.length} companies, ${jobs.length} published jobs.`,
+    `   📄  Resume Builder templates: ${resumeTemplates.map((t) => t.name).join(', ')}`,
+  );
+
+  console.log(
+    `✅  Seed complete — ${companies.length} companies, ${jobs.length} published jobs, ` +
+      `${resumeTemplates.length} resume templates.`,
   );
 }
 

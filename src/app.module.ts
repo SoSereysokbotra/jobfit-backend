@@ -58,6 +58,7 @@ import { EmployerModule } from './modules/employer/employer.module';
 import { LearningModule } from './modules/learning/learning.module';
 import { MatchReportModule } from './modules/match-report/match-report.module';
 import { SyncModule } from './modules/sync/sync.module';
+import { ResumeBuilderModule } from './modules/resume-builder/resume-builder.module';
 
 // Observability (Phase 3) — health probes + Prometheus metrics.
 import { HealthModule } from './modules/health/health.module';
@@ -110,6 +111,7 @@ import { AlertingModule } from './modules/alerting/alerting.module';
     SalaryModule,
     JobModule,
     ResumeModule,
+    ResumeBuilderModule,
     ApplicationModule,
     OfferModule,
     SavedJobModule,
