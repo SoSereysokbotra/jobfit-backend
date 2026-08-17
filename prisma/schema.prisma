@@ -7,6 +7,908 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model User {
+  id                       String                    @id @default(uuid())
+  email                    String                    @unique
+  name                     String                    @default("")
+  passwordHash             String                    @default("")
+  role                     UserRole                  @default(JOB_SEEKER)
+  avatarUrl                String?
+  isActive                 Boolean                   @default(true)
+  emailVerified            Boolean                   @default(false)
+  verificationCode         String?
+  verificationCodeExpiry   DateTime?
+  passwordResetCode        String?
+  passwordResetCodeExpiry  DateTime?
+  lastLogin                DateTime?
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+  deletedAt                DateTime?
+  subscriptionTier         SubscriptionTier          @default(FREE)
+  movedApplicationStages   ApplicationStageHistory[] @relation("MovedByUser")
+  reviewedApplications     Application[]             @relation("ReviewedByEmployer")
+  applications             Application[]
+  auditLogs                AuditLog[]                @relation("AdminAuditLogs")
+  certifications           Certification[]
+  educations               Education[]
+  employerProfile          EmployerProfile?
+  experiences              Experience[]
+  idempotencyKeys          IdempotencyKey[]
+  jobSeekerProfile         JobSeekerProfile?
+  postedJobs               Job[]                     @relation("PostedByEmployer")
+  matchLabels              MatchLabel[]
+  matchReports             MatchReport[]
+  notifications            Notification[]
+  offerMessages            OfferMessage[]            @relation("OfferMessages")
+  extendedOffers           Offer[]                   @relation("ExtendedOffers")
+  profile                  Profile?
+  recommendations          Recommendation[]
+  refreshTokens            RefreshToken[]
+  resumeDocuments          ResumeDocument[]
+  resumes                  Resume[]
+  saved_external_jobs      saved_external_jobs[]
+  savedJobs                SavedJob[]
+  trackedJobs              TrackedJob[]
+  acknowledgedSystemEvents SystemEvent[]             @relation("AcknowledgedSystemEvents")
+  analytics                UserAnalytics?
+  skills                   UserSkill[]
+
+  @@index([email])
+  @@index([role])
+  @@index([subscriptionTier])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+  revokedAt DateTime?
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@index([userId, revokedAt])
+  @@map("refresh_tokens")
+}
+
+model Profile {
+  id                     String                 @id @default(uuid())
+  userId                 String                 @unique
+  firstName              String
+  lastName               String
+  phone                  String?
+  photoUrl               String?
+  bio                    String?
+  headline               String?
+  city                   String?
+  state                  String?
+  country                String?
+  latitude               Float?
+  longitude              Float?
+  desiredJobLevels       JobLevel[]
+  desiredRemoteTypes     RemoteType[]
+  desiredEmploymentTypes EmploymentType[]
+  desiredIndustries      String[]
+  minSalary              Int?
+  maxSalary              Int?
+  salaryCurrency         String                 @default("USD")
+  linkedinUrl            String?
+  githubUrl              String?
+  portfolioUrl           String?
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+  deletedAt              DateTime?
+  embedding              Unsupported("vector(1024)")?
+  user                   User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("profiles")
+}
+
+model Experience {
+  id             String         @id @default(uuid())
+  userId         String
+  company        String
+  title          String
+  jobLevel       JobLevel
+  employmentType EmploymentType
+  industry       String
+  description    String?
+  isCurrentJob   Boolean        @default(false)
+  startDate      DateTime
+  endDate        DateTime?
+  technologies   String[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  deletedAt      DateTime?
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([company])
+  @@map("experiences")
+}
+
+model Education {
+  id           String      @id @default(uuid())
+  userId       String
+  institution  String
+  degreeLevel  DegreeLevel
+  fieldOfStudy String
+  description  String?
+  startDate    DateTime
+  endDate      DateTime?
+  gpa          Float?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  deletedAt    DateTime?
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([institution])
+  @@map("educations")
+}
+
+model Certification {
+  id             String    @id @default(uuid())
+  userId         String
+  name           String
+  issuer         String
+  credentialId   String?
+  credentialUrl  String?
+  issueDate      DateTime
+  expirationDate DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("certifications")
+}
+
+model UserSkill {
+  id                String    @id @default(uuid())
+  userId            String
+  skillId           String
+  endorsementCount  Int       @default(0)
+  proficiencyLevel  String    @default("INTERMEDIATE")
+  yearsOfExperience Float?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
+  skill             Skill     @relation(fields: [skillId], references: [id])
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, skillId])
+  @@index([userId])
+  @@index([skillId])
+  @@map("user_skills")
+}
+
+model UserAnalytics {
+  id                        String    @id @default(uuid())
+  userId                    String    @unique
+  totalApplications         Int       @default(0)
+  totalInterviews           Int       @default(0)
+  totalOffers               Int       @default(0)
+  applicationAcceptanceRate Float     @default(0)
+  interviewAcceptanceRate   Float     @default(0)
+  profileViewCount          Int       @default(0)
+  lastProfileViewDate       DateTime?
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+  deletedAt                 DateTime?
+  user                      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_analytics")
+}
+
+model JobSeekerProfile {
+  id          String       @id @default(uuid())
+  userId      String       @unique
+  firstName   String
+  lastName    String
+  bio         String?
+  location    String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  matchScores MatchScore[]
+
+  @@map("job_seeker_profiles")
+}
+
+model EmployerProfile {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  firstName String
+  lastName  String
+  companyId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  company   Company  @relation(fields: [companyId], references: [id])
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("employer_profiles")
+}
+
+model Company {
+  id                 String                     @id @default(uuid())
+  name               String                     @unique
+  description        String?
+  website            String?
+  logoUrl            String?
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
+  city               String?
+  country            String?
+  deletedAt          DateTime?
+  foundedYear        Int?
+  glassdoorId        String?
+  glassdoorRating    Float?
+  glassdoorReviews   Int?
+  industry           String?
+  size               String?
+  state              String?
+  isVerified         Boolean                    @default(false)
+  verificationMethod CompanyVerificationMethod?
+  verifiedAt         DateTime?
+  employers          EmployerProfile[]
+  jobs               Job[]
+
+  @@index([name])
+  @@index([industry])
+  @@index([isVerified])
+  @@map("companies")
+}
+
+model Job {
+  id                       String                   @id @default(uuid())
+  companyId                String
+  title                    String
+  description              String
+  status                   JobStatus                @default(DRAFT)
+  remoteType               String
+  location                 String?
+  minSalary                Int?
+  maxSalary                Int?
+  createdAt                DateTime                 @default(now())
+  updatedAt                DateTime                 @updatedAt
+  postedByEmployerId       String?
+  source                   String?
+  externalId               String?
+  externalUrl              String?
+  lastSeenAt               DateTime?
+  embedding                Unsupported("vector(1024)")?
+  benefits                 String[]                 @default([])
+  bonusPct                 Int?
+  requirements             String[]                 @default([])
+  responsibilities         String[]                 @default([])
+  searchTsv                Unsupported("tsvector")? @default(dbgenerated("to_tsvector('english'::regconfig, ((COALESCE(title, ''::text) || ' '::text) || COALESCE(description, ''::text)))"))
+  sourceType               JobSourceType            @default(INTERNAL)
+  extractedRequirements    String[]                 @default([])
+  requirementsExtractedAt  DateTime?
+  requirementsGroundedness Float?
+  employmentType           EmploymentType?
+  experienceLevel          JobLevel?
+  applications             Application[]
+  skills                   JobSkill[]
+  company                  Company                  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  postedByEmployer         User?                    @relation("PostedByEmployer", fields: [postedByEmployerId], references: [id])
+  matchLabels              MatchLabel[]
+  matchScores              MatchScore[]
+  recommendations          Recommendation[]
+  savedBy                  SavedJob[]
+
+  @@unique([source, externalId])
+  @@index([postedByEmployerId])
+  @@index([source])
+  @@index([employmentType])
+  @@index([experienceLevel])
+  @@index([searchTsv], type: Gin)
+  @@index([sourceType])
+  @@map("jobs")
+  trackedJobs      TrackedJob[]
+}
+
+model SavedJob {
+  id        String   @id @default(uuid())
+  userId    String
+  jobId     String
+  createdAt DateTime @default(now())
+  job       Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, jobId])
+  @@index([userId])
+  @@index([jobId])
+  @@map("saved_jobs")
+}
+
+model Resume {
+  id               String              @id @default(uuid())
+  userId           String
+  fileName         String
+  fileUrl          String
+  fileSize         Int
+  fileType         String
+  title            String?
+  isDefault        Boolean             @default(false)
+  parsingStatus    ResumeParsingStatus @default(PENDING)
+  parsingError     String?
+  atsScore         Int?
+  qualityScore     Int?
+  version          Int                 @default(1)
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  deletedAt        DateTime?
+  applications     Application[]
+  parsedData       ParsedResumeData?
+  builderDocuments ResumeDocument[]    @relation("ResumeBuilderExport")
+  user             User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isDefault])
+  @@index([parsingStatus])
+  @@map("resumes")
+}
+
+model ParsedResumeData {
+  id             String   @id @default(uuid())
+  resumeId       String   @unique
+  fullName       String?
+  email          String?
+  phone          String?
+  location       String?
+  summary        String?
+  experiences    String?
+  educations     String?
+  skills         String?
+  certifications String?
+  rawText        String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  parsedBy       String?
+  projects       String?
+  promptVersion  String?
+  resume         Resume   @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+
+  @@map("parsed_resume_data")
+}
+
+model Application {
+  id                        String                    @id @default(uuid())
+  userId                    String
+  jobId                     String
+  resumeId                  String?
+  status                    ApplicationStatus         @default(SUBMITTED)
+  appliedAt                 DateTime                  @default(now())
+  notes                     String?
+  coverLetter               String?
+  employerNotes             String?
+  reviewedByEmployerId      String?
+  createdAt                 DateTime                  @default(now())
+  updatedAt                 DateTime                  @updatedAt
+  deletedAt                 DateTime?
+  screenedAt                DateTime?
+  screenMatchScore          Float?
+  screenRequirementsTotal   Int?
+  screenRequirementsCovered Int?
+  screenMissingRequirements String[]                  @default([])
+  screenRequirementsSource  String?
+  archivedByCandidateAt     DateTime?
+  archivedByEmployerAt      DateTime?
+  stageHistory              ApplicationStageHistory[]
+  timeline                  ApplicationTimeline[]
+  job                       Job                       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  resume                    Resume?                   @relation(fields: [resumeId], references: [id])
+  reviewedByEmployer        User?                     @relation("ReviewedByEmployer", fields: [reviewedByEmployerId], references: [id])
+  user                      User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contactPerson             ContactPerson?
+  offer                     Offer?
+
+  @@unique([userId, jobId])
+  @@index([userId])
+  @@index([status])
+  @@index([reviewedByEmployerId])
+  @@index([archivedByCandidateAt])
+  @@index([archivedByEmployerAt])
+  @@map("applications")
+}
+
+model Offer {
+  id                   String         @id @default(uuid())
+  applicationId        String         @unique
+  status               OfferStatus    @default(EXTENDED)
+  baseSalary           Int
+  currency             String         @default("USD")
+  signingBonus         Int?
+  annualBonusPct       Float?
+  equityShares         Int?
+  equityPrice          Float?
+  startDate            DateTime?
+  responseDeadline     DateTime?
+  /// DEPRECATED — superseded by OfferMessage. This single column was used as a
+  /// conversation: the employer's note, with candidate replies appended as
+  /// "[Candidate] …". It could not order, timestamp or attribute anything, appending
+  /// meant rewriting the whole string, and the employer's own write path REPLACED it —
+  /// so replying deleted the candidate's message. Migrated into OfferMessage and no
+  /// longer written. Kept only so the migration is reversible.
+  notes                String?
+  extendedByEmployerId String?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+  decidedAt            DateTime?
+  messages             OfferMessage[]
+  application          Application    @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  extendedByEmployer   User?          @relation("ExtendedOffers", fields: [extendedByEmployerId], references: [id])
+
+  @@index([status])
+  @@map("offers")
+}
+
+model OfferMessage {
+  id           String             @id @default(uuid())
+  offerId      String
+  authorRole   OfferMessageAuthor
+  authorUserId String?
+  body         String
+  /// When the RECIPIENT read it. One column is enough: the recipient is implied by
+  /// authorRole, and "has the author read their own message" is not a question anyone asks.
+  readAt       DateTime?
+  createdAt    DateTime           @default(now())
+  authorUser   User?              @relation("OfferMessages", fields: [authorUserId], references: [id])
+  offer        Offer              @relation(fields: [offerId], references: [id], onDelete: Cascade)
+
+  @@index([offerId, createdAt])
+  @@index([offerId, readAt])
+  @@map("offer_messages")
+}
+
+model ApplicationStageHistory {
+  id             String             @id @default(uuid())
+  applicationId  String
+  previousStatus ApplicationStatus?
+  newStatus      ApplicationStatus
+  movedByUserId  String?
+  notes          String?
+  createdAt      DateTime           @default(now())
+  application    Application        @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  movedByUser    User?              @relation("MovedByUser", fields: [movedByUserId], references: [id])
+
+  @@index([applicationId])
+  @@index([createdAt])
+  @@map("application_stage_history")
+}
+
+model ApplicationTimeline {
+  id            String            @id @default(uuid())
+  applicationId String
+  status        ApplicationStatus
+  eventType     String
+  description   String?
+  eventDate     DateTime          @default(now())
+  application   Application       @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+  @@map("application_timelines")
+}
+
+model ContactPerson {
+  id            String      @id @default(uuid())
+  applicationId String      @unique
+  name          String
+  email         String?
+  phone         String?
+  title         String?
+  linkedinUrl   String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@map("contact_persons")
+}
+
+model MatchScore {
+  id                 String           @id @default(uuid())
+  jobId              String
+  jobSeekerProfileId String
+  score              Float
+  breakdown          Json?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  job                Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  jobSeekerProfile   JobSeekerProfile @relation(fields: [jobSeekerProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, jobSeekerProfileId])
+  @@map("match_scores")
+}
+
+model Recommendation {
+  id                String   @id @default(uuid())
+  userId            String
+  jobId             String
+  score             Float
+  breakdown         Json?
+  reasonExplanation String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  job               Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, jobId])
+  @@index([userId, score])
+  @@map("recommendations")
+}
+
+model MatchReport {
+  id         String   @id @default(uuid())
+  userId     String
+  externalId String
+  source     String
+  title      String
+  company    String?
+  payload    Json
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("match_reports")
+}
+
+model MatchLabel {
+  id        String           @id @default(uuid())
+  userId    String
+  jobId     String
+  label     MatchLabelValue
+  reason    String?
+  source    MatchLabelSource @default(HUMAN)
+  category  String?
+  seniority String?
+  language  String?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  job       Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, jobId])
+  @@index([userId])
+  @@map("match_labels")
+}
+
+model Skill {
+  id         String      @id @default(uuid())
+  name       String      @unique
+  slug       String      @unique
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  jobs       JobSkill[]
+  userSkills UserSkill[]
+
+  @@map("skills")
+}
+
+model JobSkill {
+  jobId   String
+  skillId String
+  job     Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  skill   Skill  @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@id([jobId, skillId])
+  @@map("job_skills")
+}
+
+/// One thing that happened, addressed to one user.
+///
+/// The notification module existed as three empty listener stubs and a service whose two
+/// methods had empty bodies — there was nowhere for a notification to go. The employer
+/// could only discover a candidate's negotiation message by happening to open the board.
+///
+/// Rows are written INSIDE the transaction that causes them (see
+/// ApplicationTransitionService and OfferService), not from an event listener. An
+/// @OnEvent handler fires on emit, which for a status change means it fires from inside an
+/// open transaction that may still roll back — leaving the user notified of something that
+/// never happened. Writing the row beside the audit rows makes the notification exactly as
+/// true as the change it describes.
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  type      NotificationType
+  title     String
+  body      String
+  /// In-app path to whatever this is about, e.g. "/offers" or "/applications/{id}".
+  /// Null when there is nowhere useful to send the reader.
+  link      String?
+  /// Null until read. A timestamp rather than a boolean so "when did they see it?" is
+  /// answerable — the mock feed this replaces could not survive a page reload at all.
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
+  @@map("notifications")
+}
+
+model Industry {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("industries")
+}
+
+/// System health alerts (Feature 1). Emitted by monitoring / health checks; admins
+/// can acknowledge them from the dashboard.
+model SystemEvent {
+  id                    String              @id @default(uuid())
+  eventType             SystemEventType
+  severity              SystemEventSeverity @default(INFO)
+  message               String
+  details               Json?
+  acknowledgedAt        DateTime?
+  acknowledgedByAdminId String?
+  createdAt             DateTime            @default(now())
+  acknowledgedByAdmin   User?               @relation("AcknowledgedSystemEvents", fields: [acknowledgedByAdminId], references: [id])
+
+  @@index([severity])
+  @@index([createdAt])
+  @@index([acknowledgedAt])
+  @@map("system_events")
+}
+
+/// Email delivery events (Feature 3). Fed by the email provider (SendGrid/SES) webhook.
+/// `notificationId` is a soft reference kept for future linkage — there is no
+/// notifications table yet, so it is a plain nullable column (no FK).
+model EmailEvent {
+  id              String         @id @default(uuid())
+  recipientEmail  String
+  notificationId  String?
+  eventType       EmailEventType
+  reason          String?
+  externalEventId String?
+  createdAt       DateTime       @default(now())
+
+  @@index([recipientEmail])
+  @@index([createdAt])
+  @@index([eventType])
+  @@map("email_events")
+}
+
+/// Basic admin action log (Audit Logging). Intentionally minimal for the MVP —
+/// no old/new values, IP, or free-text reason (Phase 2+).
+model AuditLog {
+  id           String            @id @default(uuid())
+  adminId      String
+  actionType   AuditActionType
+  resourceType AuditResourceType
+  resourceId   String?
+  createdAt    DateTime          @default(now())
+  admin        User              @relation("AdminAuditLogs", fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model IdempotencyKey {
+  id             String   @id @default(uuid())
+  key            String   @unique
+  userId         String
+  /// "POST /api/v1/saved-jobs" — method + path, so one key cannot straddle routes.
+  endpoint       String
+  requestHash    String
+  responseStatus Int
+  /// Null for handlers that return no body (e.g. a 204).
+  responseBody   Json?
+  createdAt      DateTime @default(now())
+  /// createdAt + 24h. Indexed because the only query that reads it is the
+  /// cleanup sweep's `deleteMany({ where: { expiresAt: { lt: now } } })`.
+  expiresAt      DateTime
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@index([userId])
+  @@map("idempotency_keys")
+}
+
+/// A résumé design WE author and seed. Internal reference data: no owner column,
+/// nothing here is user-writable, and there is no user-facing create/update route.
+/// `layoutConfig` is authored by us and read by the renderer.
+model ResumeTemplate {
+  id            String           @id @default(uuid())
+  name          String           @unique
+  category      String
+  thumbnailUrl  String?
+  isAtsFriendly Boolean          @default(true)
+  layoutConfig  Json
+  isActive      Boolean          @default(true)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  documents     ResumeDocument[]
+
+  @@index([isActive, category])
+  @@map("resume_templates")
+}
+
+model ResumeDocument {
+  id               String                        @id @default(uuid())
+  userId           String
+  title            String
+  templateId       String
+  /// A PRESET KEY from a known set (e.g. "default" | "navy" | "forest"), NOT a
+  /// free-form hex value. The DTO validates membership; the column deliberately
+  /// stays a plain String so the preset list can grow, or its hex values change,
+  /// without a migration.
+  colorScheme      String                        @default("default")
+  lineSpacing      ResumeLineSpacing             @default(DEFAULT)
+  margin           ResumeMargin                  @default(NORMAL)
+  fontFamily       String?
+  status           ResumeDocumentStatus          @default(DRAFT)
+  fullName         String?
+  email            String?
+  phone            String?
+  location         String?
+  linkedinUrl      String?
+  portfolioUrl     String?
+  /// The `Resume` row produced by the MOST RECENT export, if any — a single FK,
+  /// not a history. Re-exporting soft-deletes the previously linked `Resume` and
+  /// repoints this, so the user's résumé picker only ever shows one current file
+  /// per document.
+  ///
+  /// SetNull, NOT Cascade, and the direction matters: deleting the `Resume`
+  /// leaves the document intact and merely unlinked. Deleting the DOCUMENT does
+  /// NOT touch the exported `Resume`. There is no cascade in either direction
+  /// between a document and its exported résumé.
+  exportedResumeId String?
+  createdAt        DateTime                      @default(now())
+  updatedAt        DateTime                      @updatedAt
+  deletedAt        DateTime?
+  certifications   ResumeDocumentCertification[]
+  educations       ResumeDocumentEducation[]
+  experiences      ResumeDocumentExperience[]
+  projects         ResumeDocumentProject[]
+  skills           ResumeDocumentSkill[]
+  summary          ResumeDocumentSummary?
+  exportedResume   Resume?                       @relation("ResumeBuilderExport", fields: [exportedResumeId], references: [id])
+  template         ResumeTemplate                @relation(fields: [templateId], references: [id])
+  user             User                          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([templateId])
+  @@map("resume_documents")
+}
+
+/// 1:1 with the document. A single block of text, so no `order`.
+model ResumeDocumentSummary {
+  id               String         @id @default(uuid())
+  resumeDocumentId String         @unique
+  content          String
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  resumeDocument   ResumeDocument @relation(fields: [resumeDocumentId], references: [id], onDelete: Cascade)
+
+  @@map("resume_document_summaries")
+}
+
+model ResumeDocumentExperience {
+  id               String         @id @default(uuid())
+  resumeDocumentId String
+  order            Int
+  company          String
+  title            String
+  /// Not importable — `Experience` has no location column. User-entered.
+  location         String?
+  startDate        DateTime
+  endDate          DateTime?
+  isCurrentJob     Boolean        @default(false)
+  description      String?
+  technologies     String[]
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  resumeDocument   ResumeDocument @relation(fields: [resumeDocumentId], references: [id], onDelete: Cascade)
+
+  @@index([resumeDocumentId, order])
+  @@map("resume_document_experiences")
+}
+
+model ResumeDocumentEducation {
+  id               String         @id @default(uuid())
+  resumeDocumentId String
+  order            Int
+  institution      String
+  degreeLevel      DegreeLevel
+  fieldOfStudy     String
+  startDate        DateTime
+  endDate          DateTime?
+  gpa              Float?
+  description      String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  resumeDocument   ResumeDocument @relation(fields: [resumeDocumentId], references: [id], onDelete: Cascade)
+
+  @@index([resumeDocumentId, order])
+  @@map("resume_document_educations")
+}
+
+/// Denormalized on purpose: the display name is copied, not FK'd to `Skill`, so
+/// the document is a stable snapshot and stays editable off-catalogue.
+model ResumeDocumentSkill {
+  id               String         @id @default(uuid())
+  resumeDocumentId String
+  order            Int
+  name             String
+  proficiencyLevel String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  resumeDocument   ResumeDocument @relation(fields: [resumeDocumentId], references: [id], onDelete: Cascade)
+
+  @@index([resumeDocumentId, order])
+  @@map("resume_document_skills")
+}
+
+model ResumeDocumentCertification {
+  id               String         @id @default(uuid())
+  resumeDocumentId String
+  order            Int
+  name             String
+  issuer           String
+  issueDate        DateTime
+  expirationDate   DateTime?
+  credentialId     String?
+  credentialUrl    String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  resumeDocument   ResumeDocument @relation(fields: [resumeDocumentId], references: [id], onDelete: Cascade)
+
+  @@index([resumeDocumentId, order])
+  @@map("resume_document_certifications")
+}
+
+/// Builder-only: there is no `Project` model to import from, so this section is
+/// manual-entry until a profile-side equivalent exists.
+model ResumeDocumentProject {
+  id               String         @id @default(uuid())
+  resumeDocumentId String
+  order            Int
+  name             String
+  description      String?
+  technologies     String[]
+  url              String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  resumeDocument   ResumeDocument @relation(fields: [resumeDocumentId], references: [id], onDelete: Cascade)
+
+  @@index([resumeDocumentId, order])
+  @@map("resume_document_projects")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model saved_external_jobs {
+  id          String   @id
+  userId      String
+  source      String
+  externalId  String
+  title       String
+  company     String?
+  description String?
+  url         String?
+  salary      String?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime
+  users       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, source, externalId])
+  @@index([userId])
+}
+
 enum UserRole {
   JOB_SEEKER
   EMPLOYER
@@ -32,7 +934,6 @@ enum ApplicationStatus {
   ARCHIVED
 }
 
-// ── Shared-kernel enums (Phase 3) ────────────────────────────────────────────
 enum SubscriptionTier {
   FREE
   PREMIUM
@@ -56,8 +957,6 @@ enum RemoteType {
   REMOTE
 }
 
-// Whether a job can be applied to inside JobFits (INTERNAL) or only on the site it was
-// ingested from (EXTERNAL). See Job.sourceType.
 enum JobSourceType {
   INTERNAL
   EXTERNAL
@@ -79,10 +978,6 @@ enum DegreeLevel {
   DOCTORATE
   CERTIFICATION
 }
-
-// ── Admin module enums (Admin MVP) ───────────────────────────────────────────
-// NOTE: the admin docs spell these lowercase (e.g. 'health_check'); we follow this
-// project's existing convention of UPPERCASE Prisma enum members (see UserRole above).
 
 enum SystemEventType {
   HEALTH_CHECK
@@ -121,441 +1016,9 @@ enum AuditResourceType {
   SYSTEM
 }
 
-// ── Employer module enums (Employer Phase 2) ─────────────────────────────────
-// How a company's ownership was verified. Two methods only (docs' simplified scope):
-// email-domain match, or manual admin review.
 enum CompanyVerificationMethod {
   EMAIL_DOMAIN
   ADMIN_REVIEW
-}
-
-model User {
-  id               String           @id @default(uuid())
-  email            String           @unique
-  name             String           @default("")
-  passwordHash     String           @default("")
-  role             UserRole         @default(JOB_SEEKER)
-  subscriptionTier SubscriptionTier @default(FREE)
-  avatarUrl        String?
-  isActive         Boolean          @default(true)
-
-  // Email verification (isVerified in the domain maps to this column)
-  emailVerified          Boolean   @default(false)
-  verificationCode       String?
-  verificationCodeExpiry DateTime?
-
-  // Password reset (6-digit code flow — see Flow 0.3)
-  passwordResetCode       String?
-  passwordResetCodeExpiry DateTime?
-
-  lastLogin DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
-
-  // Job seeker profile (legacy — kept for job/application/company modules)
-  jobSeekerProfile JobSeekerProfile?
-  // Employer profile
-  employerProfile  EmployerProfile?
-  // Auth sessions
-  refreshTokens    RefreshToken[]
-
-  // ── User module (Phase 3) ──────────────────────────────────────────────────
-  profile         Profile?
-  experiences     Experience[]
-  educations      Education[]
-  certifications  Certification[]
-  skills          UserSkill[]
-  analytics       UserAnalytics?
-  resumes         Resume[]
-  applications    Application[]
-  savedJobs       SavedJob[]
-  recommendations Recommendation[]
-  matchLabels     MatchLabel[]
-  matchReports    MatchReport[]
-
-  // ── Admin module (Admin MVP) ───────────────────────────────────────────────
-  // Admin actions this user performed / system alerts this admin acknowledged.
-  auditLogs                AuditLog[]    @relation("AdminAuditLogs")
-  acknowledgedSystemEvents SystemEvent[] @relation("AcknowledgedSystemEvents")
-
-  // ── Employer module (Employer Phase 2) ─────────────────────────────────────
-  // Jobs this employer posted, applications they reviewed, and pipeline moves they made.
-  postedJobs             Job[]                     @relation("PostedByEmployer")
-  reviewedApplications   Application[]             @relation("ReviewedByEmployer")
-  extendedOffers         Offer[]                   @relation("ExtendedOffers")
-  offerMessages          OfferMessage[]            @relation("OfferMessages")
-  movedApplicationStages ApplicationStageHistory[] @relation("MovedByUser")
-
-  notifications Notification[]
-
-  // ── Idempotency (PWA offline mode, Phase 1) ────────────────────────────────
-  idempotencyKeys IdempotencyKey[]
-
-  // ── Resume Builder ─────────────────────────────────────────────────────────
-  resumeDocuments ResumeDocument[]
-
-  @@index([email])
-  @@index([role])
-  @@index([subscriptionTier])
-  @@map("users")
-}
-
-model RefreshToken {
-  id        String    @id @default(uuid())
-  userId    String
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  // SHA-256 hash of the refresh token — plaintext is never stored.
-  tokenHash String    @unique
-  expiresAt DateTime
-  createdAt DateTime  @default(now())
-  // Soft-delete for rotation: NULL = live, non-null = consumed/revoked (kept so a
-  // replayed already-rotated token can be detected as reuse/theft).
-  revokedAt DateTime?
-
-  @@index([userId])
-  @@index([tokenHash])
-  @@index([userId, revokedAt])
-  @@map("refresh_tokens")
-}
-
-// ── User module (Phase 3) ──────────────────────────────────────────────────────
-
-model Profile {
-  id     String @id @default(uuid())
-  userId String @unique
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  firstName String
-  lastName  String
-  phone     String?
-  photoUrl  String?
-  bio       String?
-  headline  String? // e.g. "Senior Software Engineer at Google"
-
-  // Location
-  city      String?
-  state     String?
-  country   String?
-  latitude  Float?
-  longitude Float?
-
-  // Work preferences
-  desiredJobLevels       JobLevel[]
-  desiredRemoteTypes     RemoteType[]
-  desiredEmploymentTypes EmploymentType[]
-  desiredIndustries      String[] // Industry IDs
-
-  // Salary
-  minSalary      Int?
-  maxSalary      Int?
-  salaryCurrency String @default("USD")
-
-  // Social links
-  linkedinUrl  String?
-  githubUrl    String?
-  portfolioUrl String?
-
-  // ── Semantic matching (Phase 3) ─────────────────────────────────────────────
-  // BGE-M3 candidate embedding (1024-dim), built from profile + latest parsed
-  // résumé. Managed via raw SQL — Prisma can't read/write the `vector` type.
-  embedding Unsupported("vector(1024)")?
-
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
-
-  @@index([userId])
-  @@map("profiles")
-}
-
-model Experience {
-  id     String @id @default(uuid())
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  company        String
-  title          String
-  jobLevel       JobLevel
-  employmentType EmploymentType
-  industry       String // Industry ID
-
-  description  String?
-  isCurrentJob Boolean @default(false)
-
-  startDate DateTime
-  endDate   DateTime?
-
-  technologies String[] // tech used
-
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
-
-  @@index([userId])
-  @@index([company])
-  @@map("experiences")
-}
-
-model Education {
-  id     String @id @default(uuid())
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  institution  String
-  degreeLevel  DegreeLevel
-  fieldOfStudy String
-  description  String?
-
-  startDate DateTime
-  endDate   DateTime?
-  gpa       Float?
-
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
-
-  @@index([userId])
-  @@index([institution])
-  @@map("educations")
-}
-
-model Certification {
-  id     String @id @default(uuid())
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  name          String
-  issuer        String
-  credentialId  String?
-  credentialUrl String?
-
-  issueDate      DateTime
-  expirationDate DateTime?
-
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
-
-  @@index([userId])
-  @@map("certifications")
-}
-
-model UserSkill {
-  id     String @id @default(uuid())
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  skillId String
-  skill   Skill  @relation(fields: [skillId], references: [id], onDelete: Restrict)
-
-  endorsementCount  Int    @default(0)
-  proficiencyLevel  String @default("INTERMEDIATE") // BEGINNER, INTERMEDIATE, ADVANCED, EXPERT
-  yearsOfExperience Float?
-
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
-
-  @@unique([userId, skillId])
-  @@index([userId])
-  @@index([skillId])
-  @@map("user_skills")
-}
-
-model UserAnalytics {
-  id     String @id @default(uuid())
-  userId String @unique
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  totalApplications         Int   @default(0)
-  totalInterviews           Int   @default(0)
-  totalOffers               Int   @default(0)
-  applicationAcceptanceRate Float @default(0)
-  interviewAcceptanceRate   Float @default(0)
-
-  profileViewCount    Int       @default(0)
-  lastProfileViewDate DateTime?
-
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
-
-  @@index([userId])
-  @@map("user_analytics")
-}
-
-model JobSeekerProfile {
-  id        String   @id @default(uuid())
-  userId    String   @unique
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  firstName String
-  lastName  String
-  bio       String?
-  location  String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  matchScores MatchScore[]
-
-  @@map("job_seeker_profiles")
-}
-
-model EmployerProfile {
-  id        String   @id @default(uuid())
-  userId    String   @unique
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  firstName String
-  lastName  String
-  companyId String
-  company   Company  @relation(fields: [companyId], references: [id])
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@map("employer_profiles")
-}
-
-model Company {
-  id          String  @id @default(uuid())
-  name        String  @unique
-  description String?
-  website     String?
-  logoUrl     String?
-  industry    String? // Industry ID
-  size        String? // STARTUP | SMALL | MEDIUM | LARGE | ENTERPRISE
-  foundedYear Int?
-
-  // Location
-  city    String?
-  state   String?
-  country String?
-
-  // Glassdoor data
-  glassdoorId      String?
-  glassdoorRating  Float?
-  glassdoorReviews Int?
-
-  // ── Employer module: ownership verification (Employer Phase 2) ──────────────
-  isVerified         Boolean                    @default(false)
-  verificationMethod CompanyVerificationMethod?
-  verifiedAt         DateTime?
-
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
-
-  employers EmployerProfile[]
-  jobs      Job[]
-
-  // NOTE: Prisma's @@fulltext is MySQL-only and invalid on PostgreSQL. Company search is
-  // implemented with case-insensitive `contains` in the repository; for production-grade
-  // full-text search add a tsvector GIN index via a raw migration and switch to $queryRaw.
-  @@index([name])
-  @@index([industry])
-  @@index([isVerified])
-  @@map("companies")
-}
-
-model Job {
-  id          String    @id @default(uuid())
-  companyId   String
-  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  title       String
-  description String
-  status      JobStatus @default(DRAFT)
-  remoteType  String // e.g. "REMOTE", "HYBRID", "ON_SITE"
-  location    String?
-  minSalary   Int?
-  maxSalary   Int?
-
-  // What the posting actually is. NULLABLE ON PURPOSE, and null must render as nothing.
-  //
-  // The frontend hardcoded `type: "Full-time"` and `level: "Mid-level"` in its mapper
-  // because there was nothing to map, so every job card claimed both regardless of the
-  // posting — including a part-time teaching role. The enums existed here and were used by
-  // nothing. A job whose employer has not said is not a full-time mid-level job; it is a
-  // job we do not know that about, and the two must not look the same. Same judgement as
-  // CompanyProfileDto, which stopped inventing company facts for the same reason.
-  employmentType  EmploymentType?
-  experienceLevel JobLevel?
-
-  // Structured posting content (employer-authored). Empty arrays when unset.
-  responsibilities String[] @default([])
-  requirements     String[] @default([])
-
-  // Requirements read OUT of `description` by the AI service, for postings that carry no
-  // employer-authored `requirements` (43 of 52 ingested jobs). Cached rather than derived
-  // per request: extraction is an LLM call (~7s), far too slow to sit in a page load.
-  // Never overwrites `requirements` — employer-authored text stays authoritative.
-  extractedRequirements    String[]  @default([])
-  requirementsExtractedAt  DateTime?
-  // Grounded share of the model's raw output at extraction time. Persisted so a batch that
-  // silently started inventing is visible afterwards instead of being invisible.
-  requirementsGroundedness Float?
-  benefits                 String[]  @default([])
-  bonusPct                 Int? // target annual bonus, % of base
-
-  // Can this job be applied to inside JobFits?
-  //   INTERNAL — posted here; applications are received and tracked here.
-  //   EXTERNAL — ingested from another site; the real posting lives at `externalUrl`
-  //              and the user must be sent there. Applying in JobFits would go nowhere.
-  // Kept as its own column rather than inferred from `source`/`externalUrl`, because
-  // "may this user apply here?" is an authorisation-shaped question that belongs in one
-  // queryable place, not re-derived in every service, DTO and UI branch.
-  sourceType JobSourceType @default(INTERNAL)
-
-  // ── Ingestion (FR-JOBS-001): external-source tracking + dedup ──────────────
-  source      String? // e.g. "THEMUSE"; NULL = direct employer posting
-  externalId  String? // the source's job id, for dedup + updates
-  externalUrl String? // apply / landing page on the source
-  lastSeenAt  DateTime? // last ingestion run that saw this posting (freshness)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // ── Employer module (Employer Phase 2) ──────────────────────────────────────
-  // Employer (user) who posted this job. NULL = external/ingested job (no employer).
-  postedByEmployerId String?
-  postedByEmployer   User?   @relation("PostedByEmployer", fields: [postedByEmployerId], references: [id], onDelete: SetNull)
-
-  // ── Semantic matching (Phase 3) ─────────────────────────────────────────────
-  // BGE-M3 job embedding (1024-dim), built from title + description + skills.
-  // Managed via raw SQL — Prisma can't read/write the `vector` type.
-  embedding Unsupported("vector(1024)")?
-
-  // Phase B: full-text search vector (BM25) — GENERATED STORED from title+description.
-  // Read via raw SQL only.
-  searchTsv Unsupported("tsvector")?
-
-  applications    Application[]
-  matchScores     MatchScore[]
-  skills          JobSkill[]
-  savedBy         SavedJob[]
-  recommendations Recommendation[]
-  matchLabels     MatchLabel[]
-
-  // Dedup key for ingested jobs. NULLs are distinct in Postgres, so direct
-  // employer postings (source = externalId = NULL) never collide here.
-  @@unique([source, externalId])
-  @@index([postedByEmployerId])
-  @@index([source])
-  @@map("jobs")
-}
-
-// A job a seeker bookmarked for later. Simple join of (user, job); unique so a
-// job can't be saved twice, cascade so it disappears if either side is deleted.
-model SavedJob {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  jobId     String
-  job       Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
-
-  @@unique([userId, jobId])
-  @@index([userId])
-  @@index([jobId])
-  @@map("saved_jobs")
 }
 
 enum ResumeParsingStatus {
@@ -565,148 +1028,6 @@ enum ResumeParsingStatus {
   FAILED
 }
 
-model Resume {
-  id     String @id @default(uuid())
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  fileName String
-  fileUrl  String
-  fileSize Int
-  fileType String // "PDF" | "DOCX"
-
-  title     String?
-  isDefault Boolean @default(false)
-
-  parsingStatus ResumeParsingStatus @default(PENDING)
-  parsingError  String?
-
-  atsScore     Int?
-  qualityScore Int?
-  version      Int  @default(1)
-
-  parsedData   ParsedResumeData?
-  applications Application[]
-
-  /// Builder documents whose most recent export produced THIS résumé. Normally
-  /// 0 or 1 — the document repoints its FK on re-export.
-  builderDocuments ResumeDocument[] @relation("ResumeBuilderExport")
-
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
-
-  @@index([userId])
-  @@index([isDefault])
-  @@index([parsingStatus])
-  @@map("resumes")
-}
-
-model ParsedResumeData {
-  id       String @id @default(uuid())
-  resumeId String @unique
-  resume   Resume @relation(fields: [resumeId], references: [id], onDelete: Cascade)
-
-  fullName String?
-  email    String?
-  phone    String?
-  location String?
-
-  summary        String?
-  experiences    String? // JSON string
-  educations     String? // JSON string
-  // JSON string. Personal/academic/technical work, kept separate from `experiences`:
-  // on student CVs the projects hold nearly all the technical signal, and with nowhere
-  // to put them the parser folded them into experiences as jobs that were never held.
-  projects       String? // JSON string
-  skills         String? // JSON string
-  certifications String? // JSON string
-  rawText        String?
-
-  // "ai" when the AI service produced the structured data, "heuristic" when the
-  // regex/section fallback did (AI service unavailable). Null for legacy rows.
-  parsedBy String?
-
-  // Which app/prompts/resume_parse_<v>.txt produced this row. Null for rows written
-  // before prompt versioning, so a stored parse can be traced back to its prompt.
-  promptVersion String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@map("parsed_resume_data")
-}
-
-model Application {
-  id     String @id @default(uuid())
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  jobId  String
-  job    Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
-
-  resumeId String?
-  resume   Resume? @relation(fields: [resumeId], references: [id], onDelete: SetNull)
-
-  status      ApplicationStatus @default(SUBMITTED)
-  appliedAt   DateTime          @default(now())
-  notes       String?
-  coverLetter String?
-
-  // ── AI Recruiter: automatic screening at the moment of applying ──────────────
-  // A SNAPSHOT, never recomputed. It records what was true when this person applied;
-  // rewriting it as their résumé or the job changes would quietly rewrite history and
-  // make the employer's earlier decision unexplainable.
-  //
-  // All nullable: screening must never fail an application, so an AI/DB hiccup leaves
-  // the row unscreened rather than losing the candidate their application.
-  screenedAt                DateTime?
-  screenMatchScore          Float? // 0-100, DETERMINISTIC scorer (never the LLM fitScore)
-  screenRequirementsTotal   Int?
-  screenRequirementsCovered Int?
-  screenMissingRequirements String[]  @default([])
-  // EMPLOYER when the employer wrote the requirements, AI_EXTRACTED when they were read
-  // out of the description. The employer is entitled to know which they are judging on.
-  screenRequirementsSource  String?
-
-  // ── Employer module: pipeline review (Employer Phase 2) ─────────────────────
-  employerNotes        String?
-  reviewedByEmployerId String?
-  reviewedByEmployer   User?   @relation("ReviewedByEmployer", fields: [reviewedByEmployerId], references: [id], onDelete: SetNull)
-
-  // ── Archiving: one per side, because tidying is a VIEW, not a STATE ──────────
-  // Archiving used to be the ApplicationStatus value ARCHIVED, which made one party's
-  // housekeeping rewrite a record the other party reads: a candidate tidying an accepted
-  // job dropped it out of the employer's Hired column and — because ARCHIVED mapped to
-  // "Rejected" — filed someone they had hired under rejections. It also overwrote the
-  // status it replaced, so the row stopped saying the person was hired at all.
-  //
-  // These are per-actor and non-destructive. The status keeps telling the truth
-  // (ACCEPTED stays ACCEPTED); each side hides its own list without touching the other's.
-  // Legacy rows still carrying status = ARCHIVED are left alone — their pre-archive status
-  // is unrecoverable, and inventing one would be worse than leaving the history visible.
-  archivedByCandidateAt DateTime?
-  archivedByEmployerAt  DateTime?
-
-  timeline      ApplicationTimeline[]
-  contactPerson ContactPerson?
-  stageHistory  ApplicationStageHistory[]
-  offer         Offer?
-
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
-
-  @@unique([userId, jobId])
-  @@index([userId])
-  @@index([status])
-  @@index([reviewedByEmployerId])
-  @@map("applications")
-}
-
-// ── Offers (Offers & Decisions) ───────────────────────────────────────────────
-// A concrete offer an employer extends on an application. 1:1 with Application; all
-// the compensation the seeker's /offers dashboard needs lives here. The seeker's
-// accept/decline/negotiate decisions drive both this row and the Application status.
 enum OfferStatus {
   EXTENDED
   NEGOTIATING
@@ -715,201 +1036,11 @@ enum OfferStatus {
   WITHDRAWN
 }
 
-model Offer {
-  id            String      @id @default(uuid())
-  applicationId String      @unique
-  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-
-  status OfferStatus @default(EXTENDED)
-
-  // Compensation
-  baseSalary     Int
-  currency       String @default("USD")
-  signingBonus   Int?
-  annualBonusPct Float?
-  equityShares   Int?
-  equityPrice    Float?
-
-  startDate        DateTime?
-  responseDeadline DateTime?
-  /// DEPRECATED — superseded by OfferMessage. This single column was used as a
-  /// conversation: the employer's note, with candidate replies appended as
-  /// "[Candidate] …". It could not order, timestamp or attribute anything, appending
-  /// meant rewriting the whole string, and the employer's own write path REPLACED it —
-  /// so replying deleted the candidate's message. Migrated into OfferMessage and no
-  /// longer written. Kept only so the migration is reversible.
-  notes            String?
-
-  messages OfferMessage[]
-
-  // Who extended it (the employer user).
-  extendedByEmployerId String?
-  extendedByEmployer   User?   @relation("ExtendedOffers", fields: [extendedByEmployerId], references: [id], onDelete: SetNull)
-
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  decidedAt DateTime?
-
-  @@index([status])
-  @@map("offers")
-}
-
-// ── Offer negotiation messages ────────────────────────────────────────────────
-// The conversation about an offer. Replaces the Offer.notes string, which could hold
-// exactly one candidate message before the write path refused, and which the employer's
-// own note overwrote wholesale.
 enum OfferMessageAuthor {
   CANDIDATE
   EMPLOYER
 }
 
-model OfferMessage {
-  id      String @id @default(uuid())
-  offerId String
-  offer   Offer  @relation(fields: [offerId], references: [id], onDelete: Cascade)
-
-  authorRole   OfferMessageAuthor
-  // Nullable so a deleted account does not take the conversation with it. authorRole is
-  // what the UI attributes by, and it survives independently.
-  authorUserId String?
-  authorUser   User?              @relation("OfferMessages", fields: [authorUserId], references: [id], onDelete: SetNull)
-
-  body String
-
-  /// When the RECIPIENT read it. One column is enough: the recipient is implied by
-  /// authorRole, and "has the author read their own message" is not a question anyone asks.
-  readAt DateTime?
-
-  createdAt DateTime @default(now())
-
-  @@index([offerId, createdAt])
-  @@index([offerId, readAt])
-  @@map("offer_messages")
-}
-
-// ── Employer module: application pipeline stage history (Employer Phase 2) ─────
-// One row per pipeline transition. Reuses ApplicationStatus (not a separate pipeline
-// enum) to stay consistent with the rest of the system.
-model ApplicationStageHistory {
-  id            String      @id @default(uuid())
-  applicationId String
-  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-
-  previousStatus ApplicationStatus?
-  newStatus      ApplicationStatus
-
-  movedByUserId String?
-  movedByUser   User?   @relation("MovedByUser", fields: [movedByUserId], references: [id], onDelete: SetNull)
-
-  notes     String?
-  createdAt DateTime @default(now())
-
-  @@index([applicationId])
-  @@index([createdAt])
-  @@map("application_stage_history")
-}
-
-model ApplicationTimeline {
-  id            String      @id @default(uuid())
-  applicationId String
-  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-
-  status      ApplicationStatus
-  eventType   String
-  description String?
-  eventDate   DateTime          @default(now())
-
-  @@index([applicationId])
-  @@map("application_timelines")
-}
-
-model ContactPerson {
-  id            String      @id @default(uuid())
-  applicationId String      @unique
-  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-
-  name        String
-  email       String?
-  phone       String?
-  title       String?
-  linkedinUrl String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@map("contact_persons")
-}
-
-model MatchScore {
-  id                 String           @id @default(uuid())
-  jobId              String
-  job                Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  jobSeekerProfileId String
-  jobSeekerProfile   JobSeekerProfile @relation(fields: [jobSeekerProfileId], references: [id], onDelete: Cascade)
-  score              Float // 0 - 100
-  breakdown          Json? // sub-scores e.g. skill, experience
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
-
-  @@unique([jobId, jobSeekerProfileId])
-  @@map("match_scores")
-}
-
-// Seeker-facing job recommendation (Phase 3). Keyed by (userId, jobId) so it works
-// off the populated `Profile`/User rather than the empty legacy JobSeekerProfile.
-// Written by the matching batch; read by the /recommendations endpoint.
-model Recommendation {
-  id     String @id @default(uuid())
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  jobId  String
-  job    Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
-
-  score             Float // 0-100 weighted total
-  breakdown         Json? // sub-scores: skills, experience, location, salary
-  reasonExplanation String? // human-readable "why this matched"
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([userId, jobId])
-  @@index([userId, score])
-  @@map("recommendations")
-}
-
-// Full-page résumé↔job match report, generated from the browser extension and
-// rendered by the web app at /match-report/{id}.
-//
-// `payload` holds the WHOLE rendered report rather than ids to recompute from:
-// the scores are a snapshot of the moment the user scanned, so revisiting the
-// link shows what they were shown, not a different answer produced by a résumé
-// they have since edited.
-//
-// PRIVACY: the description the extension captured is used once to extract
-// requirements; only the DERIVED report is stored, on the user's own row. This
-// is deliberately not a job-listing store.
-model MatchReport {
-  id     String @id @default(uuid())
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  externalId String // the source's job id, e.g. a LinkedIn posting id
-  source     String // "linkedin", …
-  title      String
-  company    String?
-
-  payload Json // the full report — see MatchReportPayload
-
-  createdAt DateTime @default(now())
-
-  @@index([userId])
-  @@map("match_reports")
-}
-
-// ── Evaluation (RAG plan Phase A) ─────────────────────────────────────────────
-// Hand-labeled ground-truth for measuring retrieval quality (Recall@10/MRR/nDCG@10).
-// Candidate = user (the retrieval unit). Slice tags are a Phase-A stopgap: Job has
-// no category/seniority/language columns yet (Phase B adds real queryable ones).
 enum MatchLabelValue {
   GREAT
   OK
@@ -921,224 +1052,26 @@ enum MatchLabelSource {
   FEEDBACK
 }
 
-model MatchLabel {
-  id     String @id @default(uuid())
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  jobId  String
-  job    Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
-
-  label  MatchLabelValue
-  reason String?
-  source MatchLabelSource @default(HUMAN)
-
-  // Hand-labeled evaluation slices (nullable — free-text stopgap, not schema truth).
-  category  String?
-  seniority String?
-  language  String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([userId, jobId])
-  @@index([userId])
-  @@map("match_labels")
-}
-
-model Skill {
-  id        String   @id @default(uuid())
-  name      String   @unique
-  slug      String   @unique
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  jobs       JobSkill[]
-  userSkills UserSkill[]
-
-  @@map("skills")
-}
-
-model JobSkill {
-  jobId   String
-  job     Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  skillId String
-  skill   Skill  @relation(fields: [skillId], references: [id], onDelete: Cascade)
-
-  @@id([jobId, skillId])
-  @@map("job_skills")
-}
-
 /// What a notification is about. The client picks an icon from this; the sentence itself
 /// is in `title`/`body`, written by whatever raised it.
 enum NotificationType {
-  APPLICATION // a status change on an application you are party to
-  OFFER // an offer extended, revised or rescinded
-  MESSAGE // a message in an offer negotiation
+  APPLICATION
+  OFFER
+  MESSAGE
   MATCH
   SYSTEM
 }
 
-/// One thing that happened, addressed to one user.
-///
-/// The notification module existed as three empty listener stubs and a service whose two
-/// methods had empty bodies — there was nowhere for a notification to go. The employer
-/// could only discover a candidate's negotiation message by happening to open the board.
-///
-/// Rows are written INSIDE the transaction that causes them (see
-/// ApplicationTransitionService and OfferService), not from an event listener. An
-/// @OnEvent handler fires on emit, which for a status change means it fires from inside an
-/// open transaction that may still roll back — leaving the user notified of something that
-/// never happened. Writing the row beside the audit rows makes the notification exactly as
-/// true as the change it describes.
-model Notification {
-  id     String           @id @default(uuid())
-  userId String
-  user   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type   NotificationType
-
-  title String
-  body  String
-
-  /// In-app path to whatever this is about, e.g. "/offers" or "/applications/{id}".
-  /// Null when there is nowhere useful to send the reader.
-  link String?
-
-  /// Null until read. A timestamp rather than a boolean so "when did they see it?" is
-  /// answerable — the mock feed this replaces could not survive a page reload at all.
-  readAt DateTime?
-
-  createdAt DateTime @default(now())
-
-  /// The feed is always "this user's, newest first", and the badge counts unread.
-  @@index([userId, createdAt])
-  @@index([userId, readAt])
-  @@map("notifications")
-}
-
-model Industry {
-  id        String   @id @default(uuid())
-  name      String   @unique
-  slug      String   @unique
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@map("industries")
-}
-
-// ── Admin module models (Admin MVP) ──────────────────────────────────────────
-
-/// System health alerts (Feature 1). Emitted by monitoring / health checks; admins
-/// can acknowledge them from the dashboard.
-model SystemEvent {
-  id        String              @id @default(uuid())
-  eventType SystemEventType
-  severity  SystemEventSeverity @default(INFO)
-  message   String
-  details   Json? // structured payload: latency_ms, endpoint, error_count, ...
-
-  acknowledgedAt        DateTime?
-  acknowledgedByAdminId String?
-  acknowledgedByAdmin   User?     @relation("AcknowledgedSystemEvents", fields: [acknowledgedByAdminId], references: [id], onDelete: SetNull)
-
-  createdAt DateTime @default(now())
-
-  @@index([severity])
-  @@index([createdAt])
-  @@index([acknowledgedAt])
-  @@map("system_events")
-}
-
-/// Email delivery events (Feature 3). Fed by the email provider (SendGrid/SES) webhook.
-/// `notificationId` is a soft reference kept for future linkage — there is no
-/// notifications table yet, so it is a plain nullable column (no FK).
-model EmailEvent {
-  id              String         @id @default(uuid())
-  recipientEmail  String
-  notificationId  String?
-  eventType       EmailEventType
-  reason          String? // for bounces/complaints: why it failed
-  externalEventId String? // provider event id (SendGrid/SES)
-
-  createdAt DateTime @default(now())
-
-  @@index([recipientEmail])
-  @@index([createdAt])
-  @@index([eventType])
-  @@map("email_events")
-}
-
-/// Basic admin action log (Audit Logging). Intentionally minimal for the MVP —
-/// no old/new values, IP, or free-text reason (Phase 2+).
-model AuditLog {
-  id           String            @id @default(uuid())
-  adminId      String
-  admin        User              @relation("AdminAuditLogs", fields: [adminId], references: [id], onDelete: Cascade)
-  actionType   AuditActionType
-  resourceType AuditResourceType
-  resourceId   String? // user id or email address the action targeted
-
-  createdAt DateTime @default(now())
-
-  @@index([adminId])
-  @@index([createdAt])
-  @@map("audit_logs")
-}
-
-// ── Idempotency (PWA offline mode, Phase 1) ───────────────────────────────────
-// A record of "this client already performed this action", so a queued offline
-// mutation replayed after a reconnect returns the ORIGINAL response instead of
-// running the handler a second time.
-//
-// `key` is client-generated (one per logical action) and globally unique. It is
-// scoped to a user and an endpoint on read: a key that turns up against a
-// different user, a different route, or a different body is a client bug, and is
-// rejected with 409 rather than quietly served the wrong cached response.
-//
-// `requestHash` is a SHA-256 over the canonicalised request body. It is what
-// distinguishes "the same action, retried" from "a different action that reused
-// the key by mistake".
-model IdempotencyKey {
-  id     String @id @default(uuid())
-  key    String @unique
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  /// "POST /api/v1/saved-jobs" — method + path, so one key cannot straddle routes.
-  endpoint    String
-  requestHash String
-
-  responseStatus Int
-  /// Null for handlers that return no body (e.g. a 204).
-  responseBody   Json?
-
-  createdAt DateTime @default(now())
-  /// createdAt + 24h. Indexed because the only query that reads it is the
-  /// cleanup sweep's `deleteMany({ where: { expiresAt: { lt: now } } })`.
-  expiresAt DateTime
-
-  @@index([expiresAt])
-  @@index([userId])
-  @@map("idempotency_keys")
-}
-
-// ── Resume Builder ────────────────────────────────────────────────────────────
-// An in-app, structured résumé the user composes from our templates, distinct
-// from the uploaded-file `Resume`. Exporting one renders a PDF, stores it, and
-// creates a normal `Resume` row so the document flows into ATS scoring and the
-// "select résumé when applying" picker.
-//
-// Full rationale, field-by-field: docs/RESUME_BUILDER_DATA_MODEL.md
-
 enum ResumeLineSpacing {
-  SINGLE // 1.0
-  DEFAULT // 1.15
-  WIDE // 1.5
+  SINGLE
+  DEFAULT
+  WIDE
 }
 
 enum ResumeMargin {
-  NARROW // 0.5"
-  NORMAL // 0.75"
-  WIDE // 1.0"
+  NARROW
+  NORMAL
+  WIDE
 }
 
 enum ResumeDocumentStatus {
@@ -1146,204 +1079,82 @@ enum ResumeDocumentStatus {
   FINALIZED
 }
 
-/// A résumé design WE author and seed. Internal reference data: no owner column,
-/// nothing here is user-writable, and there is no user-facing create/update route.
-/// `layoutConfig` is authored by us and read by the renderer.
-model ResumeTemplate {
-  id            String  @id @default(uuid())
-  name          String  @unique
-  category      String // "ats-friendly" | "modern" | "creative"
-  thumbnailUrl  String?
-  isAtsFriendly Boolean @default(true)
-  layoutConfig  Json // section order + styling rules the renderer reads
-  isActive      Boolean @default(true)
-
-  documents ResumeDocument[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([isActive, category])
-  @@map("resume_templates")
+/// Where a tracked job sits on the user's own board.
+///
+/// DELIBERATELY NOT `ApplicationStatus`. That enum records what an EMPLOYER decided, and
+/// the lifecycle enforces it: `EMPLOYER_SETTABLE_STATUSES` is SCREENING/INTERVIEW/OFFER/
+/// REJECTED and a candidate asserting one is refused by the chokepoint. A drag-and-drop
+/// board is the opposite — the user moves their own card freely, and what it means is
+/// "this is where I think I am", not "this is what the employer recorded".
+///
+/// Reusing ApplicationStatus would either break the tracker (every drag refused) or break
+/// the pipeline (a candidate writing INTERVIEW into an employer's board). Same lesson as
+/// ARCHIVED, which was a shared status until one party's housekeeping started overwriting
+/// the other party's record.
+enum TrackedJobStage {
+  SAVED
+  APPLIED
+  INTERVIEW
+  OFFER
+  REJECTED
 }
 
-model ResumeDocument {
+/// A job the user is tracking themselves, on the Job Tracker board.
+///
+/// WHY THIS IS NOT AN `Application`. Applications are for jobs applied to INSIDE JobFits:
+/// an employer receives them, drives the status, and the server REFUSES an in-app
+/// application to an EXTERNAL job because it would go nowhere. Tracked jobs are the other
+/// half of a real job hunt — postings applied to on bongthom, jobnet, LinkedIn or by
+/// email, where no employer exists here to report anything back. The user is the only
+/// source of truth, so the user owns the stage.
+///
+/// THE SNAPSHOT IS THE POINT. `title`/`companyName`/`url` are copied, not read through
+/// `jobId`. A tracked card must survive the posting being taken down, re-ingested, or
+/// never having been in our database at all (saved from the extension, or typed in by
+/// hand). `jobId` is a convenience link when we happen to know the posting, never the
+/// source of the card's content.
+model TrackedJob {
   id     String @id @default(uuid())
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  title      String
-  templateId String
-  template   ResumeTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  /// Set when the card came from a posting we hold. NULL for anything typed in or saved
+  /// from elsewhere. onDelete: SetNull — losing the posting must not lose the card.
+  jobId String?
+  job   Job?    @relation(fields: [jobId], references: [id], onDelete: SetNull)
 
-  // Presentation controls (the reference screenshot's knobs).
-  /// A PRESET KEY from a known set (e.g. "default" | "navy" | "forest"), NOT a
-  /// free-form hex value. The DTO validates membership; the column deliberately
-  /// stays a plain String so the preset list can grow, or its hex values change,
-  /// without a migration.
-  colorScheme String            @default("default")
-  lineSpacing ResumeLineSpacing @default(DEFAULT)
-  margin      ResumeMargin      @default(NORMAL)
-  fontFamily  String?
+  /// Snapshot of what the user is tracking. Never re-read from `job`.
+  title       String
+  companyName String
+  url         String?
+  location    String?
 
-  status ResumeDocumentStatus @default(DRAFT)
+  stage TrackedJobStage @default(SAVED)
 
-  // ── Résumé header ─────────────────────────────────────────────────────────
-  // SNAPSHOTTED from Profile/User at creation, then owned by the document and
-  // independently editable — a résumé tailored for one application must be able
-  // to differ from the master profile. Never re-read from Profile afterwards.
-  fullName     String?
-  email        String?
-  phone        String?
-  location     String?
-  linkedinUrl  String?
-  portfolioUrl String?
+  /// Order within a column. Drag-and-drop reorders inside a stage as well as between
+  /// stages, so position is per (user, stage) and is rewritten on every move.
+  position Int @default(0)
 
-  /// The `Resume` row produced by the MOST RECENT export, if any — a single FK,
-  /// not a history. Re-exporting soft-deletes the previously linked `Resume` and
-  /// repoints this, so the user's résumé picker only ever shows one current file
-  /// per document.
-  ///
-  /// SetNull, NOT Cascade, and the direction matters: deleting the `Resume`
-  /// leaves the document intact and merely unlinked. Deleting the DOCUMENT does
-  /// NOT touch the exported `Resume`. There is no cascade in either direction
-  /// between a document and its exported résumé.
-  exportedResumeId String?
-  exportedResume   Resume? @relation("ResumeBuilderExport", fields: [exportedResumeId], references: [id], onDelete: SetNull)
+  /// The user's own notes about this hunt. Optional everywhere — the board is useful
+  /// before any of it is filled in.
+  minSalary Int?
+  maxSalary Int?
+  notes     String?
 
-  summary        ResumeDocumentSummary?
-  experiences    ResumeDocumentExperience[]
-  educations     ResumeDocumentEducation[]
-  skills         ResumeDocumentSkill[]
-  certifications ResumeDocumentCertification[]
-  projects       ResumeDocumentProject[]
-
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
-
-  @@index([userId])
-  @@index([templateId])
-  @@map("resume_documents")
-}
-
-/// 1:1 with the document. A single block of text, so no `order`.
-model ResumeDocumentSummary {
-  id               String         @id @default(uuid())
-  resumeDocumentId String         @unique
-  resumeDocument   ResumeDocument @relation(fields: [resumeDocumentId], references: [id], onDelete: Cascade)
-
-  content String
+  /// When the user says they applied. Not derived from `stage`: someone can drag a card
+  /// straight to INTERVIEW for a job they applied to weeks ago outside the product.
+  appliedAt  DateTime?
+  /// Hidden from the board without being deleted — the "Archived" view in the UI.
+  archivedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@map("resume_document_summaries")
-}
-
-model ResumeDocumentExperience {
-  id               String         @id @default(uuid())
-  resumeDocumentId String
-  resumeDocument   ResumeDocument @relation(fields: [resumeDocumentId], references: [id], onDelete: Cascade)
-
-  order Int
-
-  company      String
-  title        String
-  /// Not importable — `Experience` has no location column. User-entered.
-  location     String?
-  startDate    DateTime
-  endDate      DateTime?
-  isCurrentJob Boolean   @default(false)
-  description  String?
-  technologies String[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([resumeDocumentId, order])
-  @@map("resume_document_experiences")
-}
-
-model ResumeDocumentEducation {
-  id               String         @id @default(uuid())
-  resumeDocumentId String
-  resumeDocument   ResumeDocument @relation(fields: [resumeDocumentId], references: [id], onDelete: Cascade)
-
-  order Int
-
-  institution  String
-  degreeLevel  DegreeLevel
-  fieldOfStudy String
-  startDate    DateTime
-  endDate      DateTime?
-  gpa          Float?
-  description  String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([resumeDocumentId, order])
-  @@map("resume_document_educations")
-}
-
-/// Denormalized on purpose: the display name is copied, not FK'd to `Skill`, so
-/// the document is a stable snapshot and stays editable off-catalogue.
-model ResumeDocumentSkill {
-  id               String         @id @default(uuid())
-  resumeDocumentId String
-  resumeDocument   ResumeDocument @relation(fields: [resumeDocumentId], references: [id], onDelete: Cascade)
-
-  order Int
-
-  name             String
-  proficiencyLevel String? // BEGINNER | INTERMEDIATE | ADVANCED | EXPERT
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([resumeDocumentId, order])
-  @@map("resume_document_skills")
-}
-
-model ResumeDocumentCertification {
-  id               String         @id @default(uuid())
-  resumeDocumentId String
-  resumeDocument   ResumeDocument @relation(fields: [resumeDocumentId], references: [id], onDelete: Cascade)
-
-  order Int
-
-  name           String
-  issuer         String
-  issueDate      DateTime
-  expirationDate DateTime?
-  credentialId   String?
-  credentialUrl  String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([resumeDocumentId, order])
-  @@map("resume_document_certifications")
-}
-
-/// Builder-only: there is no `Project` model to import from, so this section is
-/// manual-entry until a profile-side equivalent exists.
-model ResumeDocumentProject {
-  id               String         @id @default(uuid())
-  resumeDocumentId String
-  resumeDocument   ResumeDocument @relation(fields: [resumeDocumentId], references: [id], onDelete: Cascade)
-
-  order Int
-
-  name         String
-  description  String?
-  technologies String[]
-  url          String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([resumeDocumentId, order])
-  @@map("resume_document_projects")
+  /// One card per known posting per user. NULLs are distinct in Postgres, so any number
+  /// of hand-entered cards coexist — the same trick Job uses for (source, externalId).
+  @@unique([userId, jobId])
+  /// The board query is always "this user's, by stage, in order".
+  @@index([userId, stage, position])
+  @@index([userId, archivedAt])
+  @@map("tracked_jobs")
 }
