@@ -9,6 +9,11 @@ import { ComputeMatchScoreUseCase } from './compute-match-score.use-case';
 import { AiServiceError } from '@infra/ai/ai.errors';
 
 describe('RecomputeUserMatchesUseCase', () => {
+  // Stands in for ActiveResumeService — the rule for WHICH résumé is tested in its own
+  // spec; here it only has to resolve to one so the parsed-data lookup is reached.
+  const activeResume = (has = true) =>
+    ({ findActiveResumeId: jest.fn().mockResolvedValue(has ? 'r1' : null) }) as never;
+
   describe('execute() scoring (characterized; retriever stubbed)', () => {
     let prisma: any;
     let aiClient: any;
@@ -24,9 +29,9 @@ describe('RecomputeUserMatchesUseCase', () => {
           }),
         },
         experience: { count: jest.fn().mockResolvedValue(0) },
-        resume: {
-          findFirst: jest.fn().mockResolvedValue({
-            parsedData: { experiences: JSON.stringify([{ title: 'x' }, { title: 'y' }]) },
+        parsedResumeData: {
+          findUnique: jest.fn().mockResolvedValue({
+            experiences: JSON.stringify([{ title: 'x' }, { title: 'y' }]),
           }),
         },
         job: {
@@ -41,7 +46,7 @@ describe('RecomputeUserMatchesUseCase', () => {
         industry: { findMany: jest.fn().mockResolvedValue([]) },
         recommendation: { upsert: jest.fn().mockResolvedValue(undefined) },
       };
-      service = new RecomputeUserMatchesUseCase(prisma as never, new ComputeMatchScoreUseCase(), aiClient as never);
+      service = new RecomputeUserMatchesUseCase(prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, activeResume());
       // Isolate scoring from the retriever internals.
       jest.spyOn(service, 'retrieveRankedJobs').mockResolvedValue([
         { id: 'jobA', cosine_sim: 0.8 },
@@ -82,14 +87,14 @@ describe('RecomputeUserMatchesUseCase', () => {
           .mockResolvedValueOnce([{ id: 'c' }, { id: 'b' }])
           .mockResolvedValueOnce([{ id: 'c', cosine_sim: 0.3 }]),
         profile: { findUnique: jest.fn().mockResolvedValue({ headline: 'engineer' }) },
-        resume: {
-          findFirst: jest.fn().mockResolvedValue({
-            parsedData: { skills: JSON.stringify(['node']), experiences: null },
+        parsedResumeData: {
+          findUnique: jest.fn().mockResolvedValue({
+            skills: JSON.stringify(['node']), experiences: null,
           }),
         },
       };
       const aiClient = { rerank: jest.fn() };
-      const service = new RecomputeUserMatchesUseCase(prisma as never, new ComputeMatchScoreUseCase(), aiClient as never);
+      const service = new RecomputeUserMatchesUseCase(prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, activeResume());
 
       // rerank:false is explicit — this test is about RRF fusion, and the reranker is
       // ON by default in production, which would otherwise reorder the result.
@@ -111,10 +116,10 @@ describe('RecomputeUserMatchesUseCase', () => {
           { id: 'b', cosine_sim: 0.7 },
         ]),
         profile: { findUnique: jest.fn().mockResolvedValue({ headline: null }) },
-        resume: { findFirst: jest.fn().mockResolvedValue(null) },
+        parsedResumeData: { findUnique: jest.fn().mockResolvedValue(null) },
       };
       const aiClient = { rerank: jest.fn() };
-      const service = new RecomputeUserMatchesUseCase(prisma as never, new ComputeMatchScoreUseCase(), aiClient as never);
+      const service = new RecomputeUserMatchesUseCase(prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, activeResume());
 
       const result = await service.retrieveRankedJobs('u1', 10);
 
@@ -137,7 +142,7 @@ describe('RecomputeUserMatchesUseCase', () => {
           ])
           .mockResolvedValueOnce([]), // sparse (BM25) — none
         profile: { findUnique: jest.fn().mockResolvedValue({ headline: 'engineer' }) },
-        resume: { findFirst: jest.fn().mockResolvedValue(null) },
+        parsedResumeData: { findUnique: jest.fn().mockResolvedValue(null) },
         job: {
           findMany: jest.fn().mockResolvedValue([
             { id: 'a', title: 'A', description: '', company: { name: 'X' } },
@@ -152,7 +157,7 @@ describe('RecomputeUserMatchesUseCase', () => {
           scores: [{ id: 'a', score: 0.5 }, { id: 'b', score: 0.1 }, { id: 'c', score: 0.9 }],
         }),
       };
-      const service = new RecomputeUserMatchesUseCase(prisma as never, new ComputeMatchScoreUseCase(), aiClient as never);
+      const service = new RecomputeUserMatchesUseCase(prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, activeResume());
 
       const result = await service.retrieveRankedJobs('u1', 3, { rerank: true });
 
@@ -177,7 +182,7 @@ describe('RecomputeUserMatchesUseCase', () => {
           ])
           .mockResolvedValueOnce([]),
         profile: { findUnique: jest.fn().mockResolvedValue({ headline: 'engineer' }) },
-        resume: { findFirst: jest.fn().mockResolvedValue(null) },
+        parsedResumeData: { findUnique: jest.fn().mockResolvedValue(null) },
         job: {
           findMany: jest.fn().mockResolvedValue([
             { id: 'a', title: 'A', description: '', company: { name: 'X' } },
@@ -200,7 +205,7 @@ describe('RecomputeUserMatchesUseCase', () => {
     it('reranks by default when no explicit option is given (config ON)', async () => {
       const { prisma, aiClient } = rerankFixtures();
       const service = new RecomputeUserMatchesUseCase(
-        prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, withConfig(true),
+        prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, activeResume(), withConfig(true),
       );
 
       const result = await service.retrieveRankedJobs('u1', 3);
@@ -212,7 +217,7 @@ describe('RecomputeUserMatchesUseCase', () => {
     it('skips the reranker when the config flag is off', async () => {
       const { prisma, aiClient } = rerankFixtures();
       const service = new RecomputeUserMatchesUseCase(
-        prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, withConfig(false),
+        prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, activeResume(), withConfig(false),
       );
 
       const result = await service.retrieveRankedJobs('u1', 3);
@@ -226,7 +231,7 @@ describe('RecomputeUserMatchesUseCase', () => {
       // cannot silently inherit whatever the deployment has enabled.
       const { prisma, aiClient } = rerankFixtures();
       const service = new RecomputeUserMatchesUseCase(
-        prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, withConfig(true),
+        prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, activeResume(), withConfig(true),
       );
 
       const result = await service.retrieveRankedJobs('u1', 3, { rerank: false });
@@ -244,7 +249,7 @@ describe('RecomputeUserMatchesUseCase', () => {
         ),
       };
       const service = new RecomputeUserMatchesUseCase(
-        prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, withConfig(true),
+        prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, activeResume(), withConfig(true),
       );
 
       const result = await service.retrieveRankedJobs('u1', 3);

@@ -5,6 +5,7 @@ import { AiServiceError } from '@infra/ai/ai.errors';
 describe('GenerationService', () => {
   let prisma: any;
   let aiClient: any;
+  let activeResume: any;
   let service: GenerationService;
 
   const application = {
@@ -26,10 +27,11 @@ describe('GenerationService', () => {
       parsedResumeData: {
         findUnique: jest.fn().mockResolvedValue({ summary: 'Seasoned backend dev.' }),
       },
-      resume: { findFirst: jest.fn().mockResolvedValue(null) },
     };
     aiClient = { generateCoverLetter: jest.fn(), generateInterview: jest.fn() };
-    service = new GenerationService(prisma, aiClient);
+    // No default/active résumé: these tests exercise the explicit-resumeId path.
+    activeResume = { findActiveResumeId: jest.fn().mockResolvedValue(null) };
+    service = new GenerationService(prisma, aiClient, activeResume);
   });
 
   describe('coverLetterForApplication', () => {

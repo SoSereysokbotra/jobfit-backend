@@ -16,6 +16,7 @@
 
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@infra/prisma/prisma.service';
+import { ActiveResumeService } from '../../../resume/application/services/active-resume.service';
 import { ComputeMatchScoreUseCase } from '../use-cases/compute-match-score.use-case';
 import { RecomputeUserMatchesUseCase } from '../use-cases/recompute-user-matches.use-case';
 import { CandidateContext, JobContext, SubScores } from '../../domain/scoring/types';
@@ -40,6 +41,7 @@ export class JobMatchService {
     private readonly prisma: PrismaService,
     private readonly compute: ComputeMatchScoreUseCase,
     private readonly recompute: RecomputeUserMatchesUseCase,
+    private readonly activeResume: ActiveResumeService,
   ) {}
 
   /** Null when the user has no profile — there is nothing to match against. */
@@ -148,17 +150,18 @@ export class JobMatchService {
     return reasons;
   }
 
-  /** Structured experience rows if present, else the count from the parsed résumé. */
+  /** Structured experience rows if present, else the count from the active parsed résumé. */
   private async experienceCount(userId: string): Promise<number> {
     const structured = await this.prisma.experience.count({ where: { userId } });
     if (structured > 0) return structured;
 
-    const resume = await this.prisma.resume.findFirst({
-      where: { userId, parsingStatus: 'SUCCESS' },
-      orderBy: { updatedAt: 'desc' },
-      select: { parsedData: { select: { experiences: true } } },
+    const resumeId = await this.activeResume.findActiveResumeId(userId);
+    if (!resumeId) return 0;
+    const parsed = await this.prisma.parsedResumeData.findUnique({
+      where: { resumeId },
+      select: { experiences: true },
     });
-    const json = resume?.parsedData?.experiences;
+    const json = parsed?.experiences;
     if (!json) return 0;
     try {
       const parsed: unknown = JSON.parse(json);

@@ -4,7 +4,15 @@
 // adapter fetches + normalizes to NormalizedJob; the service persists them and
 // returns an IngestionResult summary.
 
-export type JobSource = 'THEMUSE';
+import { $Enums } from '@prisma/client';
+
+/**
+ * Boards we ingest from.
+ *
+ * A union rather than a string so adding a source makes TypeScript point at every
+ * place that has to decide what to do about it.
+ */
+export type JobSource = 'THEMUSE' | 'BONGTHOM' | 'JOBNET';
 
 /** A normalized, source-agnostic job ready to persist. */
 export interface NormalizedJob {
@@ -19,6 +27,38 @@ export interface NormalizedJob {
   remoteType: string;
   /** Apply / landing page on the source. */
   externalUrl: string | null;
+
+  /**
+   * Fields only SOME sources publish. Absent means the source did not say — it must
+   * stay absent all the way to the database, never become a default.
+   *
+   * This is the rule from the employmentType/experienceLevel work: a fabricated value
+   * in a column is indistinguishable from an employer's own answer. `persist` writes
+   * these only when present, which is why they are optional here rather than nullable
+   * with a fallback.
+   */
+  minSalary?: number | null;
+  maxSalary?: number | null;
+  employmentType?: $Enums.EmploymentType | null;
+}
+
+/**
+ * What every board adapter must provide.
+ *
+ * Before this, `IngestionService` had a method per source (`ingestFromTheMuse`) and
+ * named its one adapter in the constructor. Three sources would have meant three
+ * near-identical methods and a service that has to be edited for every new board.
+ */
+export interface JobBoardSource {
+  readonly source: JobSource;
+  /**
+   * Up to `limit` postings, newest first.
+   *
+   * `limit` is a CEILING, not a target: a source that has fewer returns fewer, and one
+   * whose upstream is paginated stops once it has enough. Callers must not assume they
+   * got exactly `limit`.
+   */
+  fetchJobs(limit: number): Promise<NormalizedJob[]>;
 }
 
 /** A stored, externally-ingested job (for the employer "Imported Jobs" view). */

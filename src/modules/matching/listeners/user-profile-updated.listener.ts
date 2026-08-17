@@ -18,9 +18,13 @@ export class UserProfileUpdatedListener {
 
   constructor(private readonly embeddings: MatchingEmbeddingService) {}
 
+  // ResumeDefaultChangedEvent also carries the user id: switching default CVs changes
+  // which résumé the vector is built from, so it needs the same rebuild. Without it the
+  // user picks a different CV, nothing moves, and the setting looks inert.
   @OnEvent('ProfileCreatedEvent')
   @OnEvent('ProfileUpdatedEvent')
   @OnEvent('PreferencesUpdatedEvent')
+  @OnEvent('ResumeDefaultChangedEvent')
   async onProfileChange(event: AggregateEvent): Promise<void> {
     await this.reembed(() => this.embeddings.embedCandidate(event.aggregateId), event.aggregateId);
   }

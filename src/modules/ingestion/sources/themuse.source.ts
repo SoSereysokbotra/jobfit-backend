@@ -6,13 +6,15 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { NormalizedJob } from '../ingestion.types';
+import { JobBoardSource, JobSource, NormalizedJob } from '../ingestion.types';
 // TheMuse `contents` is HTML. Flattening it while KEEPING paragraph and bullet
 // boundaries is the whole difference between a readable posting and a wall of text.
 import { htmlToText } from '../html-to-text';
 
 const THEMUSE_URL = 'https://www.themuse.com/api/public/jobs';
 const FETCH_TIMEOUT_MS = 15_000;
+/** TheMuse serves 20 results per page; used to turn a job limit into a page count. */
+const PAGE_SIZE = 20;
 
 /** The subset of TheMuse's response we rely on. */
 interface TheMuseJob {
@@ -29,10 +31,20 @@ interface TheMuseResponse {
 }
 
 @Injectable()
-export class TheMuseSource {
+export class TheMuseSource implements JobBoardSource {
   private readonly logger = new Logger(TheMuseSource.name);
+  readonly source: JobSource = 'THEMUSE';
 
   constructor(private readonly config: ConfigService) {}
+
+  /**
+   * JobBoardSource entry point. TheMuse paginates, so a job limit becomes a page count;
+   * `fetch(pages)` stays public because the existing route is expressed in pages.
+   */
+  async fetchJobs(limit: number): Promise<NormalizedJob[]> {
+    const jobs = await this.fetch(Math.max(1, Math.ceil(limit / PAGE_SIZE)));
+    return jobs.slice(0, limit);
+  }
 
   /** Fetch + normalize `pages` pages (1-indexed) from TheMuse. */
   async fetch(pages: number): Promise<NormalizedJob[]> {
