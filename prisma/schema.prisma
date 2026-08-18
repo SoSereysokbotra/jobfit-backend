@@ -3,8 +3,11 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  // Runtime queries go through the transaction-mode pooler (6543).
+  url       = env("DATABASE_URL")
+  // Migrations and introspection need a session-mode connection (5432).
+  directUrl = env("DIRECT_URL")
 }
 
 model User {

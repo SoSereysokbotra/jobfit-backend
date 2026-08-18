@@ -119,3 +119,35 @@ left alone deliberately — dropping a table is a separate, explicit decision.
   already carry a score for jobs we hold, so a card with a `jobId` could show one — but a
   hand-entered card never can, and a ring that is present for some cards and absent for
   others needs a design answer first.
+
+---
+
+## 8. Review note — 2026-08-18
+
+From [`MENTOR_REVIEW_2026-08-18.md`](./MENTOR_REVIEW_2026-08-18.md).
+
+### The §2 argument was never back-ported to `SavedJob`
+
+§2 ("The snapshot is the point") is the best-reasoned decision in the codebase, and it
+applies word for word to a **saved** job — which today is `onDelete: Cascade` with no
+snapshot columns at all. Delete the posting and the user's bookmark vanishes without a
+trace, on a corpus ingested from boards that delisted 9 of 43 postings during one run.
+
+This leaves three tables serving one user intent: `SavedJob` (internal `jobId`, dies with
+the job), `saved_external_jobs` (extension, snapshot, survives) and
+`TrackedJob(stage=SAVED)` (snapshot, survives). Worth either giving `SavedJob` the same
+treatment, or folding it into the tracker's SAVED column — which is arguably what it is.
+
+### §6 note on `saved_external_jobs` is branch-local
+
+The claim that no code uses it is true on `feat/external-job-tracker` and **false on
+`origin/main`**, where the controller exists and the extension calls it with its flag set
+to `"real"`. The two branches are disjoint: neither can serve both clients. Merge before
+deploying either. Details in the review, finding #4.
+
+### §7 "no match score on the card" — the design answer got harder
+
+The open design question (a ring for cards with a `jobId`, nothing for hand-entered ones) now
+has a second constraint: `Recommendation.score` is a **write-once cache** that is never
+invalidated (review #6), so a score shown on a card can be arbitrarily old. If a ring ships,
+it needs a `computedAt` next to it — or it will assert freshness the data does not have.

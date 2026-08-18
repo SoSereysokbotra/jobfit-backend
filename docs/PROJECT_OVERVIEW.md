@@ -152,3 +152,28 @@ Tests green: **backend 156/156 jest + `tsc` clean; AI service 32/32 pytest**. Ru
 
 *One sentence to keep: **retrieval is the quality-and-cost lever; the eval harness is the credibility;
 the honest negative on generation is the proof you measured instead of guessed.***
+
+---
+
+## 11. Review — 2026-08-18
+
+An external review read every `.md` in all four repos and verified each claim against the
+code, the schema and git. Findings, with severity, evidence and a suggested fix for each:
+**[`MENTOR_REVIEW_2026-08-18.md`](./MENTOR_REVIEW_2026-08-18.md)**.
+
+Three of them change how §4's "everything buildable on this laptop is done" should be read:
+
+1. **No email is ever sent** (`MailerService` is a `console.log` stub) while login refuses
+   unverified accounts — so **no new user can sign in on the deployed instance**. Every
+   claimed user journey assumes a population that cannot currently be created.
+2. **`recommendations` is never invalidated** (no scheduler; recompute only when the row
+   count is zero). The reranker's +20% MRR, the 305 Cambodian jobs and the default-résumé
+   fix all reach **new** users only. `GET /recommendations/scout` reads the same cache and
+   therefore cannot return a newly-ingested job at all.
+3. **`PATCH /users/:id/subscription` has no role or ownership check**, so the "enforced
+   server-side" paywall is a `PATCH` away — and `DELETE /users/:id` is open the same way,
+   with no audit row.
+
+The review's own summary of what it did **not** find is worth reading too: the negative
+results, the `TrackedJob` domain call, endpoint-level `sourceType` enforcement and
+`semantic:false ⇒ overall:null` all held up under scrutiny.
