@@ -40,8 +40,16 @@ export class MatchingController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'New high-match jobs for the extension’s passive background scout: the ' +
-      'user’s recommendations at/above minScore, optionally newer than `since`.',
+      'New high-match jobs for the extension’s passive background scout: jobs published ' +
+      'since `since` (default: the last 7 days), scored live for this user and returned ' +
+      'at/above minScore.',
+    description:
+      'Scored on demand rather than read from the recommendations cache. Reading the ' +
+      'cache made the endpoint structurally unable to return a NEW job — a cached row ' +
+      'only exists if a recompute ran, and nothing recomputes when a job is ingested — ' +
+      'so it returned an empty list indefinitely. Scoring uses the same deterministic ' +
+      'path that writes the cache, so a score here and on /recommendations agree. ' +
+      'Dismissed jobs are excluded.',
   })
   @ApiResponse({ status: 200, type: [ScoutMatchDto] })
   async scout(

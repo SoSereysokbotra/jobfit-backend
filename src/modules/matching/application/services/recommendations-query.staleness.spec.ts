@@ -102,15 +102,6 @@ describe('RecommendationsQueryService.getForUser — when it recomputes', () => 
     );
   });
 
-  it('excludes dismissed rows from the extension scout too', async () => {
-    prisma.recommendation.findMany.mockResolvedValue([]);
-
-    await service.getScout('u1', 70);
-
-    expect(prisma.recommendation.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ userId: 'u1', dismissedAt: null }),
-      }),
-    );
-  });
+  // getScout's own dismissal handling moved with it when it stopped reading this cache
+  // (MENTOR_REVIEW_2026-08-18 §7) — covered in recommendations-query.scout.spec.ts.
 });

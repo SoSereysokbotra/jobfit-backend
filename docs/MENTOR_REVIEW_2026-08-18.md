@@ -25,7 +25,7 @@ git** — not against the docs. Every finding cites a file, a line, or a git obj
 | 4 | No single backend branch serves both the web app and the extension | ✅ Fixed 2026-08-20 |
 | 5 | Screening ignores `application.resumeId` — the employer judges a CV the candidate did not submit | ✅ Fixed 2026-08-20 (match score: stated limit) |
 | 6 | `recommendations` is a write-once cache: changing your CV never moves your matches | ✅ Fixed 2026-08-20 (migration pending) |
-| 7 | `GET /recommendations/scout` structurally cannot return a new job | 🟠 Correctness |
+| 7 | `GET /recommendations/scout` structurally cannot return a new job | ✅ Fixed 2026-08-20 |
 | 8 | `PRIVACY.md` states something the code no longer does, and omits four hosts | 🟠 Legal / store review |
 | 9 | Employers cannot see a candidate's résumé anywhere in the API | 🟠 Missing requirement |
 | 10 | The paywall gates features no payment path can unlock, and the extension serves the same AI ungated | 🟠 Contradiction |
@@ -706,6 +706,55 @@ is worth more than either implementation.
 **The question you'll be asked.**
 > *"Your scout tells me about new matching jobs every 3 hours. Trace the path a job takes from
 > `ingest.ts` to my notification. Where does it stop?"*
+
+### ✅ Resolved 2026-08-20 — option (a), with the tripwire for when (b) becomes right
+
+Confirmed exactly as described. **The window is now inverted:** instead of taking cached
+recommendations and filtering them by `job.createdAt`, `getScout` takes the jobs that are
+actually new and scores those. A job with no cached row — which is every job ingested
+since the user's last recompute — is now reachable.
+
+**Where the path used to stop:** `ingest.ts` → `jobs` row → `JobPublishedEvent` →
+`JobPublishedListener` embeds it → **and there it ended.** Nothing wrote a
+`recommendation` row for that job for any user, and `getScout` read only that table. The
+embedding existed; the row the endpoint queried never did.
+
+**Scoring goes through the same path that writes the cache.** The scoring half of
+`RecomputeUserMatchesUseCase.execute` is extracted into a public `scoreJobs(userId, near)`
+that both callers use, so a scout score and a `/recommendations` score for the same job
+cannot drift. `execute` was refactored to consume it; the characterisation test that pins
+its exact payloads still passes unchanged, which is the evidence the refactor was
+behaviour-preserving.
+
+**Why (a) and not (b), stated in the code.** At current corpus size a scout call scores a
+few hundred rows: one pgvector query plus arithmetic, no LLM. Fan-out on ingest moves that
+cost off the request path and amortises it across users — the right answer once the corpus
+or user base makes per-request scoring expensive — but it needs a queue, a per-user job,
+and a way not to stampede on a large import. `SCOUT_CANDIDATE_CAP = 500` is the tripwire:
+**if it starts truncating real results, live scoring has been outgrown.**
+
+Also handled:
+
+- **Dismissed jobs are excluded.** The cache read filtered them implicitly (via #6);
+  scoring live has to do it explicitly, and does — before scoring, so no number is
+  computed for a job nobody will see.
+- **A missing `since` no longer means "everything ever".** It defaults to a 7-day window.
+  The extension always sends its watermark; this covers a first run or a client that lost
+  it.
+- **No embedding, no score.** `cosineForJobs` drops jobs without embeddings and returns
+  nothing when the user has no profile vector — both correctly yield "no matches" rather
+  than a score computed from a missing input.
+
+**Tests — 15 new.** 11 on `getScout` (led by *"returns a newly ingested job that has NO
+recommendation row"*, which was the whole defect) and 4 on the extracted `scoreJobs`.
+Mutation-verified: pointing scout back at the cache fails 7. Whole suite: 69 files, 783
+tests, green.
+
+**⚠️ Not updated:** the extension's `CONTRACTS.md` P3, which describes this endpoint. That
+repo is not checked out locally. Its wording ("jobs matching the user's profile at/above
+`minScore`, created since `since`") is now *accurate* rather than aspirational, but the
+`since`-omitted default and the dismissal exclusion are new and should be written down
+there.
 
 ---
 

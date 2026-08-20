@@ -279,3 +279,91 @@ describe('RecomputeUserMatchesUseCase', () => {
     });
   });
 });
+
+// ── scoreJobs: the single scoring path (MENTOR_REVIEW_2026-08-18 §7) ──────────
+//
+// Extracted out of execute() so the extension's scout can score jobs that have no cached
+// recommendation row. Both callers must go through here, or a scout score and a
+// /recommendations score for the same job can drift apart.
+describe('RecomputeUserMatchesUseCase.scoreJobs', () => {
+  const buildPrisma = (profile: unknown) => ({
+    profile: { findUnique: jest.fn().mockResolvedValue(profile) },
+    experience: { count: jest.fn().mockResolvedValue(2) },
+    parsedResumeData: { findUnique: jest.fn().mockResolvedValue(null) },
+    industry: { findMany: jest.fn().mockResolvedValue([]) },
+    job: {
+      findMany: jest.fn().mockResolvedValue([
+        {
+          id: 'jobA',
+          title: 'Backend Engineer',
+          remoteType: 'REMOTE',
+          location: 'Phnom Penh',
+          minSalary: null,
+          maxSalary: null,
+          company: { industry: null },
+        },
+      ]),
+    },
+    recommendation: {
+      upsert: jest.fn().mockResolvedValue(undefined),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+  });
+
+  const PROFILE = {
+    city: 'Phnom Penh',
+    country: 'KH',
+    desiredRemoteTypes: ['REMOTE'],
+    minSalary: null,
+    maxSalary: null,
+    desiredIndustries: [],
+  };
+
+  const make = (profile: unknown) => {
+    const prisma = buildPrisma(profile);
+    const activeResumeStub = { findActiveResumeId: jest.fn().mockResolvedValue(null) };
+    return new RecomputeUserMatchesUseCase(
+      prisma as never,
+      new ComputeMatchScoreUseCase(),
+      { rerank: jest.fn() } as never,
+      activeResumeStub as never,
+    );
+  };
+
+  it('scores the jobs it is given, without touching the recommendations cache', async () => {
+    const service = make(PROFILE);
+
+    const scored = await service.scoreJobs('u1', [{ id: 'jobA', cosine_sim: 0.8 }]);
+
+    expect(scored).toHaveLength(1);
+    expect(scored![0]).toMatchObject({
+      jobId: 'jobA',
+      score: expect.any(Number),
+      reasonExplanation: expect.stringContaining('Backend Engineer'),
+    });
+  });
+
+  it('returns null when the user has no profile — nothing to match against', async () => {
+    const service = make(null);
+
+    await expect(service.scoreJobs('u1', [{ id: 'jobA', cosine_sim: 0.8 }])).resolves
+      .toBeNull();
+  });
+
+  it('short-circuits on an empty input rather than querying', async () => {
+    const service = make(PROFILE);
+
+    await expect(service.scoreJobs('u1', [])).resolves.toEqual([]);
+  });
+
+  it('skips an id with no matching job row', async () => {
+    const service = make(PROFILE);
+
+    const scored = await service.scoreJobs('u1', [
+      { id: 'jobA', cosine_sim: 0.8 },
+      { id: 'ghost', cosine_sim: 0.9 },
+    ]);
+
+    expect(scored!.map((s) => s.jobId)).toEqual(['jobA']);
+  });
+});
