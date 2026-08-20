@@ -63,3 +63,54 @@ Status assigned from code evidence as of 2026-07-28.
 JOBS-001 was initially reported as lacking deduplication. **That was wrong** — dedup is
 implemented via `@@unique([source, externalId])` on `Job` plus upsert-by-source in the ingestion
 run, with `lastSeenAt` tracking freshness. Rollback and run-history remain absent.
+
+---
+
+## Review addendum — 2026-08-18
+
+From [`../MENTOR_REVIEW_2026-08-18.md`](../MENTOR_REVIEW_2026-08-18.md). Three corrections
+to how this scorecard reads, and one structural gap in what it covers.
+
+### NOTIF-001 is mis-filed — it is an AUTH outage, not a notifications gap
+
+*"Mailer is a TODO stub — no email is ever sent"* is exact. But the verification code for
+**registration** has no other delivery channel, and `LoginHandler` hard-refuses an
+unverified account (`login.handler.ts:68`). So on the deployed instance **a new user
+registers, receives nothing, and can never log in.** Filed under NOTIF it reads as a missing
+convenience; it is a broken critical path in AUTH-001, and it should be the top line of
+`04-roadmap.md`.
+
+Nothing catches it because every test seeds an already-verified user — no test covers
+register → verify → login end to end.
+
+### AUTH-002 "✅ Done — Guards + roles + AuditLog" overstates authorization
+
+`RolesGuard` returns `true` for any route without `@Roles()` metadata
+(`roles.guard.ts:23-25`). `UserController` carries **no `@Roles()` anywhere**, so for any
+authenticated user:
+
+- `PATCH /users/:id/subscription` → grant yourself PROFESSIONAL (or downgrade anyone else)
+- `DELETE /users/:id` → soft-delete any account, **with no audit row**
+- `GET /users` → list every user
+- `GET /users/email/:email` → `@Public()`, i.e. an **unauthenticated** account-existence
+  oracle returning id, name, role and tier
+- `POST /users` → create a user with `role: ADMIN`
+
+Authentication is default-secure; authorization is not. AUTH-002 should be 🟡 at best.
+
+### The scorecard grades against a document that does not exist
+
+`jobfit-frontend/docs/SRS.md` is **0 bytes**. Every FR id here is a dangling reference. See
+review finding #18 — and note the consequence below.
+
+### The structural gap: there are no employer-side requirements
+
+All 33 FRs are written from the job seeker's perspective. Consequently nothing in this
+scorecard records that **an employer cannot see a candidate's résumé, profile or cover
+letter anywhere in the API** (`grep -rn "resume" src/modules/employer` → nothing). They get
+a name, an email, and an AI screening summary whose own DTO comment notes it *"varied by
+only 4 points"* across candidates from a senior engineer to a graphic designer.
+
+That is an AI screening layer with the human review step removed — and it is invisible here
+because no requirement was ever written for it. Worth adding an `EMPLOYER-00x` block before
+the next audit.

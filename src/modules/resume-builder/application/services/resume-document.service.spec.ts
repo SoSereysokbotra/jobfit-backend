@@ -53,7 +53,7 @@ function table(store: Map<string, Row>, name: string) {
 
   const api = {
     findMany: jest.fn(async (args: Row = {}) => {
-      let rows = [...store.values()].filter((r) => matches(r, args.where));
+      const rows = [...store.values()].filter((r) => matches(r, args.where));
       if (args.orderBy) {
         // Supports both `{ field: 'asc' }` and one level of relation ordering,
         // e.g. `{ skill: { name: 'asc' } }` as used by the skills import.

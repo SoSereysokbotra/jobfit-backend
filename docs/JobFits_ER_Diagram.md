@@ -543,3 +543,36 @@ erDiagram
 
   users ||--o{ subscriptions : "has"
   subscriptions ||--o{ payments : "receives"
+
+%% ─────────────────────────────────────────────────────────────────────────────
+%% ⚠️ STALE — 2026-08-18. This diagram is NOT the data model.
+%%
+%% `prisma/schema.prisma` is the source of truth. Divergences found by review
+%% (see docs/MENTOR_REVIEW_2026-08-18.md, finding #17):
+%%
+%% ROLE vs TIER ARE CONFLATED HERE, AND THE DISTINCTION IS LOAD-BEARING.
+%%   This file:   users.role = USER | PREMIUM | PROFESSIONAL | ADMIN
+%%   Reality:     UserRole         = JOB_SEEKER | EMPLOYER | ADMIN
+%%                SubscriptionTier = FREE | PREMIUM | PROFESSIONAL  (separate column)
+%%
+%% TABLES DOCUMENTED HERE THAT DO NOT EXIST IN schema.prisma:
+%%   salary_data · learning_paths · learning_progress · referrals ·
+%%   interview_tips · interview_questions · notification_preferences ·
+%%   user_settings · faqs · knowledge_base · help_center · job_listings ·
+%%   job_forms · job_form_responses · subscriptions · payments
+%%
+%%   This matters beyond tidiness: jobfit-extension/docs/CONTRACTS.md specifies
+%%   GET /salary as reading "from salary_data aggregate" and GET /learning/gap as
+%%   returning a learningPath object. Both routes were built against tables that
+%%   do not exist and had to silently degrade — while the extension's MOCKS still
+%%   return the rich shape. The mock is more capable than the real endpoint.
+%%
+%% TABLES THAT EXIST BUT ARE MISSING HERE:
+%%   job_seeker_profiles · employer_profiles · parsed_resume_data · offers ·
+%%   offer_messages · application_stage_history · match_scores · match_reports ·
+%%   match_labels · tracked_jobs · saved_external_jobs · resume_documents (+6
+%%   child tables) · resume_templates · industries · system_events · email_events ·
+%%   audit_logs · idempotency_keys · job_skills · skills
+%%
+%% Regenerate from schema.prisma, and mark anything aspirational as PLANNED.
+%% ─────────────────────────────────────────────────────────────────────────────

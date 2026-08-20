@@ -56,6 +56,7 @@ import { PaymentModule } from './modules/payment/payment.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { EmployerModule } from './modules/employer/employer.module';
 import { LearningModule } from './modules/learning/learning.module';
+import { JobTrackerModule } from './modules/job-tracker/job-tracker.module';
 import { MatchReportModule } from './modules/match-report/match-report.module';
 import { SyncModule } from './modules/sync/sync.module';
 import { ResumeBuilderModule } from './modules/resume-builder/resume-builder.module';
@@ -123,6 +124,7 @@ import { AlertingModule } from './modules/alerting/alerting.module';
     AdminModule,
     EmployerModule,
     LearningModule,
+    JobTrackerModule,
     MatchReportModule,
 
     // ── PWA offline mode (Phase 2) — delta sync + bootstrap ──────────────────

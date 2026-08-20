@@ -3,8 +3,11 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  // Runtime queries go through the transaction-mode pooler (6543).
+  url       = env("DATABASE_URL")
+  // Migrations and introspection need a session-mode connection (5432).
+  directUrl = env("DIRECT_URL")
 }
 
 enum UserRole {
@@ -174,6 +177,7 @@ model User {
   matchLabels     MatchLabel[]
   matchReports    MatchReport[]
   savedExternalJobs SavedExternalJob[]
+  trackedJobs       TrackedJob[]
 
   // ── Admin module (Admin MVP) ───────────────────────────────────────────────
   // Admin actions this user performed / system alerts this admin acknowledged.
@@ -534,6 +538,7 @@ model Job {
   savedBy         SavedJob[]
   recommendations Recommendation[]
   matchLabels     MatchLabel[]
+  trackedJobs     TrackedJob[]
 
   // Dedup key for ingested jobs. NULLs are distinct in Postgres, so direct
   // employer postings (source = externalId = NULL) never collide here.
@@ -1383,4 +1388,86 @@ model ResumeDocumentProject {
 
   @@index([resumeDocumentId, order])
   @@map("resume_document_projects")
+}
+
+// ── Job Tracker ────────────────────────────────────────────────────────────────
+
+/// Where a tracked job sits on the user's own board.
+///
+/// DELIBERATELY NOT `ApplicationStatus`. That enum records what an EMPLOYER decided, and
+/// the lifecycle enforces it: `EMPLOYER_SETTABLE_STATUSES` is SCREENING/INTERVIEW/OFFER/
+/// REJECTED and a candidate asserting one is refused by the chokepoint. A drag-and-drop
+/// board is the opposite — the user moves their own card freely, and what it means is
+/// "this is where I think I am", not "this is what the employer recorded".
+///
+/// Reusing ApplicationStatus would either break the tracker (every drag refused) or break
+/// the pipeline (a candidate writing INTERVIEW into an employer's board). Same lesson as
+/// ARCHIVED, which was a shared status until one party's housekeeping started overwriting
+/// the other party's record.
+enum TrackedJobStage {
+  SAVED
+  APPLIED
+  INTERVIEW
+  OFFER
+  REJECTED
+}
+
+/// A job the user is tracking themselves, on the Job Tracker board.
+///
+/// WHY THIS IS NOT AN `Application`. Applications are for jobs applied to INSIDE JobFits:
+/// an employer receives them, drives the status, and the server REFUSES an in-app
+/// application to an EXTERNAL job because it would go nowhere. Tracked jobs are the other
+/// half of a real job hunt — postings applied to on bongthom, jobnet, LinkedIn or by
+/// email, where no employer exists here to report anything back. The user is the only
+/// source of truth, so the user owns the stage.
+///
+/// THE SNAPSHOT IS THE POINT. `title`/`companyName`/`url` are copied, not read through
+/// `jobId`. A tracked card must survive the posting being taken down, re-ingested, or
+/// never having been in our database at all (saved from the extension, or typed in by
+/// hand). `jobId` is a convenience link when we happen to know the posting, never the
+/// source of the card's content.
+model TrackedJob {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Set when the card came from a posting we hold. NULL for anything typed in or saved
+  /// from elsewhere. onDelete: SetNull — losing the posting must not lose the card.
+  jobId String?
+  job   Job?    @relation(fields: [jobId], references: [id], onDelete: SetNull)
+
+  /// Snapshot of what the user is tracking. Never re-read from `job`.
+  title       String
+  companyName String
+  url         String?
+  location    String?
+
+  stage TrackedJobStage @default(SAVED)
+
+  /// Order within a column. Drag-and-drop reorders inside a stage as well as between
+  /// stages, so position is per (user, stage) and is rewritten on every move.
+  position Int @default(0)
+
+  /// The user's own notes about this hunt. Optional everywhere — the board is useful
+  /// before any of it is filled in.
+  minSalary Int?
+  maxSalary Int?
+  notes     String?
+
+  /// When the user says they applied. Not derived from `stage`: someone can drag a card
+  /// straight to INTERVIEW for a job they applied to weeks ago outside the product.
+  appliedAt  DateTime?
+  /// Hidden from the board without being deleted — the "Archived" view in the UI.
+  archivedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// One card per known posting per user. NULLs are distinct in Postgres, so any number
+  /// of hand-entered cards coexist — the same trick Job uses for (source, externalId).
+  @@unique([userId, jobId])
+  /// The board query is always "this user's, by stage, in order".
+  @@index([userId, stage, position])
+  @@index([userId, archivedAt])
+  @@map("tracked_jobs")
 }
