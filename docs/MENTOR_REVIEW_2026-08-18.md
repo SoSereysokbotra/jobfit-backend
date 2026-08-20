@@ -20,7 +20,7 @@ git** — not against the docs. Every finding cites a file, a line, or a git obj
 | # | Finding | Severity |
 |---|---|---|
 | 1 | No email is ever sent, but login requires a verified email → **no new user can sign in** | ✅ Fixed 2026-08-20 |
-| 2 | `PATCH /users/:id/subscription` has no role or ownership check → free Premium; any user can retier or delete any other user | 🔴 Security |
+| 2 | `PATCH /users/:id/subscription` has no role or ownership check → free Premium; any user can retier or delete any other user | ✅ Fixed 2026-08-20 |
 | 3 | `GET /users/email/:email` is `@Public()`; `GET /users` lists everyone; `POST /users` accepts `role: ADMIN` | 🔴 Security |
 | 4 | No single backend branch serves both the web app and the extension | 🔴 Release |
 | 5 | Screening ignores `application.resumeId` — the employer judges a CV the candidate did not submit | 🟠 The mentor's question, one layer down |
@@ -159,6 +159,54 @@ routes are a duplicate surface that arguably should not exist.
 > *"You said the paywall is enforced server-side. Show me the line that stops me calling
 > `PATCH /users/<my id>/subscription` with `PROFESSIONAL`."*
 > And: *"Your global guard is 'secure by default'. Default-secure against what, exactly?"*
+
+### ✅ Resolved 2026-08-20
+
+Both holes were real and reproduced. Blast radius for the fix was zero: the frontend calls
+only `/admin/users/*` — nothing anywhere consumes `UserController`'s write routes.
+
+**The answer to "default-secure against what":** authentication only. `JwtAuthGuard`
+(APP_GUARD) demands a token; `RolesGuard` (APP_GUARD) allows any route carrying no
+`@Roles()`. So the default is *authenticated*, never *authorized*, and every route must
+state its own authorization. That distinction is now written at the top of
+[user.controller.ts](../src/modules/user/presentation/controllers/user.controller.ts) where
+the next person adding a route will read it. We left `RolesGuard` itself alone — flipping
+it to deny-by-default would 403 every unannotated route in the app.
+
+What changed:
+
+| Route | Before | After |
+|---|---|---|
+| `POST /users` | any authenticated caller | `@Roles('ADMIN')` |
+| `GET /users` | any authenticated caller | `@Roles('ADMIN')` |
+| `PATCH /users/:id/subscription` | any authenticated caller | `@Roles('ADMIN')` |
+| `DELETE /users/:id` | any authenticated caller | **removed** |
+
+- **The delete is gone, not gated.** `@Roles('ADMIN')` on it would have left *two* admin
+  delete paths, one of which writes no audit row — which is the defect `HANDOFF_2026-08-17`
+  §6 blames for the vanished user and its 50 eval pairs. Deletion is now reachable only via
+  `DELETE /admin/users/:id`, which records `USER_ACCOUNT_DELETED`. The now-dead
+  `UserService.deleteUser` was removed too, so the path cannot be re-exposed by one
+  `@Post()`.
+- `:id` on the subscription route is now `ParseUUIDPipe`, matching the admin controller.
+- **`profile.controller.ts` was already correct** — its `:userId` writes all call
+  `assertOwner()`. `UserController` was the outlier, not the norm.
+
+**Tests.** 14 specs in
+[user.controller.authz.spec.ts](../src/modules/user/presentation/controllers/user.controller.authz.spec.ts)
+drive the *real* `RolesGuard` against the *real* decorator metadata, including the original
+exploit (a `JOB_SEEKER` retiering their own id) and an assertion that no deletion route
+exists. Verified by mutation: deleting a single `@Roles('ADMIN')` fails 4 of them. A test
+against the controller *body* would have passed either way — the whole defect was that the
+body never got to decide.
+
+**Follow-ups this exposes (not done here):**
+1. `PATCH /users/:id/subscription` still writes **no audit row**. `AuditActionType` has no
+   `USER_SUBSCRIPTION_CHANGED` member, so adding one needs a Prisma migration.
+2. The payment module is an empty scaffold (`payment.controller.ts` is 4 lines). This admin
+   route is therefore the *only* way a tier can change — finding #10, confirmed.
+3. `GET /users/:id` and the `@Public()` `GET /users/email/:email` are still open. Those are
+   finding #3, deliberately untouched here.
 
 ---
 
