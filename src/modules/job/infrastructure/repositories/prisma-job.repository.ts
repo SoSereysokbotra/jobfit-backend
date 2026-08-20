@@ -56,6 +56,10 @@ export class PrismaJobRepository implements IJobRepository {
         location: job.location,
         minSalary: salary?.min ?? null,
         maxSalary: salary?.max ?? null,
+        // Currency falls back to the column default rather than to a literal here, so
+        // there is exactly one place that decides what "unspecified currency" means.
+        ...(salary?.currency ? { salaryCurrency: salary.currency } : {}),
+        salaryPeriod: salary?.period ?? null,
         responsibilities: job.responsibilities,
         requirements: job.requirements,
         benefits: job.benefits,
@@ -74,6 +78,8 @@ export class PrismaJobRepository implements IJobRepository {
         location: job.location,
         minSalary: salary?.min ?? null,
         maxSalary: salary?.max ?? null,
+        ...(salary?.currency ? { salaryCurrency: salary.currency } : {}),
+        salaryPeriod: salary?.period ?? null,
         responsibilities: job.responsibilities,
         requirements: job.requirements,
         benefits: job.benefits,
@@ -98,7 +104,12 @@ export class PrismaJobRepository implements IJobRepository {
   private toDomain(row: PrismaJobWithSkills): Job {
     const salaryRange =
       row.minSalary !== null && row.maxSalary !== null
-        ? SalaryRange.create(row.minSalary, row.maxSalary).value
+        ? SalaryRange.create(
+            row.minSalary,
+            row.maxSalary,
+            row.salaryCurrency,
+            row.salaryPeriod ?? undefined,
+          ).value
         : undefined;
 
     return Job.create(

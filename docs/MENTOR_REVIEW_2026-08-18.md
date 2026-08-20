@@ -30,7 +30,7 @@ git** — not against the docs. Every finding cites a file, a line, or a git obj
 | 9 | Employers cannot see a candidate's résumé anywhere in the API | ✅ Fixed 2026-08-20 |
 | 10 | The paywall gates features no payment path can unlock, and the extension serves the same AI ungated | ✅ Fixed 2026-08-20 (payment module still absent, by decision) |
 | 11 | No rate limit on any AI/GPU route | ✅ Fixed 2026-08-20 |
-| 12 | `formatSalaryRange` fabricates currency and magnitude (`$500K` for a $500 job) | 🟠 Honesty |
+| 12 | `formatSalaryRange` fabricates currency and magnitude (`$500K` for a $500 job) | ✅ Fixed 2026-08-20 |
 | 13 | The displayed match **percentage** has never been calibrated — the defect that got `fitScore` rejected | 🟡 Evidence |
 | 14 | Soft-deleted users can still log in, and can never re-register | 🟡 Edge case |
 | 15 | Two parallel match tables (`MatchScore` vs `Recommendation`) | 🟡 Design |
@@ -1185,6 +1185,90 @@ Until the column exists, print the raw number with no unit rather than asserting
 
 **The question you'll be asked.**
 > *"Your users are in Cambodia. This job pays $500K a year?"*
+
+### ✅ Resolved 2026-08-20 — the diagnosis was half right, and the missing half was worse
+
+The finding is correct that the currency and the magnitude were fabricated. Two of its
+specifics did not survive checking, and what replaced them is a bigger bug.
+
+**The `$500K` example does not occur.** `job.mappers.ts` ran every amount through
+`toSalaryK`, which divided by 1000 — so the API's `140000` became `140` and rendered
+`$140K`, correctly. The K suffix and the division cancelled out.
+
+**What that division actually did is destroy the Cambodian range.** `toSalaryK` is
+`Math.round(amount / 1000)`. A $300/month Phnom Penh salary became **`0`**, and a $500
+one became `1`. So the product's target market could not have its pay displayed at all:
+Low monthly figures either vanished into "$0K" — indistinguishable from *no salary stated*
+— or were inflated 2× by rounding. The review's version of the bug was cosmetic on a
+corpus we do not have; the real one silently deleted data on the corpus we do.
+
+**The null case is the dominant one, and the numbers check out.** Queried at
+2026-08-20: **19 of 367 jobs carry a salary, 348 do not.** `toSalaryK(null)` returned
+`0`, so 95% of every job card, comparison table and recommendation rendered
+**`$0K – $0K`**. That is the single most-shown wrong fact in the product.
+
+#### Backend — the columns the review asked for
+
+Migration
+[`20260820160000_job_salary_currency_and_period`](../prisma/migrations/20260820160000_job_salary_currency_and_period/migration.sql)
+adds `jobs.salaryCurrency` (default `USD`, matching `Profile`) and `jobs.salaryPeriod`
+(new `SalaryPeriod` enum).
+
+`salaryPeriod` is **nullable with no default**, deliberately. Defaulting it to ANNUAL
+would be this exact finding committed one layer down: 500-per-month and 500-per-year are
+the same integer, and the ingestion cannot currently tell which it has. Null means
+unknown, and the DTO documents that clients must not read it as annual.
+
+The back-fill is guarded rather than blanket: `ANNUAL` only where `minSalary >= 10000`.
+Every existing salaried row is INTERNAL, created through the employer form, and the
+smallest is 24,000 — no reading of 24,000 is hourly or monthly, so ANNUAL is a deduction.
+Anything below the guard stays NULL, because it could genuinely be monthly Cambodian pay.
+
+`SalaryRange` carries `period`, `SalaryRangeResponseDto` emits it, and `CreateJobDto`
+accepts `salaryCurrency` + `salaryPeriod` so an employer can state both.
+
+#### Frontend — the formatter now refuses to guess
+
+| Case | Before | After |
+|---|---|---|
+| No salary (348/367) | `$0K – $0K` | renders nothing (`null`) |
+| NY engineer `140000–185000` | `$140K – $185K` | `$140K – $185K/yr` |
+| PP monthly `300–500` | `$0K – $1K` | `$300 – $500/mo` |
+| Riel `1200000–2000000` | `$1200K – $2000K` | `KHR 1.2M – KHR 2M/mo` |
+| Period unknown | `…/yr` implied by "K" | no suffix at all |
+
+- **`formatSalaryRange` returns `string | null`**, and call sites drop the whole element
+  — icon included. Returning `"—"` would have left every caller string-comparing to find
+  out, and a lone `$` icon with no number is its own small lie.
+- **`toSalaryK` is deleted**, not just unused. A lossy helper left lying around is an
+  invitation.
+- Sorting by salary puts unknowns **last** rather than scoring them 0; an explicit salary
+  filter **excludes** them, because a job that states no pay cannot be shown to clear a
+  bar; and the comparison table gives them no midpoint, so an unpriced job can no longer
+  "lose" on salary.
+
+#### A precision bug introduced and caught during the fix
+
+The first version used `notation: "compact"` with `maximumFractionDigits: 0`, which
+renders 1,200,000 riel as **`KHR 1M`** — a 20% error, in the function whose entire purpose
+is to stop confident wrong numbers. Caught by running the formatter over the real rows
+rather than trusting it. Now `maximumFractionDigits: 1`, so it reads `1.2M` while 140,000
+still reads `140K`.
+
+**Tests — 26 new.** 11 on `SalaryRange` and 4 on `JobMapper` (backend), 15 on the
+formatter (frontend), each case drawn from a real row rather than invented. Backend: 76
+files, 890 tests, green. Frontend: 52 tests, green; `tsc` clean apart from two
+pre-existing errors in `employer/settings` and `profile.mappers`, neither touched here.
+
+**Two things this does NOT fix, stated rather than left implied:**
+
+1. **Nothing populates the new columns for ingested jobs.** All 305 Cambodian postings
+   still carry no salary at all, so the currency/period work is groundwork — the honest
+   display is live today, the richer data is not. Extracting pay from posting text is a
+   separate job.
+2. **`TrackedJob` and `Profile` keep their own salary columns** with the same ambiguity.
+   `Profile.salaryCurrency` exists; `Profile` has no period, and the onboarding slider
+   still speaks in `$K/year`.
 
 ---
 

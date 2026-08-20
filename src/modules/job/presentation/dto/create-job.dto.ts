@@ -1,5 +1,23 @@
-import { IsString, IsNotEmpty, IsOptional, IsEnum, IsInt, Min, IsArray } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsEnum,
+  IsInt,
+  Min,
+  IsArray,
+  Length,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+/** How often the salary figures are paid. See SalaryPeriodDto usage below. */
+export enum SalaryPeriodDto {
+  HOURLY = 'HOURLY',
+  DAILY = 'DAILY',
+  WEEKLY = 'WEEKLY',
+  MONTHLY = 'MONTHLY',
+  ANNUAL = 'ANNUAL',
+}
 
 export enum RemoteTypeDto {
   REMOTE = 'REMOTE',
@@ -57,6 +75,30 @@ export class CreateJobDto {
   @IsInt()
   @Min(0)
   maxSalary?: number;
+
+  /**
+   * ISO 4217 code. Defaults to USD server-side.
+   *
+   * Not defaulted HERE, so an employer who omits it is recorded as having omitted it
+   * rather than as having chosen dollars — the column default is the single place that
+   * decision is made.
+   */
+  @ApiPropertyOptional({ example: 'KHR', description: 'ISO 4217; defaults to USD' })
+  @IsOptional()
+  @IsString()
+  @Length(3, 3)
+  salaryCurrency?: string;
+
+  /**
+   * How often the amounts are paid. OMIT rather than guess: the amounts are stored as
+   * plain integers, so 500 monthly and 500 annual are indistinguishable without this, and
+   * a client that has to guess will guess wrong for most of the corpus
+   * (MENTOR_REVIEW_2026-08-18 §12).
+   */
+  @ApiPropertyOptional({ enum: SalaryPeriodDto })
+  @IsOptional()
+  @IsEnum(SalaryPeriodDto)
+  salaryPeriod?: SalaryPeriodDto;
 
   @ApiPropertyOptional({ type: [String] })
   @IsOptional()

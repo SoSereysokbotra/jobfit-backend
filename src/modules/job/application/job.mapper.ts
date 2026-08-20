@@ -12,8 +12,14 @@ export class JobMapper {
       status: job.status.value,
       remoteType: job.remoteType.value,
       location: job.location,
+      // `period` is omitted, never defaulted — see SalaryRangeResponseDto.
       salaryRange: salary
-        ? { min: salary.min, max: salary.max, currency: salary.currency }
+        ? {
+            min: salary.min,
+            max: salary.max,
+            currency: salary.currency,
+            period: salary.period,
+          }
         : undefined,
       skillIds: job.skillIds,
       responsibilities: job.responsibilities,

@@ -461,6 +461,17 @@ model Company {
   @@map("companies")
 }
 
+/// How often a salary figure is paid. Cambodian postings quote MONTHLY; TheMuse and the
+/// internal employer form quote ANNUAL. The corpus already mixes them, so the period has
+/// to travel with the number — 500/month and 500/year are the same integer.
+enum SalaryPeriod {
+  HOURLY
+  DAILY
+  WEEKLY
+  MONTHLY
+  ANNUAL
+}
+
 model Job {
   id          String    @id @default(uuid())
   companyId   String
@@ -472,6 +483,18 @@ model Job {
   location    String?
   minSalary   Int?
   maxSalary   Int?
+
+  /// The unit `minSalary`/`maxSalary` are counted in. Both were bare integers, so a
+  /// Cambodian monthly figure and a US annual figure were indistinguishable in the same
+  /// column — and the frontend resolved that ambiguity by assuming USD-per-year and
+  /// appending "K" (MENTOR_REVIEW_2026-08-18 §12).
+  ///
+  /// `salaryPeriod` is NULLABLE and null means UNKNOWN, not "annual". A default of ANNUAL
+  /// would be the same fabrication in a new place: 83% of the corpus is Cambodian, where
+  /// monthly is the norm, and the ingestion cannot currently tell. Clients must render an
+  /// unknown period without implying one.
+  salaryCurrency String        @default("USD")
+  salaryPeriod   SalaryPeriod?
 
   // What the posting actually is. NULLABLE ON PURPOSE, and null must render as nothing.
   //

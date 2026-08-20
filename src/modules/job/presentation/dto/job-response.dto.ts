@@ -1,9 +1,33 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
+/**
+ * A pay band the client can render without inventing anything.
+ *
+ * `min`/`max` are ABSOLUTE amounts as the posting stated them — 140000 is one hundred and
+ * forty thousand. They are not "thousands", and a client must not append "K" to them.
+ *
+ * The frontend used to receive only the numbers, so it supplied the missing halves
+ * itself: it assumed USD and assumed per-year, then abbreviated. On a corpus that is 83%
+ * Cambodian that produced confident, wrong facts (MENTOR_REVIEW_2026-08-18 §12). Both
+ * halves now travel with the number.
+ */
 export class SalaryRangeResponseDto {
-  @ApiProperty() min: number;
-  @ApiProperty() max: number;
-  @ApiProperty() currency: string;
+  @ApiProperty({ description: 'Absolute amount, not thousands' }) min: number;
+  @ApiProperty({ description: 'Absolute amount, not thousands' }) max: number;
+  @ApiProperty({ example: 'USD' }) currency: string;
+
+  /**
+   * How often the amounts are paid, or ABSENT when the posting did not say.
+   *
+   * Absent means unknown and must render as unknown. It is deliberately not defaulted to
+   * ANNUAL: 500 per month and 500 per year are the same integer, and guessing is the
+   * defect this field exists to remove.
+   */
+  @ApiPropertyOptional({
+    enum: ['HOURLY', 'DAILY', 'WEEKLY', 'MONTHLY', 'ANNUAL'],
+    description: 'Absent when unknown — do not assume ANNUAL',
+  })
+  period?: 'HOURLY' | 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'ANNUAL';
 }
 
 /**
