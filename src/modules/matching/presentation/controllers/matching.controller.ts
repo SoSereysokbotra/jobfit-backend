@@ -1,7 +1,28 @@
-import { Controller, Get, HttpCode, HttpStatus, Query } from '@nestjs/common';
+// RATE LIMITING (MENTOR_REVIEW_2026-08-18 §11). Only two routes here reach the AI
+// service, and they are guarded PER ROUTE rather than at the class level:
+//
+//   GET /              — a cache read, EXCEPT when a row is stale, which since §6
+//                        triggers a recompute (embed + LLM rerank) on the read path.
+//   GET /by-job        — one embed per external job, called per page view.
+//
+// `for-job`, `skill-gap` and `scout` are deliberately NOT limited: all three are
+// database reads plus arithmetic. `scout` in particular scores live now (§7) but
+// `scoreJobs` never calls the AI service — verified, not assumed. Limiting them would
+// cost real usability and buy nothing.
+import {
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { AuthenticatedUser } from '@common/guards/jwt-auth.guard';
+import { AiThrottlerGuard } from '@common/guards/ai-throttler.guard';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
+import { RateLimit } from '@common/decorators/rate-limit.decorator';
+import { THROTTLERS } from '@config/throttler.config';
 import { RecommendationsQueryService } from '../../application/services/recommendations-query.service';
 import { MatchExternalJobUseCase } from '../../application/use-cases/match-external-job.use-case';
 import { SkillGapService } from '../../application/services/skill-gap.service';
@@ -27,6 +48,8 @@ export class MatchingController {
   ) {}
 
   @Get()
+  @UseGuards(AiThrottlerGuard)
+  @RateLimit(THROTTLERS.aiRecommendations.name)
   @ApiOperation({
     summary:
       'Personalized job recommendations for the current user (semantic match). ' +
@@ -97,6 +120,8 @@ export class MatchingController {
   }
 
   @Get('by-job')
+  @UseGuards(AiThrottlerGuard)
+  @RateLimit(THROTTLERS.aiMatch.name)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:

@@ -1,7 +1,8 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigType } from '@nestjs/config';
 
 import aiConfig from '@config/ai.config';
+import { MetricsService } from '@modules/metrics/metrics.service';
 
 import { AiErrorCode, AiServiceError } from './ai.errors';
 import {
@@ -48,6 +49,10 @@ export class AiClient {
   constructor(
     @Inject(aiConfig.KEY)
     private readonly config: ConfigType<typeof aiConfig>,
+    // OPTIONAL on purpose. Metrics are observability, not behaviour: an AI call must not
+    // fail because the metrics provider is absent, and the dozens of existing unit tests
+    // that construct an AiClient with a config alone keep working unchanged.
+    @Optional() private readonly metrics?: MetricsService,
   ) {
     // Trim a trailing slash so `${baseUrl}${path}` never doubles up.
     this.baseUrl = config.serviceUrl.replace(/\/+$/, '');
@@ -178,6 +183,7 @@ export class AiClient {
             signal: controller.signal,
           });
         } catch (err) {
+          this.record(path, 'error', startedAt);
           // Aborted => our timeout fired; otherwise a network/DNS failure.
           lastError = controller.signal.aborted
             ? new AiServiceError(
@@ -203,9 +209,11 @@ export class AiClient {
           this.logger.debug(
             `${method} ${path} -> ${res.status} (${Date.now() - startedAt}ms)`,
           );
+          this.record(path, 'success', startedAt);
           return (await res.json()) as TRes;
         }
 
+        this.record(path, 'error', startedAt);
         const err = await this.toError(res, path);
         // Retry only on server-side failures; 4xx are deterministic.
         if (res.status >= 500 && attempt < MAX_RETRIES) {
@@ -225,6 +233,25 @@ export class AiClient {
       lastError ??
       new AiServiceError('INTERNAL', `AI request to ${path} failed`)
     );
+  }
+
+  /**
+   * Record one AI call. Never throws: a metrics failure must not take down the feature
+   * it is measuring.
+   *
+   * Counted per ATTEMPT, not per logical request — a retry is a second inference and a
+   * second bill, so collapsing the two would understate exactly the load this exists to
+   * watch (MENTOR_REVIEW_2026-08-18 §11).
+   */
+  private record(path: string, outcome: 'success' | 'error', startedAt: number): void {
+    try {
+      this.metrics?.observeAiCall(
+        { operation: path, outcome },
+        (Date.now() - startedAt) / 1000,
+      );
+    } catch {
+      // Intentionally swallowed — see above.
+    }
   }
 
   /** Map a non-2xx response to an {@link AiServiceError}, reading the envelope. */
