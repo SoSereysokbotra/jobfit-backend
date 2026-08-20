@@ -27,7 +27,7 @@ git** — not against the docs. Every finding cites a file, a line, or a git obj
 | 6 | `recommendations` is a write-once cache: changing your CV never moves your matches | ✅ Fixed 2026-08-20 (migration pending) |
 | 7 | `GET /recommendations/scout` structurally cannot return a new job | ✅ Fixed 2026-08-20 |
 | 8 | `PRIVACY.md` states something the code no longer does, and omits four hosts | ⚠️ Verified + drafted 2026-08-20 — extension repo absent, NOT fixed |
-| 9 | Employers cannot see a candidate's résumé anywhere in the API | 🟠 Missing requirement |
+| 9 | Employers cannot see a candidate's résumé anywhere in the API | ✅ Fixed 2026-08-20 |
 | 10 | The paywall gates features no payment path can unlock, and the extension serves the same AI ungated | 🟠 Contradiction |
 | 11 | No rate limit on any AI/GPU route | 🟠 Cost |
 | 12 | `formatSalaryRange` fabricates currency and magnitude (`$500K` for a $500 job) | 🟠 Honesty |
@@ -889,6 +889,42 @@ application is for.
 
 **The question you'll be asked.**
 > *"I'm an employer. Ten people applied. How do I read their CVs?"*
+
+### ✅ Resolved 2026-08-20 — the answer is now a route
+
+Confirmed: `grep -rn "resume" src/modules/employer` returned nothing. Both missing pieces
+were already on the `Application` row and simply never projected.
+
+**On the board — `GET /employer/applications`:**
+
+- `resume` — `{ id, fileName, fileType, fileSize }`, or `null`. **Metadata only, no URL.**
+  A board load lists every application; minting a signed download credential per card
+  would put dozens of live URLs into a response the employer will mostly not open, and
+  which may be cached or logged. `null` also covers "applied without a CV" and "has since
+  deleted it", so the card never shows a dead link.
+- `coverLetter` — the string was on the row the whole time.
+
+**On demand — `GET /employer/applications/:id/resume`:** a signed, expiring URL plus the
+filename and type.
+
+| Decision | Why |
+|---|---|
+| **Which CV** | `Application.resumeId` — the one actually submitted, fixed at submission by §5. Never the candidate's current default; an employer has to be able to explain a decision from the document they were shown. **This finding depended on §5 and could not have been done correctly before it.** |
+| **Authorisation** | The same `companyId` check every other write on this service uses. An employer reaches only a résumé attached to an application to **their own** job. |
+| **Order of operations** | The URL is minted **after** the company check, never before. Tested explicitly — on any refusal path `getSignedUrl` must not have been called. |
+| **Path construction** | From the résumé's **owner** (`resume.userId`), not the requesting employer. |
+| **TTL** | 300s. It is a bearer credential to a third party's private file: long enough to click, short enough that a URL recovered from a log or browser history is worthless. |
+| **404 wording** | "applied without one" and "has deleted the résumé they applied with" are separate messages. Conflating them would misdescribe the candidate. |
+
+**Tests — 12, mutation-verified.** 8 on the download route (three of them pure
+authorisation) and 4 on the list projection. Deleting the company check from
+`getResumeDownload` fails the test that matters. Whole suite: 70 files, 795 tests, green.
+
+**Still open, deliberately:** this closes the *access* gap, not the *audit* gap. Nothing
+records that an employer viewed a candidate's CV. `AuditActionType` has no member for it,
+so it needs a Prisma migration — the same blocker as the subscription-change audit noted
+under §2. For a hiring product handling CVs, "who opened whose résumé, and when" is worth
+having.
 
 ---
 

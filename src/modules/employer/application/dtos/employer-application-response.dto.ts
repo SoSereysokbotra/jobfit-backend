@@ -62,6 +62,34 @@ export class ScreeningSummaryDto {
   requirementsSource: string;
 }
 
+/**
+ * The résumé the candidate submitted with this application — metadata only.
+ *
+ * NO URL HERE, on purpose. A board load lists every application; minting a signed
+ * download credential for each one would put dozens of live URLs into a response that may
+ * be cached, logged or shared, when the employer will open at most one or two. Ask for the
+ * URL when you actually want the file: `GET /employer/applications/:id/resume`.
+ */
+export class SubmittedResumeDto {
+  @ApiProperty() id: string;
+  @ApiProperty({ description: 'As the candidate named it — shown on the card.' })
+  fileName: string;
+  @ApiProperty({ description: 'PDF | DOCX' }) fileType: string;
+  @ApiProperty({ description: 'Bytes.' }) fileSize: number;
+
+  constructor(row: {
+    id: string;
+    fileName: string;
+    fileType: string;
+    fileSize: number;
+  }) {
+    this.id = row.id;
+    this.fileName = row.fileName;
+    this.fileType = row.fileType;
+    this.fileSize = row.fileSize;
+  }
+}
+
 export class EmployerApplicationResponseDto {
   @ApiProperty() id: string;
   @ApiProperty() jobId: string;
@@ -100,6 +128,26 @@ export class EmployerApplicationResponseDto {
   })
   screening: ScreeningSummaryDto;
 
+  @ApiPropertyOptional({
+    type: SubmittedResumeDto,
+    nullable: true,
+    description:
+      'The CV this candidate applied with — the one recorded on the application, not ' +
+      'whichever résumé is their default today. Null when they had none to send, or when ' +
+      'they have since deleted it. Call GET /employer/applications/{id}/resume for a ' +
+      'short-lived download URL.',
+  })
+  resume: SubmittedResumeDto | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description:
+      'The cover letter the candidate wrote for this application. It was on the ' +
+      'Application row all along and simply never reached the employer.',
+  })
+  coverLetter: string | null;
+
   @ApiProperty() appliedAt: Date;
 
   @ApiProperty({
@@ -126,6 +174,8 @@ export class EmployerApplicationResponseDto {
     unreadMessages: number;
     employerNotes: string | null;
     screening: ScreeningSummaryDto;
+    resume: SubmittedResumeDto | null;
+    coverLetter: string | null;
     appliedAt: Date;
   }) {
     this.id = row.id;
@@ -137,6 +187,8 @@ export class EmployerApplicationResponseDto {
     this.unreadMessages = row.unreadMessages;
     this.employerNotes = row.employerNotes;
     this.screening = row.screening;
+    this.resume = row.resume;
+    this.coverLetter = row.coverLetter;
     this.appliedAt = row.appliedAt;
     this.availableActions = employerActionsFrom(
       row.status as unknown as DomainStatus,

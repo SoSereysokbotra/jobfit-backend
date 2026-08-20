@@ -20,11 +20,22 @@ import { EmployerApplicationRepository } from '../../infrastructure/repositories
 import { ListApplicationsQueryDto } from '../dtos/list-applications.query.dto';
 import { UpdateApplicationStatusDto } from '../dtos/update-application-status.dto';
 import { AddApplicationNotesDto } from '../dtos/add-application-notes.dto';
-import { EmployerApplicationResponseDto } from '../dtos/employer-application-response.dto';
+import {
+  EmployerApplicationResponseDto,
+  SubmittedResumeDto,
+} from '../dtos/employer-application-response.dto';
+import { ResumeDownloadDto } from '../dtos/resume-download.dto';
+import { StorageService } from '@infra/storage/storage.service';
 import {
   ApplicationNotesUpdatedDto,
   ApplicationStatusUpdatedDto,
 } from '../dtos/pipeline-action-response.dto';
+
+/**
+ * How long a résumé download link stays valid. Long enough to click, short enough that a
+ * URL copied out of a log or a browser history is worthless by the time anyone tries it.
+ */
+const RESUME_URL_TTL_SECONDS = 300;
 
 @Injectable()
 export class EmployerApplicationService {
@@ -32,6 +43,7 @@ export class EmployerApplicationService {
     private readonly context: EmployerContextService,
     private readonly appRepo: EmployerApplicationRepository,
     private readonly transitions: ApplicationTransitionService,
+    private readonly storage: StorageService,
   ) {}
 
   async list(
@@ -69,6 +81,12 @@ export class EmployerApplicationService {
           archived: row.archivedByEmployerAt != null,
           unreadMessages: row.offer?._count.messages ?? 0,
           employerNotes: row.employerNotes,
+          // A deleted résumé is treated as absent rather than shown as a dead link.
+          resume:
+            row.resume && row.resume.deletedAt === null
+              ? new SubmittedResumeDto(row.resume)
+              : null,
+          coverLetter: row.coverLetter,
           screening: {
             screenedAt: row.screenedAt,
             matchScore: row.screenMatchScore,
@@ -136,6 +154,71 @@ export class EmployerApplicationService {
       dto.notes,
     );
     return new ApplicationNotesUpdatedDto(updated.id, updated.employerNotes);
+  }
+
+  /**
+   * A short-lived signed URL for the CV this candidate submitted.
+   *
+   * WHAT THIS FIXES. The pipeline gave an employer a name, an email and a screening
+   * number the DTO itself describes as varying "by only 4 points" between a senior
+   * engineer and a graphic designer — an AI triage with the human review step missing
+   * (MENTOR_REVIEW_2026-08-18 §9). Reading the CV is the employer's actual job.
+   *
+   * THE RÉSUMÉ IS THE SUBMITTED ONE. `Application.resumeId`, fixed at submission (§5) —
+   * never the candidate's current default. An employer must be able to explain a decision
+   * from the document they were shown, and the candidate may have changed their default
+   * since.
+   *
+   * AUTHORISATION is `requireOwnedApplication`: the same company check every other write
+   * on this service uses. An employer can only reach a résumé attached to an application
+   * to one of THEIR OWN jobs — the URL is minted after that check, never before.
+   *
+   * The link is minted per request and expires in {@link RESUME_URL_TTL_SECONDS}. Short on
+   * purpose: it is a bearer credential to a private file, so it should outlive a click and
+   * not much else.
+   */
+  async getResumeDownload(
+    userId: string,
+    applicationId: string,
+  ): Promise<ResumeDownloadDto> {
+    const ctx = await this.context.requireContext(userId);
+    const app = await this.appRepo.findByIdWithResume(applicationId);
+    if (!app) throw new NotFoundException('Application not found');
+    if (app.job.companyId !== ctx.companyId) {
+      throw new ForbiddenException(
+        'This application is not for one of your jobs.',
+      );
+    }
+
+    // Distinguish the two empty cases in the message: "they sent no CV" is a fact about
+    // the application, "it was deleted" is a fact about the file. Neither is an error the
+    // employer can act on, but conflating them would misdescribe the candidate.
+    if (!app.resume) {
+      throw new NotFoundException(
+        'This application has no résumé attached — the candidate applied without one.',
+      );
+    }
+    if (app.resume.deletedAt !== null) {
+      throw new NotFoundException(
+        'The candidate has deleted the résumé they applied with.',
+      );
+    }
+
+    // Deterministic path, same construction as ResumeService.storagePath. Built from the
+    // résumé's OWNER, not the requesting employer.
+    const path = `${app.resume.userId}/${app.resume.id}/${app.resume.fileName}`;
+    const url = await this.storage.getSignedUrl(
+      'resumes',
+      path,
+      RESUME_URL_TTL_SECONDS,
+    );
+
+    return new ResumeDownloadDto({
+      url,
+      expiresAt: new Date(Date.now() + RESUME_URL_TTL_SECONDS * 1000),
+      fileName: app.resume.fileName,
+      fileType: app.resume.fileType,
+    });
   }
 
   /** Load an application and assert it belongs to the employer's company (404/403). */

@@ -19,6 +19,7 @@ import {
 import {
   ApiBearerAuth,
   ApiOkResponse,
+  ApiResponse,
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
@@ -31,6 +32,7 @@ import { ListApplicationsQueryDto } from '../../application/dtos/list-applicatio
 import { UpdateApplicationStatusDto } from '../../application/dtos/update-application-status.dto';
 import { AddApplicationNotesDto } from '../../application/dtos/add-application-notes.dto';
 import { EmployerApplicationResponseDto } from '../../application/dtos/employer-application-response.dto';
+import { ResumeDownloadDto } from '../../application/dtos/resume-download.dto';
 import {
   ApplicationNotesUpdatedDto,
   ApplicationStatusUpdatedDto,
@@ -51,6 +53,26 @@ export class EmployerApplicationController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<EmployerApplicationResponseDto[]> {
     return this.appService.list(user.id, query);
+  }
+
+  @Get(':id/resume')
+  @ApiOperation({
+    summary: 'Download link for the CV this candidate applied with',
+    description:
+      'Returns a signed, time-limited URL to the résumé recorded on the application — ' +
+      'the document the candidate actually submitted, not whichever CV is their default ' +
+      'now. Scoped to your own company: an application to someone else’s job is 403. ' +
+      '404 when the candidate applied without a CV, or has since deleted it. The link is ' +
+      'minted per request and expires in minutes; do not cache or share it.',
+  })
+  @ApiOkResponse({ type: ResumeDownloadDto })
+  @ApiResponse({ status: 403, description: 'Not an application to one of your jobs.' })
+  @ApiResponse({ status: 404, description: 'No application, or no résumé to download.' })
+  resume(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<ResumeDownloadDto> {
+    return this.appService.getResumeDownload(user.id, id);
   }
 
   @Patch(':id/status')
