@@ -26,7 +26,7 @@ git** — not against the docs. Every finding cites a file, a line, or a git obj
 | 5 | Screening ignores `application.resumeId` — the employer judges a CV the candidate did not submit | ✅ Fixed 2026-08-20 (match score: stated limit) |
 | 6 | `recommendations` is a write-once cache: changing your CV never moves your matches | ✅ Fixed 2026-08-20 (migration pending) |
 | 7 | `GET /recommendations/scout` structurally cannot return a new job | ✅ Fixed 2026-08-20 |
-| 8 | `PRIVACY.md` states something the code no longer does, and omits four hosts | 🟠 Legal / store review |
+| 8 | `PRIVACY.md` states something the code no longer does, and omits four hosts | ⚠️ Verified + drafted 2026-08-20 — extension repo absent, NOT fixed |
 | 9 | Employers cannot see a candidate's résumé anywhere in the API | 🟠 Missing requirement |
 | 10 | The paywall gates features no payment path can unlock, and the extension serves the same AI ungated | 🟠 Contradiction |
 | 11 | No rate limit on any AI/GPU route | 🟠 Cost |
@@ -803,6 +803,62 @@ absolute. Add the four hosts. Re-date the file. Fix the Store copy in the same c
 > *"Your privacy policy says you never transmit the job description. Your match report is built
 > from the job description. Which is true?"* — a question with no good answer if you have not
 > already noticed it.
+
+### ⚠️ Prepared, NOT fixed — 2026-08-20. The files are in a repo that is not checked out.
+
+`PRIVACY.md`, `STORE_LISTING.md` and `manifest.json` all live in `jobfit-extension`, which
+is not present alongside `jobfit-backend`, `jobfit-frontend` and `jobfits-ai-service`. **No
+extension file was edited.** The finding stays open until someone with that repo acts on
+it.
+
+What was done instead: the claim was verified from the **receiving** side, which is the
+authoritative one and is available. Results in
+[EXTENSION_PRIVACY_FACTS.md](./EXTENSION_PRIVACY_FACTS.md), with drafted replacement text
+for both documents.
+
+**The finding is correct — both routes do receive posting text**
+([match-report.dto.ts](../src/modules/match-report/presentation/dto/match-report.dto.ts),
+[save-external-job.dto.ts](../src/modules/saved-job/dto/save-external-job.dto.ts)). The
+bolded sentence in `PRIVACY.md` is false. Two corrections to the detail, though:
+
+#### 🔴 The suggested replacement wording is itself wrong, and would have shipped
+
+§8 proposes saying the posting body is *"sent once, **never stored as a listing**, and only
+the derived report is kept on your own account."*
+
+That is true of **Full Report** and **false of Save Job**. `SavedExternalJob.description`
+is a persisted column — *"what the user saved from the posting"* (`schema.prisma:589`),
+returned by `GET /saved-jobs/external` and kept until the user deletes it. **Storing it is
+the entire point of the feature**: it is the bookmark the user comes back to read.
+
+Adopting the proposed sentence would have replaced one incorrect privacy statement with
+another — in a document whose whole problem is that it was written without checking. The
+two routes need separate answers.
+
+#### Two further details the rewrite needs
+
+- **"Nothing from the posting is stored" is also wrong for Full Report.**
+  `match_reports.payload` holds **AI-extracted requirement phrases**, drawn from the
+  posting body and frequently near-verbatim fragments of it. The identifiers-only claim in
+  [match-report-payload.ts:24](../src/modules/match-report/domain/match-report-payload.ts#L24)
+  is true of `payload.job` and not of the payload as a whole. The honest word is *derived
+  summary*.
+- **The 8,000-char figure is the extension's cap, not the server's.** Both DTOs accept
+  **20,000**. A policy should quote the server bound, since that is what constrains any
+  caller.
+
+#### One fact that makes the story stronger, and is not currently claimed
+
+Posting text sent to `/match-report` is processed by **JobFit's own AI service running
+local models via Ollama** — never a third-party model provider. That is a materially better
+privacy position than the false absolute it would replace, and `PRIVACY.md` does not say
+it.
+
+#### Not verifiable from here
+
+The host-permissions half. `manifest.json` is in the extension repo, and the four hosts
+come from `MULTI_SITE_PLAN.md` — a *plan*, which may not match what shipped. Whoever fixes
+this must diff the policy against the **shipped manifest**, not the plan.
 
 ---
 
