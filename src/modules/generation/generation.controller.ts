@@ -12,6 +12,11 @@
 //
 // How anyone becomes entitled today: an ADMIN grants the tier. There is no self-serve
 // purchase — see the note on EntitlementService before assuming otherwise.
+//
+// RATE LIMITED PER USER. Entitlement answers "may you run this at all"; it says nothing
+// about "how often". A paid account in a loop was previously unlimited generation
+// (MENTOR_REVIEW_2026-08-18 §11), so every route here also carries aiGenerate — the
+// tightest limiter we have, because these are the longest LLM calls in the product.
 
 import {
   Body,
@@ -20,15 +25,20 @@ import {
   HttpStatus,
   Param,
   Post,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiForbiddenResponse,
   ApiOperation,
   ApiTags,
+  ApiTooManyRequestsResponse,
 } from '@nestjs/swagger';
 import { AuthenticatedUser } from '@common/guards/jwt-auth.guard';
+import { AiThrottlerGuard } from '@common/guards/ai-throttler.guard';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
+import { RateLimit } from '@common/decorators/rate-limit.decorator';
+import { THROTTLERS } from '@config/throttler.config';
 import { EntitlementService } from '../user/application/services/entitlement.service';
 import { GenerationService } from './generation.service';
 import { GenerateCoverLetterDto } from './dto/generate-cover-letter.dto';
@@ -51,6 +61,10 @@ function titleCase(s: string): string {
 
 @ApiTags('AI Generation')
 @ApiBearerAuth()
+@ApiTooManyRequestsResponse({
+  description: 'Per-account AI rate limit exceeded (10 generations/hour).',
+})
+@UseGuards(AiThrottlerGuard)
 @Controller()
 export class GenerationController {
   constructor(
@@ -59,6 +73,7 @@ export class GenerationController {
   ) {}
 
   @Post('applications/:id/cover-letter')
+  @RateLimit(THROTTLERS.aiGenerate.name)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Generate (and persist) a cover letter for an application. Premium-only.',
@@ -73,6 +88,7 @@ export class GenerationController {
   }
 
   @Post('generate/interview')
+  @RateLimit(THROTTLERS.aiGenerate.name)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
@@ -90,6 +106,7 @@ export class GenerationController {
   // ── Browser extension: job-context generation. Same AI, same entitlement. ─────
 
   @Post('generate/cover-letter')
+  @RateLimit(THROTTLERS.aiGenerate.name)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
@@ -112,6 +129,7 @@ export class GenerationController {
   }
 
   @Post('generate/interview-prep')
+  @RateLimit(THROTTLERS.aiGenerate.name)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:

@@ -98,6 +98,22 @@ function build(over: Record<string, unknown> = {}) {
     }),
   };
 
+  // Dedupe lookup (§11). Defaults to a MISS so every pre-existing test still exercises
+  // the full generation path — the cache must be opt-in per test, never a silent default.
+  reports.findReusable = jest
+    .fn()
+    .mockResolvedValue('cachedId' in over ? over.cachedId : null);
+
+  const prisma: any = {
+    profile: {
+      findUnique: jest.fn().mockResolvedValue(
+        'profileUpdatedAt' in over
+          ? { updatedAt: over.profileUpdatedAt }
+          : null,
+      ),
+    },
+  };
+
   const service = new MatchReportService(
     reports,
     resumes,
@@ -105,8 +121,9 @@ function build(over: Record<string, unknown> = {}) {
     scorer,
     matchExternalJob,
     ai,
+    prisma,
   );
-  return { service, created, reports, scorer, matchExternalJob };
+  return { service, created, reports, scorer, matchExternalJob, ai, prisma };
 }
 
 /** The payload as it was persisted — what GET /match-report/:id will hand back. */

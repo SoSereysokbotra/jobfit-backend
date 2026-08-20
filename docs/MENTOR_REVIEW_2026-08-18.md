@@ -29,7 +29,7 @@ git** — not against the docs. Every finding cites a file, a line, or a git obj
 | 8 | `PRIVACY.md` states something the code no longer does, and omits four hosts | ✅ Fixed 2026-08-20 (and the fix's own first draft was wrong — see §8) |
 | 9 | Employers cannot see a candidate's résumé anywhere in the API | ✅ Fixed 2026-08-20 |
 | 10 | The paywall gates features no payment path can unlock, and the extension serves the same AI ungated | ✅ Fixed 2026-08-20 (payment module still absent, by decision) |
-| 11 | No rate limit on any AI/GPU route | 🟠 Cost |
+| 11 | No rate limit on any AI/GPU route | ✅ Fixed 2026-08-20 |
 | 12 | `formatSalaryRange` fabricates currency and magnitude (`$500K` for a $500 job) | 🟠 Honesty |
 | 13 | The displayed match **percentage** has never been calibrated — the defect that got `fitScore` rejected | 🟡 Evidence |
 | 14 | Soft-deleted users can still log in, and can never re-register | 🟡 Edge case |
@@ -1060,6 +1060,96 @@ exists.
 
 **The question you'll be asked.**
 > *"What's the most money one signed-up user can cost you in an hour?"*
+
+### ✅ Resolved 2026-08-20 — and the question now has a number
+
+Confirmed exactly as described: `@RateLimit` existed, and not one AI route used it.
+
+**Per USER, not per IP.** The finding asks what one *signed-up user* can cost, which is a
+question about an account. The stock `ThrottlerGuard` keys on IP and answers it wrongly in
+both directions — a shared office NAT is one IP and fifty honest users who would throttle
+each other, while one abusive account on a hotspot, a VPN and a café is a dozen IPs and a
+dozen fresh budgets. [`AiThrottlerGuard`](../src/common/guards/ai-throttler.guard.ts)
+keys on the JWT subject instead. The auth limiters deliberately stay per-IP: the whole
+point of a login limiter is to stop someone who has no account yet.
+
+**13 routes, five limiters.** Two that the review did not list turned out to matter more
+than some that it did:
+
+| Limiter | Per user/hour | Routes |
+|---|---|---|
+| `aiGenerate` | 10 | the 4 cover-letter / interview routes |
+| `aiReport` | 30 | `POST /match-report` |
+| `aiResume` | 20 | **6 résumé routes** |
+| `aiRecommendations` | 60 | `GET /recommendations` |
+| `aiMatch` | 120 | `GET /recommendations/by-job` |
+
+- **The résumé routes were the quiet one.** `ResumeScorerService.scoreResume` has **no
+  cache** — it re-runs the model on every call and only then persists. So `/ats-score`,
+  `/quality-score`, `/scores`, `POST /:id/score` *and* `PATCH /:id/set-default` each spend
+  a full scoring call, and any client polling them is an open tap. The review named none
+  of them.
+- **`GET /recommendations` became expensive in §6**, where a stale row now triggers a
+  recompute — embed plus LLM rerank — **on the read path**. Fixing one finding created
+  the exposure for another.
+- **`scout` is deliberately NOT limited.** §7 made it score live, which looks expensive,
+  but `scoreJobs` never calls the AI service. Verified, and pinned by a test so nobody
+  later "fixes" it.
+
+#### The answer to the interviewer's question
+
+Per user per hour, worst case: **10 generations + 90 report calls + 20 résumé scores +
+120 recommendation calls + 120 embeds.** Multiply by cost per call. The arithmetic is in
+[throttler.config.ts](../src/config/throttler.config.ts) so it stays honest when a limit
+changes. Two caveats stated there rather than glossed: the store is **in-memory, so the
+real ceiling is N× for N Cloud Run instances** (bounded by a constant, not global — a
+shared Redis store is the follow-up, and `ioredis` is already a dependency), and `SCALE`
+still relaxes every limit outside production.
+
+#### 🔴 The cost is worse than the review knew: `match-report` spends real money
+
+The review treats this as GPU saturation. Since then, requirement extraction became the
+`job_requirements` task, which `jobfits-ai-service` routes to **DeepSeek by default** (see
+§8). `POST /match-report` is therefore a **metered third-party API call**, and the failure
+mode is not a slow box — it is an invoice.
+
+**So the dedupe cache the review asked for is implemented**, keyed on
+`(userId, source, externalId, sha256(description))` as suggested, plus the half the
+suggestion omitted: **a freshness bar**. A report is one résumé judged against one
+posting, so an unchanged posting is only half the question. The cache is only reused when
+the report is newer than the résumé row, its parse, *and* the profile. Without that,
+uploading a better CV would leave the user staring at a report about the old one — which
+is precisely the §6 defect re-entering through a cache. Whitespace is normalised so the
+same posting re-wrapped still hits; case is not folded, so "Junior" → "Senior" misses.
+
+#### On "count LLM calls per user in the metrics module" — done, but not as a label
+
+`jobfit_ai_calls_total{operation,outcome}` and `jobfit_ai_call_duration_seconds` are
+recorded in `AiClient`'s transport, which is the single door to the AI service. Retries
+count **twice**, because a retry is a second inference and a second bill.
+
+`userId` is deliberately **not** a label: unbounded cardinality is how a cost metric
+becomes a bigger cost problem than the thing it measures. The per-user question is
+answered by the ceiling above, and 429s surface as
+`http_requests_total{status_code="429"}`. `MetricsService` is injected `@Optional` so
+observability can never break an AI call — and a test asserts the client still works when
+recording throws.
+
+**Tests — 63 new, mutation-verified.** 8 on the tracker (same user across IPs shares a
+budget; different users behind one IP do not), 34 driving the **real decorator metadata**
+on the real controllers, 14 on dedupe and 7 on metrics. The decorator suite is written as
+an inventory with an invariant — *a guarded route must name exactly one limiter* — so a
+new AI route added without one fails a test instead of shipping. Deleting a single
+`@RateLimit` fails 3. Whole suite: **75 files, 872 tests, green**; lint clean.
+
+**One bug this found in itself:** the first version of the decorator test read
+`THROTTLER_SKIP` as a single map. `SkipThrottle` actually writes one key **per throttler
+name**, so the map read returned `undefined` everywhere — which would have made every
+"this route is unlimited" assertion pass whether or not it was true. It failed loudly
+instead of passing vacuously only because the positive assertions were written first.
+
+**⚠️ Needs you:** the `20260820140000_match_report_description_hash` migration is applied
+locally; production picks it up from the cloudbuild migrate step.
 
 ---
 

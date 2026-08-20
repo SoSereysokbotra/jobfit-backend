@@ -968,9 +968,16 @@ model MatchReport {
 
   payload Json // the full report — see MatchReportPayload
 
+  /// SHA-256 of the posting text this report was built from. The dedupe key, so
+  /// re-opening an unchanged posting costs no AI call (§11) while an EDITED posting
+  /// still regenerates. Null on rows written before the column existed; those are
+  /// never reused.
+  descriptionHash String?
+
   createdAt DateTime @default(now())
 
   @@index([userId])
+  @@index([userId, source, externalId, descriptionHash, createdAt])
   @@map("match_reports")
 }
 
