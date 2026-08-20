@@ -1,43 +1,40 @@
 # What the API actually receives and stores from the extension
 
-> # 🚧 NOT DONE — handover note
+> # ✅ APPLIED 2026-08-20 — this file is now the evidence, not a to-do
 >
-> **Nothing in `jobfit-extension` has been changed.** This file is only the *evidence* for
-> the rewrite; the rewrite itself is still to do. `MENTOR_REVIEW_2026-08-18` §8 stays open.
+> The rewrite landed. `jobfit-extension` **was** checked out after all, at
+> `D:/Year2/Jobfit/jobfit-extension` — the earlier note said otherwise because only the
+> siblings of the working directory were checked. `PRIVACY.md`, `docs/STORE_LISTING.md`
+> and `manifest.config.ts` have all been corrected. `MENTOR_REVIEW_2026-08-18` §8 is
+> closed.
 >
-> It stopped here because `jobfit-extension` is not checked out next to `jobfit-backend`,
-> `jobfit-frontend` and `jobfits-ai-service` on the machine this was written on. Clone it
-> and the edits are small.
+> **Keep this file as the ground truth for the next rewrite.** The receiver knows what it
+> receives and what it keeps; the extension only knows what it sent. Re-verify it at a SHA
+> before the Store submission.
 >
-> **What to do:**
+> ### 🔴 The draft that used to live at the bottom of this file was WRONG, and was not used
 >
-> 1. Rewrite the "What the extension reads" section of `PRIVACY.md` — draft text is at the
->    bottom of this file, under *Draft replacement text*.
-> 2. Fix the matching sentence in `STORE_LISTING.md` (draft also below) **in the same
->    commit**, or the two will drift again.
-> 3. Fix the host-permissions table in `PRIVACY.md`.
-> 4. Re-date `PRIVACY.md` and make sure it is publicly hosted at the URL the Store listing
->    points to.
+> It proposed telling users that posting text is *"processed by our own AI service on local
+> models via Ollama, never a third-party provider."* **That is false.**
+> `jobfits-ai-service/app/services/chat_router.py` routes per task, and `deepseek_tasks`
+> **defaults to `interview,job_requirements`** (`app/config.py:35`). `job_requirements` is
+> exactly the task that receives the posting body from `POST /match-report`. With
+> `DEEPSEEK_API_KEY` set — it is, locally — the job posting's title and body go to
+> **`api.deepseek.com`**, a third-party provider.
 >
-> **What to watch out for — three traps, in order of how easy they are to fall into:**
+> This is the same mistake §8 exists to punish, three times over: the original policy, the
+> review's suggested replacement, *and* this file's draft were each written without
+> checking the code. The shipped policy now discloses DeepSeek by name.
 >
-> - **Do not paste the review's suggested wording.** `MENTOR_REVIEW_2026-08-18` §8 proposes
->   saying the posting body is *"never stored as a listing"*. That is **false for Save
->   Job** — `saved_external_jobs.description` stores it on purpose, because it is the
->   user's bookmark. Using it would swap one false privacy claim for another. The two
->   routes need separate sentences; see the table below.
-> - **"Nothing from the posting is stored" is wrong for Full Report too.**
->   `match_reports.payload` keeps AI-extracted requirement phrases, which are lifted from
->   the posting body and are often near-verbatim. Say *derived summary*, not *nothing*.
-> - **Get the host list from the shipped `manifest.json`, not from `MULTI_SITE_PLAN.md`.**
->   The four extra hosts named in the review (Khmer24, Indeed, BongThom, JobNet) come from
->   a *plan*. They are not verified here and may not match what actually shipped. Diff the
->   policy against the manifest itself.
+> **What is genuinely defensible, and is what the policy says:** the boundary is
+> structural, not a convention. `ResumeService`, `EmbedService`, `RerankService` and
+> `MatchReasonService` take `OllamaClient` directly and are never handed a `ChatRouter`, so
+> adding `resume_parse` to `DEEPSEEK_TASKS` does nothing — there is no wire. The résumé
+> cannot reach DeepSeek by configuration alone. That is worth saying, and it is true.
 >
-> **One thing worth adding that is not currently claimed:** posting text sent to
-> `/match-report` is processed by our own AI service on local models via Ollama, never a
-> third-party provider. That is a stronger privacy position than the false absolute it
-> replaces, and it should be stated.
+> **The trap for next time:** a privacy claim about *where data is processed* can be
+> falsified by an environment variable in a different repository. `DEEPSEEK_TASKS` is now
+> on the pre-submission checklist in `STORE_LISTING.md` for that reason.
 >
 > Everything below this box is verified fact from the backend. Trust it over the extension
 > docs, and over the review.
@@ -53,9 +50,9 @@ before relying on this.
 > receives and what it keeps. This is that ground truth, so the policy can be rewritten
 > from something checkable.
 >
-> ⚠️ This file **does not fix** the policy. `PRIVACY.md`, `STORE_LISTING.md` and
-> `manifest.json` live in `jobfit-extension`, which was not available when this was
-> written. Someone still has to edit them.
+> The policy itself now lives in `jobfit-extension` and has been rewritten from this file
+> — see *What shipped* at the bottom. Note there is no `manifest.json` to read: the
+> manifest is generated from `manifest.config.ts`.
 
 ---
 
@@ -66,7 +63,7 @@ before relying on this.
 | Field | `jobDescription` (**required**) | `description` (optional) |
 | Server cap | 20,000 chars | 20,000 chars |
 | Trigger | user clicks **Full Report** | user clicks **Save Job** |
-| Sent onward | yes — to the JobFit AI service | no |
+| Sent onward | yes — to the JobFit AI service, **and on to DeepSeek by default** (see below) | no |
 | **Posting text stored?** | **No** | **YES — `saved_external_jobs.description`** |
 | What is stored | derived report only (`match_reports.payload`) | the posting text, verbatim, until the user deletes it |
 
@@ -99,11 +96,33 @@ contains **AI-extracted requirement phrases**, which are drawn from the posting 
 are often near-verbatim fragments of it. The honest statement is *a derived summary*, not
 *nothing*.
 
-### Where the text goes onward
+### Where the text goes onward — ⚠️ to a THIRD PARTY, by default
 
-To **JobFit's own AI service**, which runs local models via Ollama
-(`jobfits-ai-service`, `OLLAMA_URL`) — **not** to OpenAI, Anthropic or any third-party
-model provider. That is a genuinely strong fact and the policy should say it plainly.
+To JobFit's own AI service (`jobfits-ai-service`) — and from there, **onward to DeepSeek**.
+
+`ChatRouter` picks a provider per task, and the posting body's task is
+`job_requirements`:
+
+| Setting | Value | Source |
+|---|---|---|
+| `deepseek_tasks` default | `interview,job_requirements` | `app/config.py:35` |
+| `DEEPSEEK_TASKS` in `.env` | *not overridden* → default applies | `jobfits-ai-service/.env` |
+| `DEEPSEEK_API_KEY` | set (non-empty ⇒ router enabled) | `jobfits-ai-service/.env` |
+| Endpoint | `https://api.deepseek.com` | `app/config.py:28` |
+
+Chain: `POST /match-report` → `AiClient.extractJobRequirements` →
+AI service `POST /job/requirements` → `ChatRouter` → `DeepSeekClient`.
+
+**What does NOT go to DeepSeek, structurally.** `ResumeService`, `EmbedService`,
+`RerankService` and `MatchReasonService` are constructed with `OllamaClient` directly and
+never receive a `ChatRouter` — so the résumé, the profile, the name, the email and the
+embeddings cannot reach an external provider even if someone adds the task name to the env
+var. `chat_router.py`'s own header documents this as a deliberate structural boundary
+rather than a convention, and it holds.
+
+`cover_letter` is a known task but is **not** in the default allowlist, so cover-letter
+generation (which carries `resumeSummary`, derived from the CV) runs locally unless someone
+explicitly opts it in. If that ever changes, the policy changes with it.
 
 ---
 
@@ -126,56 +145,73 @@ until the user deletes the saved job.
 
 ---
 
-## The manifest / permissions half
+## The manifest / permissions half — verified and fixed
 
-`MULTI_SITE_PLAN.md` added **Khmer24, Indeed, BongThom and JobNet** to
-`content_scripts.matches`, while `PRIVACY.md` lists host access to `www.linkedin.com` only
-and says *"The extension requests no access to any other website."*
+There is no `manifest.json` to diff: the manifest is **generated** from
+`jobfit-extension/manifest.config.ts` by `@crxjs/vite-plugin`. Read from that file, the
+shipped `content_scripts.matches` is:
 
-**Not verifiable here** — `manifest.json` is in the extension repo. Whoever fixes this must
-diff the policy against the shipped manifest, not against `MULTI_SITE_PLAN.md`, which is a
-plan and may not match what shipped.
+```
+https://*.linkedin.com/*   https://*.khmer24.com/*   https://*.bongthom.com/*
+https://*.jobnet.com.kh/*  https://*.indeed.com/*
+```
 
----
+So the review's four extra hosts were right — and the mismatch was **worse than it
+described**, in three ways the plan could not have shown:
 
-## Draft replacement text
-
-Grounded in the table above. Adjust hosts to the real manifest before publishing.
-
-### For `PRIVACY.md` — "What the extension reads"
-
-> **Job postings you are viewing.** On a supported job site the extension reads the
-> posting's title, company, location and the site's own job id so it can show you a match
-> score.
->
-> **The posting body is read only when you ask for it**, by clicking one of two things:
->
-> - **Full Report** — the visible posting text is sent once to the JobFit API, which uses
->   it to work out what the role requires and how your résumé compares. **The posting text
->   itself is not kept.** What is saved to your account is the report: the requirement
->   phrases we extracted, your match scores, and which of your skills matched. The text is
->   processed by JobFit's own AI service running local models — it is never sent to a
->   third-party AI provider.
-> - **Save Job** — the posting text **is** saved, deliberately, because it is your
->   bookmark: it is what you read when you come back to it later. It is stored against
->   your account only, is never shared, and is deleted when you delete the saved job.
->
-> Nothing is read from any page while you are only browsing. No posting is uploaded in the
-> background, and there is no shared job listing store built from what you visit.
-
-### For `STORE_LISTING.md`
-
-Replace *"Only the job's ID, the company name and the job title are sent to the JobFit API
-— never the posting text"* with:
-
-> The job's id, company and title are sent so we can score the match. The posting text is
-> sent only when you click Full Report or Save Job — never in the background.
+1. The old policy said `www.linkedin.com`. The manifest matches `*.linkedin.com` — every
+   subdomain, which is broader than what was declared.
+2. `host_permissions` also carries the **JobFit web origin**, derived from `VITE_WEB_URL`.
+   It is declared but currently unused ("future bridge fallback"). An undeclared-in-policy
+   permission is the same defect regardless of whether code uses it, so the policy now
+   lists it and says no page content is read from it.
+3. `manifest.config.ts`'s `description` was **136 characters against a 132-char Store
+   limit** — an outright rejection, sitting in the file whose own comment said "Store limit
+   is 132 chars". Fixed to 128 and pinned to the `STORE_LISTING.md` copy.
 
 ---
 
-## Pre-submission checklist additions
+## What shipped
 
-- [ ] `PRIVACY.md` host table == `manifest.json` `content_scripts.matches` + `host_permissions`
-- [ ] `PRIVACY.md` data claims == this file, re-verified at the release SHA
-- [ ] `STORE_LISTING.md` data claims == `PRIVACY.md`
-- [ ] `PRIVACY.md` re-dated, and publicly hosted at the URL the listing points to
+Three files in `jobfit-extension`, on 2026-08-20.
+
+### `PRIVACY.md` — rewritten, re-dated
+
+| Was | Now |
+|---|---|
+| *"The job description / posting body is never read, stored, or transmitted."* | Split in two: identifiers while browsing, posting body **only** on Full Report / Save Job |
+| (no statement) | Full Report → derived summary stored, **posting text not kept** |
+| (no statement) | Save Job → posting text **is** stored, deliberately, as the user's bookmark |
+| (no statement) | *Where your text is processed* — names **DeepSeek**, and states that the résumé/profile cannot reach it |
+| Host access to `www.linkedin.com`; *"no access to any other website"* | All five content-script hosts + the JobFit API host + the JobFit web host |
+| Endpoint list ~4 routes, partly wrong | The 13 routes the extension actually calls, read out of `src/` |
+| ⚠️ ACCURACY WARNING block | Removed — the thing it warned about is fixed |
+
+### `docs/STORE_LISTING.md`
+
+- The false *"never the posting text"* sentence is replaced.
+- Name and short description no longer say LinkedIn-only; short description pinned to the
+  manifest.
+- **`Website content` is now ticked as collected** in the data-usage disclosures. It was
+  ticked "not collected", which is the under-declaration that gets an extension pulled
+  *after* publication rather than rejected before it. The review did not catch this one.
+- Permission justifications list all five content-script hosts.
+- Full Report and Save Job added to the feature list — the privacy paragraph names them, so
+  the listing has to describe them.
+- Pre-submission checklist gained a **truthfulness** section, including a check on
+  `DEEPSEEK_TASKS`.
+
+### `manifest.config.ts`
+
+- `description` 136 → 128 chars.
+
+## What still needs a human
+
+- [ ] Host `PRIVACY.md` at a public URL and paste it into the dashboard. The Store will not
+      accept a submission without a reachable policy URL.
+- [ ] Confirm the **deployed** `jobfits-ai-service` has the same `DEEPSEEK_TASKS` as local.
+      The policy describes the default (`interview,job_requirements`). If production
+      differs, the policy is wrong again — in whichever direction.
+- [ ] Decide whether `activeTab` is still needed now that five `content_scripts` entries
+      grant the page access. An unused permission invites a review question.
+
