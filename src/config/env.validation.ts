@@ -62,7 +62,11 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(1),
   JWT_REFRESH_SECRET: z.string().optional(),
 
-  // ── Email (SMTP) — optional; auth flows fail open if not configured ───────
+  // ── Email (SMTP) — REQUIRED in production ─────────────────────────────────
+  // Kept optional in the schema so dev/test boot without a mail server, but
+  // EmailService throws at startup when NODE_ENV=production and HOST/USER/PASS are
+  // missing: email verification gates login, so an unconfigured mailer in production
+  // means no new user can ever sign in.
   EMAIL_HOST: z.string().optional(),
   EMAIL_PORT: z.string().optional(),
   EMAIL_USER: z.string().optional(),

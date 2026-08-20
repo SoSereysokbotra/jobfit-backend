@@ -75,7 +75,11 @@ steps:
       # Delimiter is ^|^ (not the default comma) because CORS_ORIGIN is itself a
       # comma-separated list. It cannot be ^@^ either: EMAIL_USER/SMTP_FROM contain '@'.
       # EMAIL_* (minus the password, which is a secret below) enables verification and
-      # password-reset mail — without it EmailService silently skips every send.
+      # password-reset mail. These are REQUIRED: email verification gates login, so
+      # EmailService refuses to boot under NODE_ENV=production when HOST/USER/PASS are
+      # missing — the deploy fails loudly instead of shipping a revision that accepts
+      # registrations it can never complete. A *wrong* EMAIL_PASS still boots (the SMTP
+      # handshake is async); that surfaces as mail.degraded on /health/ready.
       # SMTP_FROM must match the authenticated Gmail account, otherwise Gmail rewrites it.
       - '--set-env-vars=^|^NODE_ENV=production|LOG_FORMAT=json|LOG_LEVEL=info|METRICS_ENABLED=true|TRACE_ENABLED=false|SERVICE_NAME=${_SERVICE}|SERVICE_VERSION=$BUILD_ID|GCP_PROJECT_ID=$PROJECT_ID|CORS_ORIGIN=${_CORS_ORIGIN}|EMAIL_HOST=smtp.gmail.com|EMAIL_PORT=587|EMAIL_USER=soviseth869@gmail.com|SMTP_FROM=JobFit Support <soviseth869@gmail.com>'
       # REDIS_URL still omitted — the secret exists but its value is unverified, and a bad

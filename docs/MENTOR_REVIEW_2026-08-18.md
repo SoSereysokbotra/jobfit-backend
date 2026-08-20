@@ -19,7 +19,7 @@ git** — not against the docs. Every finding cites a file, a line, or a git obj
 
 | # | Finding | Severity |
 |---|---|---|
-| 1 | No email is ever sent, but login requires a verified email → **no new user can sign in** | 🔴 Product-fatal |
+| 1 | No email is ever sent, but login requires a verified email → **no new user can sign in** | ✅ Fixed 2026-08-20 |
 | 2 | `PATCH /users/:id/subscription` has no role or ownership check → free Premium; any user can retier or delete any other user | 🔴 Security |
 | 3 | `GET /users/email/:email` is `@Public()`; `GET /users` lists everyone; `POST /users` accepts `role: ADMIN` | 🔴 Security |
 | 4 | No single backend branch serves both the web app and the extension | 🔴 Release |
@@ -75,6 +75,49 @@ than one that throws.
 > Follow-up: *"How did this survive to production — what would have caught it?"* (Worth having
 > ready: no test covers register→verify→login end to end, because every test seeds a verified
 > user.)
+
+### ✅ Resolved 2026-08-20 — and two of the premises were already stale
+
+Two claims in this finding did not hold when we went to fix it:
+
+- **Mail *is* wired.** A real nodemailer transport exists at
+  [email.service.ts](../src/shared/services/email.service.ts), driven by
+  [auth-events.listener.ts](../src/modules/auth/infrastructure/event-handlers/auth-events.listener.ts)
+  off `UserRegisteredEvent` (`EventEmitterModule` is registered globally by
+  [event-bus.module.ts](../src/events/event-bus.module.ts)). `cloudbuild.yaml` sets
+  `EMAIL_HOST/PORT/USER/SMTP_FROM` and pulls `EMAIL_PASS` from Secret Manager. We ran the
+  real SMTP handshake against the configured Gmail account: **OK**.
+- **`MailerService` was never the delivery channel.** The `console.log` stub the finding
+  cites (`src/infra/mailer/mailer.service.ts`) had zero importers — dead scaffolding that
+  read like the live path. Deleted, along with the empty
+  `auth/infrastructure/external-services/email.service.ts` placeholder.
+- **A register→verify→login e2e does exist** ([auth.e2e-spec.ts](../test/auth.e2e-spec.ts),
+  "Flow 1"). It reads the code from the DB, so it covers the *flow* but not *delivery* —
+  which is why a delivery outage would still have passed CI.
+
+What was genuinely broken is the **fail-open**: with `EMAIL_*` unset, `EmailService` logged
+a warning and skipped every send, and `send()` swallowed SMTP errors, so both a missing
+config and a bouncing mailbox looked exactly like success. Fixed:
+
+1. **Boot guard** — `NODE_ENV=production` with `EMAIL_HOST/USER/PASS` missing now **throws
+   in `onModuleInit`**. The deploy fails rather than shipping a revision that accepts
+   registrations it cannot complete. Dev/test still fail open, so the suite needs no SMTP.
+2. **`send()` throws** instead of swallowing. The event listener — the one caller that must
+   not propagate, since the user row is already committed — catches it and logs at `error`
+   naming the user-visible consequence ("cannot log in until they resend").
+3. **Boot-time SMTP handshake**, run in the background so a transient outage does not block
+   a Cloud Run cold start. Catches a rotated/wrong `EMAIL_PASS`, which the boot guard
+   cannot.
+4. **`mail` on `/health/ready`** ([mail.health-indicator.ts](../src/modules/health/indicators/mail.health-indicator.ts))
+   — soft, like Redis: never `down`, but `degraded: true` with the impact spelled out when
+   the transport is unconfigured or the handshake failed.
+5. **Tests** — 12 specs on the guard/throw/status contract, 4 on the listener's
+   swallow-and-log, 4 on the indicator.
+
+**Still open:** delivery is proven at the transport, not at the inbox — nothing asserts a
+real message arrives (Gmail may throttle or spam-file it). A synthetic
+register→receive→verify probe against a real mailbox is the next step, and is what would
+turn *"the handshake is OK"* into *"a user can actually sign in."*
 
 ---
 
