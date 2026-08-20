@@ -44,7 +44,10 @@ describe('RecomputeUserMatchesUseCase', () => {
         // scoring. Empty here: this candidate states no desired industries, so the
         // sub-score is the neutral 50 either way and the payloads below are unchanged.
         industry: { findMany: jest.fn().mockResolvedValue([]) },
-        recommendation: { upsert: jest.fn().mockResolvedValue(undefined) },
+        recommendation: {
+          upsert: jest.fn().mockResolvedValue(undefined),
+          deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+        },
       };
       service = new RecomputeUserMatchesUseCase(prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, activeResume());
       // Isolate scoring from the retriever internals.
@@ -59,16 +62,34 @@ describe('RecomputeUserMatchesUseCase', () => {
       expect(written).toBe(2);
       expect(prisma.recommendation.upsert).toHaveBeenCalledTimes(2);
 
+      // computedAt is a real Date stamped per batch, so match it loosely; every other
+      // field stays pinned exactly.
       expect(prisma.recommendation.upsert.mock.calls[0][0]).toEqual({
         where: { userId_jobId: { userId: 'u1', jobId: 'jobA' } },
-        update: { score: 77, breakdown: { skills: 80, experience: 80, location: 100, salary: 50, other: 50 }, reasonExplanation: 'Backend Engineer: strong skills match, location fits.' },
-        create: { userId: 'u1', jobId: 'jobA', score: 77, breakdown: { skills: 80, experience: 80, location: 100, salary: 50, other: 50 }, reasonExplanation: 'Backend Engineer: strong skills match, location fits.' },
+        update: { score: 77, breakdown: { skills: 80, experience: 80, location: 100, salary: 50, other: 50 }, reasonExplanation: 'Backend Engineer: strong skills match, location fits.', computedAt: expect.any(Date), staleAt: null },
+        create: { userId: 'u1', jobId: 'jobA', score: 77, breakdown: { skills: 80, experience: 80, location: 100, salary: 50, other: 50 }, reasonExplanation: 'Backend Engineer: strong skills match, location fits.', computedAt: expect.any(Date) },
       });
       expect(prisma.recommendation.upsert.mock.calls[1][0]).toEqual({
         where: { userId_jobId: { userId: 'u1', jobId: 'jobB' } },
-        update: { score: 58, breakdown: { skills: 50, experience: 80, location: 50, salary: 50, other: 50 }, reasonExplanation: 'Frontend Engineer: partial skills match.' },
-        create: { userId: 'u1', jobId: 'jobB', score: 58, breakdown: { skills: 50, experience: 80, location: 50, salary: 50, other: 50 }, reasonExplanation: 'Frontend Engineer: partial skills match.' },
+        update: { score: 58, breakdown: { skills: 50, experience: 80, location: 50, salary: 50, other: 50 }, reasonExplanation: 'Frontend Engineer: partial skills match.', computedAt: expect.any(Date), staleAt: null },
+        create: { userId: 'u1', jobId: 'jobB', score: 58, breakdown: { skills: 50, experience: 80, location: 50, salary: 50, other: 50 }, reasonExplanation: 'Frontend Engineer: partial skills match.', computedAt: expect.any(Date) },
       });
+
+      // §6: the upsert only ever writes the new top-N, so anything else the user still
+      // has is a leftover from an older ranking and has to go — except dismissals, which
+      // are tombstones. Without this a job that fell out kept its months-old score.
+      expect(prisma.recommendation.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'u1', dismissedAt: null, jobId: { notIn: ['jobA', 'jobB'] } },
+      });
+
+      // update carries staleAt: null — clearing the flag is what ends the
+      // recompute-on-every-read loop. create does not: a new row is fresh by default.
+      expect(prisma.recommendation.upsert.mock.calls[0][0].update.staleAt).toBeNull();
+      // dismissedAt is absent from update: refreshing a rejected job's score is fine,
+      // un-rejecting it is not.
+      expect(
+        'dismissedAt' in prisma.recommendation.upsert.mock.calls[0][0].update,
+      ).toBe(false);
     });
 
     it('returns 0 when the user has no profile', async () => {

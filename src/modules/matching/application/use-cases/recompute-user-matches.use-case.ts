@@ -119,6 +119,10 @@ export class RecomputeUserMatchesUseCase {
     );
 
     let written = 0;
+    // One timestamp for the whole batch: these scores describe the same moment, and
+    // per-row now() would make them look staggered in the UI.
+    const now = new Date();
+    const keptJobIds: string[] = [];
     for (const row of near) {
       const job = jobById.get(row.id);
       if (!job) continue;
@@ -141,15 +145,43 @@ export class RecomputeUserMatchesUseCase {
       // Prisma's Json input wants an index-signature type; SubScores is fixed-shape.
       const breakdownJson = breakdown as unknown as Record<string, number>;
 
+      // `dismissedAt` is deliberately absent from `update`: refreshing the score of a
+      // job the user rejected is fine, un-rejecting it is not. Clearing `staleAt` here
+      // is what actually ends the recompute-on-read loop.
       await this.prisma.recommendation.upsert({
         where: { userId_jobId: { userId, jobId: row.id } },
-        update: { score, breakdown: breakdownJson, reasonExplanation },
-        create: { userId, jobId: row.id, score, breakdown: breakdownJson, reasonExplanation },
+        update: {
+          score,
+          breakdown: breakdownJson,
+          reasonExplanation,
+          computedAt: now,
+          staleAt: null,
+        },
+        create: {
+          userId,
+          jobId: row.id,
+          score,
+          breakdown: breakdownJson,
+          reasonExplanation,
+          computedAt: now,
+        },
       });
       written++;
+      keptJobIds.push(row.id);
     }
 
-    this.logger.log(`Recomputed ${written} recommendations for user ${userId}`);
+    // Rows for jobs that did NOT survive this recompute are obsolete — the upsert above
+    // only ever writes the new top-N, so without this a job that fell out of the ranking
+    // kept sitting in the user's list with whatever score it had months ago. Dismissed
+    // rows are exempt: they are tombstones, and deleting one would let the job come back.
+    const { count: removed } = await this.prisma.recommendation.deleteMany({
+      where: { userId, dismissedAt: null, jobId: { notIn: keptJobIds } },
+    });
+
+    this.logger.log(
+      `Recomputed ${written} recommendations for user ${userId}` +
+        (removed > 0 ? ` (dropped ${removed} no longer ranked)` : ''),
+    );
     return written;
   }
 

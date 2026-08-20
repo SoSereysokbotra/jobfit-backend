@@ -24,7 +24,7 @@ git** — not against the docs. Every finding cites a file, a line, or a git obj
 | 3 | `GET /users/email/:email` is `@Public()`; `GET /users` lists everyone; `POST /users` accepts `role: ADMIN` | ✅ Fixed 2026-08-20 |
 | 4 | No single backend branch serves both the web app and the extension | ✅ Fixed 2026-08-20 |
 | 5 | Screening ignores `application.resumeId` — the employer judges a CV the candidate did not submit | ✅ Fixed 2026-08-20 (match score: stated limit) |
-| 6 | `recommendations` is a write-once cache: changing your CV never moves your matches | 🟠 Correctness |
+| 6 | `recommendations` is a write-once cache: changing your CV never moves your matches | ✅ Fixed 2026-08-20 (migration pending) |
 | 7 | `GET /recommendations/scout` structurally cannot return a new job | 🟠 Correctness |
 | 8 | `PRIVACY.md` states something the code no longer does, and omits four hosts | 🟠 Legal / store review |
 | 9 | Employers cannot see a candidate's résumé anywhere in the API | 🟠 Missing requirement |
@@ -607,6 +607,73 @@ constantly, so the dismissed-jobs table it suggests becomes a **prerequisite**, 
 > *"I uploaded a new CV. When do my recommendations change?"*
 > When the honest answer is "when the row count hits zero": *"So what does the reranker's +20%
 > MRR actually buy a user who signed up last month?"*
+
+### ✅ Resolved 2026-08-20 — invalidate-on-write, plus the prerequisite the review flagged
+
+Confirmed exactly as described, and it needed a schema change: making invalidation real
+without durable dismissals would have resurrected every rejected job on the next profile
+edit. Migration
+[`20260820100000_recommendation_staleness_and_dismissal`](../prisma/migrations/20260820100000_recommendation_staleness_and_dismissal/migration.sql)
+adds three nullable/defaulted columns to `recommendations` — additive, safe on a populated
+table.
+
+**Staleness is a MARKER, not a delete.** The review's tier 1 is `deleteMany({ userId })`
+and let the lazy path rebuild. We didn't, for two reasons:
+
+1. A recompute that then fails leaves the user staring at an **empty** recommendations
+   page. Slightly-old matches beat none, so stale rows keep serving until a rebuild
+   succeeds — and `getForUser` now catches a failed recompute and serves what it has.
+2. Deletion is *how a dismissal is represented*. Tier 1 as written would have wiped
+   dismissals on every profile edit.
+
+So: `staleAt` is set by
+[`RecommendationStalenessService`](../src/modules/matching/application/services/recommendation-staleness.service.ts),
+called by `UserProfileUpdatedListener` **after a successful re-embed** (marking first would
+loop the read path against an unchanged vector). `getForUser` recomputes when rows are
+missing **or** any row is stale. Recompute clears `staleAt` and stamps `computedAt`.
+
+**Tier 2, `computedAt`, is in** — so the UI can say *"matched against your CV from 3 Aug"*
+rather than implying the number is live. Nothing renders it yet; the column is there and
+populated.
+
+**The prerequisite: dismissals are now durable.** `dismissedAt` on the row instead of a
+hard delete. Reads filter it, the extension's scout filters it, recompute refreshes the
+score but never clears the flag. `recommendation-dismiss.service.ts`'s ⚠️ KNOWN LIMITATION
+header is now a ✅ RESOLVED header.
+
+#### A second bug, not in the finding: recompute never removed anything
+
+`execute()` **upserts only**. It writes the new top-N and leaves every other row untouched
+— so a job that dropped out of the ranking kept sitting in the user's list with whatever
+score it had months ago, *even on the manual recompute path the finding says is the only
+one that runs*. Recompute now deletes this user's non-dismissed rows that are not in the
+new set.
+
+#### A gap this closed for free
+
+`GET /sync/recommendations` had `deletes` permanently empty "for want of a soft delete"
+(sync.service.ts:16-17, audit §2). `dismissedAt` is exactly that soft delete, and
+`splitDelta` already turns a tombstone into a delete — so a dismissal now propagates to
+every device instead of lingering in the client cache. One mapping line.
+
+#### Known trade-off
+
+The first read after any profile/résumé change now pays for a recompute, which includes
+the LLM rerank. Previously only brand-new users ever paid it. That is the cost of the
+feature working at all; a background job (tier 3 / #7) is where it goes to stop being on
+the request path.
+
+**Tests — 22 new, mutation-verified.** 5 on the staleness service, 6 on when `getForUser`
+recomputes (including that a failed recompute still serves stale rows), 5 on the listener
+pairing, 4 on durable dismissal, plus recompute-prunes-obsolete-rows and the sync
+tombstone. Reverting the read path to the old zero-row check fails 1; removing the
+listener's invalidation fails 2. Whole suite: 68 files, 769 tests, green.
+
+**⚠️ Needs you: the migration is written but NOT applied.** The Supabase session pooler was
+saturated while this was built, so `prisma migrate dev` could not run. Apply with
+`npx prisma migrate dev` locally; production picks it up from the cloudbuild migrate step
+(which now has `DIRECT_URL` — see #4). Until it is applied, anything touching
+`recommendations` will fail on the three missing columns.
 
 ---
 

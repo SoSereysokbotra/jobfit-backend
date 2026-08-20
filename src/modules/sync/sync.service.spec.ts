@@ -183,6 +183,9 @@ function recommendation(over: Partial<Row> = {}): Row {
     score: 88.4,
     reasonExplanation: 'matches your skills',
     breakdown: null,
+    computedAt: T0,
+    staleAt: null,
+    dismissedAt: null,
     createdAt: T0,
     updatedAt: T2,
     job: {
@@ -436,13 +439,30 @@ describe('SyncService — resources that cannot express a true delta', () => {
     expect(res.nextCursor).toBeNull();
   });
 
-  it('always reports an empty deletes array for recommendations', async () => {
+  it('reports a live recommendation as an upsert, with no deletes', async () => {
     const sync = build({ recommendations: [recommendation({ updatedAt: T3 })] });
 
     const res = await sync.syncRecommendations(ME, { since: SINCE.toISOString() });
 
     expect(res.upserts).toHaveLength(1);
     expect(res.deletes).toEqual([]);
+  });
+
+  it('reports a DISMISSED recommendation as a delete, not an upsert', async () => {
+    // Until 2026-08-20 a dismissal was a hard delete, so `deletes` was permanently empty
+    // and the job sat in the client cache forever (MENTOR_REVIEW_2026-08-18 §6). It is
+    // `dismissedAt` now, mapped onto the tombstone slot splitDelta already reads.
+    const sync = build({
+      recommendations: [
+        recommendation({ id: 'rec-gone', updatedAt: T3, dismissedAt: T3 }),
+      ],
+    });
+
+    const res = await sync.syncRecommendations(ME, { since: SINCE.toISOString() });
+
+    expect(res.deletes).toEqual(['rec-gone']);
+    // A client receiving both would resurrect it depending on apply order.
+    expect(res.upserts).toHaveLength(0);
   });
 
   it('serves recommendations in the same shape as GET /recommendations', async () => {

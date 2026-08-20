@@ -13,11 +13,15 @@
 //                   fullReplace: true. The resource is a short id list, so a full replace
 //                   is cheap — this is the audit's §5 recommendation, not a shortcut.
 //
-//   recommendations Recommendation has updatedAt but no deletedAt (hard delete), so
-//                   `deletes` is always empty. A recommendation that disappears server-side
-//                   lingers in the client cache until the next full sync. Acceptable: a
-//                   stale suggestion is not a correctness problem the way a stale
-//                   application would be.
+//   recommendations Dismissals ARE reported now. A dismissal used to be a hard delete, so
+//                   `deletes` was permanently empty and a job the user rejected lingered
+//                   in the client cache. It is `dismissedAt` since 2026-08-20
+//                   (MENTOR_REVIEW_2026-08-18 §6), which splitDelta already knows how to
+//                   turn into a tombstone — the row is mapped onto its `deletedAt` slot
+//                   below. Hard deletes remain invisible: recompute drops rows that fall
+//                   out of the ranking, and those still wait for a full sync. That one is
+//                   genuinely acceptable — a stale suggestion is not a correctness problem
+//                   the way a stale application would be.
 //
 //   certifications  No repository exists yet, so this reads Prisma directly.
 //
@@ -180,9 +184,13 @@ export class SyncService {
   }
 
   /**
-   * Recommendations. `deletes` is always empty — see the header note. Ordered by
-   * (updatedAt, id) like every other delta, NOT by score: paging has to follow the
-   * watermark, and the client re-sorts by `match` for display anyway.
+   * Recommendations. Ordered by (updatedAt, id) like every other delta, NOT by score:
+   * paging has to follow the watermark, and the client re-sorts by `match` for display
+   * anyway.
+   *
+   * A dismissed row is a TOMBSTONE, not an upsert. `dismissedAt` is mapped onto the
+   * `deletedAt` slot splitDelta already reads, so a "not interested" propagates to every
+   * device instead of the job sitting in the client cache forever (see the header note).
    */
   async syncRecommendations(
     userId: string,
@@ -196,7 +204,11 @@ export class SyncService {
         include: RECOMMENDATION_JOB_INCLUDE,
       });
 
-      return splitDelta(rows, options.limit, (row) => toRecommendedJobDto(row));
+      return splitDelta(
+        rows.map((row) => ({ ...row, deletedAt: row.dismissedAt })),
+        options.limit,
+        (row) => toRecommendedJobDto(row),
+      );
     });
   }
 
