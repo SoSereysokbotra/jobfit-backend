@@ -23,7 +23,7 @@ git** — not against the docs. Every finding cites a file, a line, or a git obj
 | 2 | `PATCH /users/:id/subscription` has no role or ownership check → free Premium; any user can retier or delete any other user | ✅ Fixed 2026-08-20 |
 | 3 | `GET /users/email/:email` is `@Public()`; `GET /users` lists everyone; `POST /users` accepts `role: ADMIN` | ✅ Fixed 2026-08-20 |
 | 4 | No single backend branch serves both the web app and the extension | ✅ Fixed 2026-08-20 |
-| 5 | Screening ignores `application.resumeId` — the employer judges a CV the candidate did not submit | 🟠 The mentor's question, one layer down |
+| 5 | Screening ignores `application.resumeId` — the employer judges a CV the candidate did not submit | ✅ Fixed 2026-08-20 (match score: stated limit) |
 | 6 | `recommendations` is a write-once cache: changing your CV never moves your matches | 🟠 Correctness |
 | 7 | `GET /recommendations/scout` structurally cannot return a new job | 🟠 Correctness |
 | 8 | `PRIVACY.md` states something the code no longer does, and omits four hosts | 🟠 Legal / store review |
@@ -504,6 +504,60 @@ path, where the answer is already sitting in a column.
 > application row, and which one did the screening read?"*
 > Sharper version: *"Your `Application` table has a `resumeId` column. What is it for? Who
 > reads it?"*
+
+### ✅ Mostly resolved 2026-08-20 — one half fixed, the other half now stated rather than implied
+
+All four consequences confirmed. The write side and the requirements half are fixed; the
+match-score half cannot be, for a documented reason, so it is now declared instead of
+quietly wrong.
+
+**Write side — `submitApplication` resolves the résumé once, at submission.**
+`dto.resumeId` if the caller **owns** it (scoped `userId` + `deletedAt: null`), otherwise
+`activeResume.findActiveResumeId(userId)`. That closes two of the listed defects:
+attaching someone else's CV is refused with a 400 (not a 404 — whether that id exists is
+not the caller's business), and omitting `resumeId` no longer stores NULL when the user has
+a perfectly good default.
+
+**Deliberate deviation from the suggested fix:** the column stays **nullable**. Making it
+non-null would block a candidate who has uploaded nothing from applying at all. NULL now
+means "there was no CV to record", not "we forgot" — a distinction the back-fill makes
+true.
+
+**Read side — screening now selects `resumeId` and passes it to `SkillGapService.analyse`,**
+which grew an optional third parameter. The two live callers that legitimately want the
+*current* CV (`GET /matching/skill-gap`, the learning path) simply omit it. A named résumé
+with no parse yields `NO_PARSED_RESUME` rather than silently falling back to the active
+one — that substitution is the whole defect, so the fallback must not be reachable by
+accident.
+
+#### The match score is a different problem, and the review's diagnosis was one step off
+
+The finding says screening "resolves through `ActiveResumeService` to the user's default CV
+right now". True for the requirements half. The **match score** never touched
+`ActiveResumeService` at all: `matchForJob` runs a cosine against `profiles.embedding` —
+**one vector per user**, built from profile + active parsed résumé
+([matching-embedding.service.ts:74-83](../src/modules/matching/application/services/matching-embedding.service.ts#L74-L83))
+and recomputed whenever either changes. So it is not per-résumé and cannot be pointed at a
+submitted document without per-résumé embeddings, which `PHASE_DEFAULT_RESUME.md`
+explicitly rejected. Adding an embed call would also make `screen()` depend on the AI
+service, which it currently and deliberately does not ("no LLM call").
+
+So `screenMatchScore` remains profile-level. What changed is that
+`ScreeningSummaryDto`'s comment — the one this finding correctly called out for asserting a
+guarantee the code did not provide — now says exactly which of its fields are per-document
+and which is not, instead of implying all of them are.
+
+**Tests — 17 new, all mutation-verified.**
+7 on résumé resolution at submit (ownership, soft-deleted, back-fill, no-résumé user, and
+that a named CV skips the default lookup), 6 on screening reading the submitted CV —
+including one that pins the match score as profile-level so nobody later assumes otherwise
+— and 4 on `analyse`'s résumé selection. Removing the `resumeId` argument from screening
+fails 3; bypassing the ownership check fails 5.
+
+**Also commented, not changed:** the learning path keeps reading the *active* CV on
+purpose. It answers "what should I learn next?", where scoring an old submitted CV would
+recommend learning things the candidate has since added — same helper, different question,
+different correct résumé.
 
 ---
 

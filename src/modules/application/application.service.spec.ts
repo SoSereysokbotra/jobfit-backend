@@ -28,6 +28,8 @@ describe('ApplicationService.submitApplication — internal vs external', () => 
   let jobRepository: { findById: jest.Mock };
   let eventBus: { publish: jest.Mock };
   let screening: { screen: jest.Mock };
+  let activeResume: { findActiveResumeId: jest.Mock };
+  let prisma: { resume: { findFirst: jest.Mock } };
   let service: ApplicationService;
 
   beforeEach(() => {
@@ -40,6 +42,9 @@ describe('ApplicationService.submitApplication — internal vs external', () => 
     jobRepository = { findById: jest.fn() };
     eventBus = { publish: jest.fn().mockResolvedValue(undefined) };
     screening = { screen: jest.fn().mockResolvedValue({ screened: true }) };
+    // No default résumé unless a test says otherwise.
+    activeResume = { findActiveResumeId: jest.fn().mockResolvedValue(null) };
+    prisma = { resume: { findFirst: jest.fn().mockResolvedValue(null) } };
 
     service = new ApplicationService(
       applicationRepository as never,
@@ -50,6 +55,8 @@ describe('ApplicationService.submitApplication — internal vs external', () => 
       jobRepository as never,
       eventBus as never,
       screening as never,
+      activeResume as never,
+      prisma as never,
     );
   });
 

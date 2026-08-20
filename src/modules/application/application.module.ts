@@ -5,6 +5,8 @@ import { UserModule } from '../user/user.module';
 import { JobModule } from '../job/job.module';
 // Exports ApplicationScreeningService — the AI Recruiter screening step.
 import { MatchingModule } from '../matching/matching.module';
+// Exports ActiveResumeService — resolves "which CV did you send" at submission time.
+import { ResumeSelectionModule } from '../resume/resume-selection.module';
 
 import { ApplicationTransitionModule } from './application-transition.module';
 import { ApplicationController } from './presentation/controllers/application.controller';
@@ -18,6 +20,7 @@ import { ContactPersonRepository } from './infrastructure/repositories/contact-p
     UserModule,
     JobModule,
     MatchingModule,
+    ResumeSelectionModule,
     ApplicationTransitionModule,
   ],
   controllers: [ApplicationController],

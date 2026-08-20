@@ -406,3 +406,98 @@ describe('SkillGapService', () => {
     });
   });
 });
+
+// ── Which CV gets read (MENTOR_REVIEW_2026-08-18 §5) ──────────────────────────
+//
+// `analyse` grew an optional resumeId so application screening can judge the document
+// the candidate actually submitted, while the live "how do I match right now" callers
+// keep reading the active CV. The risk in a fallback like this is that it silently
+// substitutes the wrong document, which is the exact bug it exists to fix.
+describe('SkillGapService — choosing the résumé', () => {
+  /** Parses keyed by résumé id, so we can tell which one was read. */
+  const buildWithResumes = (
+    requirements: string[],
+    parsesByResumeId: Record<string, string[]>,
+    activeResumeId: string | null,
+  ) => {
+    const parsedResumeData = {
+      findUnique: jest.fn(({ where }: { where: { resumeId: string } }) => {
+        const skills = parsesByResumeId[where.resumeId];
+        return Promise.resolve(
+          skills ? { skills: JSON.stringify(skills) } : null,
+        );
+      }),
+    };
+    const prisma: any = {
+      job: {
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ requirements, extractedRequirements: [] }),
+      },
+      parsedResumeData,
+    };
+    const activeResume = {
+      findActiveResumeId: jest.fn().mockResolvedValue(activeResumeId),
+    };
+    return {
+      service: new SkillGapService(prisma as never, activeResume as never),
+      parsedResumeData,
+      activeResume,
+    };
+  };
+
+  const REQS = ['Figma prototyping', 'Kubernetes operations'];
+  const PARSES = {
+    'r-design': ['Figma', 'Illustrator'],
+    'r-engineering': ['Kubernetes', 'Go'],
+  };
+
+  it('reads the named résumé, not the active one', async () => {
+    const { service, activeResume } = buildWithResumes(
+      REQS,
+      PARSES,
+      'r-engineering', // the user has since switched their default
+    );
+
+    const result = await service.analyse('u1', 'j1', 'r-design');
+
+    expect(result.skillsConsidered).toEqual(['Figma', 'Illustrator']);
+    expect(result.missing).toEqual(['Kubernetes operations']);
+    // The active résumé must not even be looked up when one was named.
+    expect(activeResume.findActiveResumeId).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the active résumé when none is named', async () => {
+    const { service, activeResume } = buildWithResumes(
+      REQS,
+      PARSES,
+      'r-engineering',
+    );
+
+    const result = await service.analyse('u1', 'j1');
+
+    expect(activeResume.findActiveResumeId).toHaveBeenCalledWith('u1');
+    expect(result.skillsConsidered).toEqual(['Kubernetes', 'Go']);
+  });
+
+  it('treats null the same as omitted — the screening path passes it explicitly', async () => {
+    const { service, activeResume } = buildWithResumes(REQS, PARSES, 'r-design');
+
+    const result = await service.analyse('u1', 'j1', null);
+
+    expect(activeResume.findActiveResumeId).toHaveBeenCalledWith('u1');
+    expect(result.skillsConsidered).toEqual(['Figma', 'Illustrator']);
+  });
+
+  it('does NOT substitute the active résumé when the named one has no parse', async () => {
+    // The dangerous fallback. Naming a document and getting a different document's
+    // evidence is precisely the defect this parameter was added to remove.
+    const { service } = buildWithResumes(REQS, PARSES, 'r-engineering');
+
+    const result = await service.analyse('u1', 'j1', 'r-unparsed');
+
+    expect(result.status).toBe('NO_PARSED_RESUME');
+    expect(result.skillsConsidered).toEqual([]);
+    expect(result.missing).toEqual(REQS);
+  });
+});

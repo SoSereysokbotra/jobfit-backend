@@ -13,6 +13,22 @@ import { ApplicationStatus as DomainStatus } from '@shared/kernel/enums/applicat
  *
  * A SNAPSHOT of that moment, never recomputed — so an employer can always explain a
  * decision they made on it, even after the candidate edits their résumé.
+ *
+ * WHICH RÉSUMÉ THE SNAPSHOT IS OF — the two fields differ, so do not read them as one
+ * number about one document:
+ *
+ *  - `requirementsTotal` / `requirementsCovered` / `missingRequirements` are computed
+ *    from `Application.resumeId` — the CV the candidate actually submitted. Fixed at
+ *    submission and unaffected by anything they change later.
+ *  - `matchScore` is NOT per-résumé. It is a cosine against `profiles.embedding`, one
+ *    vector per user built from their profile plus their ACTIVE résumé at screening
+ *    time. It was frozen with the rest of the snapshot, but the document behind it was
+ *    whichever CV was default then — not necessarily the submitted one.
+ *
+ * Until this comment said so, the guarantee above was simply false: screening read the
+ * active résumé for BOTH halves (MENTOR_REVIEW_2026-08-18 §5). Closing the remaining gap
+ * needs per-résumé embeddings, which PHASE_DEFAULT_RESUME.md deliberately rejected — so
+ * it is a stated limitation, not an oversight.
  */
 export class ScreeningSummaryDto {
   @ApiProperty({ description: 'When screening ran. Null means it never did.' })

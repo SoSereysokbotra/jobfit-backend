@@ -88,13 +88,38 @@ export class SkillGapService {
     private readonly activeResume: ActiveResumeService,
   ) {}
 
-  async analyse(userId: string, jobId: string): Promise<SkillGapResult> {
+  /**
+   * Compare a job's requirements against a candidate's CV.
+   *
+   * WHICH CV, and why the caller gets to say. Two different questions run through here
+   * and they have different correct answers:
+   *
+   *  - *"How do I match this job right now?"* (`GET /matching/skill-gap`, the learning
+   *    path) — the user's CURRENT CV. Omit `resumeId` and it resolves to the active one.
+   *  - *"What did this candidate send me?"* (application screening) — the CV that was
+   *    ACTUALLY SUBMITTED, which may not be the active one any more and may never have
+   *    been. Pass `Application.resumeId`.
+   *
+   * Screening used to omit it, so an employer's summary described whichever CV happened
+   * to be default at read time — apply with your design CV, get screened on your
+   * engineering one (MENTOR_REVIEW_2026-08-18 §5).
+   *
+   * A `resumeId` that has no parse is NOT quietly replaced by the active CV: that is the
+   * exact substitution this parameter exists to prevent, so it yields NO_PARSED_RESUME.
+   */
+  async analyse(
+    userId: string,
+    jobId: string,
+    resumeId?: string | null,
+  ): Promise<SkillGapResult> {
     const [job, parsed] = await Promise.all([
       this.prisma.job.findUnique({
         where: { id: jobId },
         select: { requirements: true, extractedRequirements: true },
       }),
-      this.activeParsedResume(userId),
+      resumeId
+        ? this.parsedResumeById(resumeId)
+        : this.activeParsedResume(userId),
     ]);
 
     // Employer-authored requirements always win. The AI-extracted list is a fallback for
@@ -177,6 +202,15 @@ export class SkillGapService {
   private async activeParsedResume(userId: string): Promise<string[]> {
     const resumeId = await this.activeResume.findActiveResumeId(userId);
     if (!resumeId) return [];
+    return this.parsedResumeById(resumeId);
+  }
+
+  /**
+   * Read one specific parse. Returns empty when that résumé has no parsed data — the
+   * caller named a document, so the honest answer is "it evidences nothing", never
+   * "here is a different document's evidence".
+   */
+  private async parsedResumeById(resumeId: string): Promise<string[]> {
     const parsed = await this.prisma.parsedResumeData.findUnique({
       where: { resumeId },
       select: { skills: true, projects: true, educations: true },
