@@ -53,8 +53,19 @@ const envSchema = z.object({
   // the recommendation pipeline. ON by default — measured MRR@10 0.63 -> 0.75 (+20%).
   MATCHING_RERANK_ENABLED: z.string().optional(),
 
-  // Database
+  // ── Database ──────────────────────────────────────────────────────────────
+  // DATABASE_URL is the runtime connection and must be the Supavisor TRANSACTION
+  // pooler (port 6543). Pointing it at 5432 puts every request through session mode,
+  // which Supabase caps at 15 clients — the app then dies under trivial concurrency
+  // with "max clients reached in session mode".
+  //
+  // DIRECT_URL is the SESSION connection (port 5432) and is used ONLY by
+  // `prisma migrate` / introspection, which need a real session. It is optional here
+  // because the running app never opens it — but prisma/schema.prisma references it, so
+  // `prisma migrate deploy` fails with P1012 if it is missing from the migration job's
+  // environment (see the migrate step in cloudbuild.yaml).
   DATABASE_URL: z.string().url(),
+  DIRECT_URL: z.string().url().optional(),
 
   // ── Auth (self-managed JWT) ──────────────────────────────────────────────
   // JWT_SECRET signs access tokens; JWT_REFRESH_SECRET (optional) signs refresh

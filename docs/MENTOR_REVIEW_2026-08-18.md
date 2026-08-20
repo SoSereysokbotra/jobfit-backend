@@ -22,7 +22,7 @@ git** — not against the docs. Every finding cites a file, a line, or a git obj
 | 1 | No email is ever sent, but login requires a verified email → **no new user can sign in** | ✅ Fixed 2026-08-20 |
 | 2 | `PATCH /users/:id/subscription` has no role or ownership check → free Premium; any user can retier or delete any other user | ✅ Fixed 2026-08-20 |
 | 3 | `GET /users/email/:email` is `@Public()`; `GET /users` lists everyone; `POST /users` accepts `role: ADMIN` | ✅ Fixed 2026-08-20 |
-| 4 | No single backend branch serves both the web app and the extension | 🔴 Release |
+| 4 | No single backend branch serves both the web app and the extension | ✅ Fixed 2026-08-20 |
 | 5 | Screening ignores `application.resumeId` — the employer judges a CV the candidate did not submit | 🟠 The mentor's question, one layer down |
 | 6 | `recommendations` is a write-once cache: changing your CV never moves your matches | 🟠 Correctness |
 | 7 | `GET /recommendations/scout` structurally cannot return a new job | 🟠 Correctness |
@@ -384,6 +384,74 @@ verified against**, not just a date — a date does not identify a tree.
 **The question you'll be asked.**
 > *"Your extension and your web app both talk to the same API. Which commit is deployed, and
 > which of the two is currently broken against it?"*
+
+### ✅ Resolved — merged at `560d70e`; the audit it asked for found two deploy blockers
+
+**The merge already landed.** Re-running the review's own `git ls-tree` check against every
+live ref reproduces its table exactly for the two historical commits, and clears it for the
+current ones:
+
+| Ref | `saved-external-job` | `job-tracker` |
+|---|---|---|
+| `7c145aa` (old `main`) | 6 files | absent |
+| `cbcb455` (old feature branch) | absent | 5 files |
+| `origin/main` · `main` · `fixback` | **6 files** | **5 files** |
+
+**The "which routes exist" re-audit, done properly.** File presence does not prove a route
+is reachable — a merge can bring files without wiring. Checked all four layers:
+
+| Layer | Extension (`saved-jobs/external`) | Frontend (`tracker`) |
+|---|---|---|
+| Files on the tree | 6 ✓ | 5 ✓ |
+| Module in `app.module.ts` | `SavedJobModule` ✓ | `JobTrackerModule` ✓ |
+| Controller in the module | `SavedExternalJobController` ✓ | `JobTrackerController` ✓ |
+| Routes (prefix `api/v1`) | `POST /`, `GET /`, `GET /lookup`, `DELETE /:id` ✓ | 8 routes ✓ |
+| Migration applied in DB | `20260813080000` ✓ | `20260813120000` ✓ |
+| Table exists | `saved_external_jobs` ✓ | `tracked_jobs` ✓ |
+
+**The tree also compiles and passes clean now: 62 suites, 731 tests, 0 failures.** The
+"pre-existing failures" carried through findings #1–#3 were never code — two were a stale
+local Prisma client (`prisma generate` had not been re-run after the merge added
+`TrackedJob`/`SavedExternalJob`), and two were the connection bug below.
+
+#### ⚠️ Two deploy blockers the audit surfaced — fixed in config, but needing action outside this repo
+
+**1. `prisma migrate deploy` could not have run.** `prisma/schema.prisma` declares
+`directUrl = env("DIRECT_URL")`, and Prisma validates every env var the datasource
+references before executing *any* command. `cloudbuild.yaml`'s migrate step passed only
+`DATABASE_URL`, so the step aborts with **P1012 — "Environment variable not found:
+DIRECT_URL"**. Reproduced locally with the same command. Because the pipeline is
+health-gated, a failing migrate step fails the build and nothing deploys — so this does not
+silently skip migrations, it stops releases outright.
+*Fixed here:* `DIRECT_URL` added to `availableSecrets` and to the migrate step's
+`secretEnv`. **Needs you:** create the `DIRECT_URL` secret in Secret Manager (the
+session-mode URL, port 5432) or the step will now fail on a missing secret instead.
+
+**2. `DATABASE_URL` was pointed at the session pooler.** `.env` had port **5432**, which
+Supabase caps at 15 clients — contradicting both the file's own comment and
+`schema.prisma`'s ("runtime queries go through the transaction-mode pooler (6543)"). Every
+test run exhausted it: `FATAL: (EMAXCONNSESSION) max clients reached in session mode`.
+Moving to 6543 alone then fails differently — `42P05 prepared statement "s0" already
+exists` — because Prisma sends named prepared statements that Supavisor reuses across
+clients. **Both are needed: port 6543 *and* `?pgbouncer=true`.** That second requirement is
+very likely why someone moved it back to 5432 in the first place.
+*Fixed here:* local `.env` corrected, and `.env.example` now states both failure modes
+verbatim so the next person recognises them. **Needs you:** check the production
+`DATABASE_URL` secret has `:6543/...?pgbouncer=true`. On 5432 Cloud Run will exhaust the
+pool under real traffic.
+
+#### Still open
+
+- **The extension was not verified.** `jobfit-extension` is not checked out alongside the
+  other repos, so its `PROGRESS.md` "Backend reality (verified)" column could not be
+  updated to record a **commit** rather than a date, as this finding recommends.
+- **`fixback` is 3 commits ahead of `main`** (the fixes for findings #1–#3) and 0 behind.
+  Merging it back is a separate decision.
+- **The convention worth adopting**, since this whole class of error comes from verifying
+  against "the code" without recording *which* code: any claim of the form "no code uses X"
+  carries the SHA it was checked at — `verified at 560d70e`, not `verified 2026-08-17`.
+  Applied to the two stale notes in `HANDOFF_2026-08-17.md` §10 and `JOB_TRACKER_PLAN.md`
+  §6, both of which still told a reader to merge before deploying.
 
 ---
 
