@@ -149,6 +149,14 @@ export class IngestionService {
     const stated = {
       ...(job.minSalary != null && { minSalary: job.minSalary }),
       ...(job.maxSalary != null && { maxSalary: job.maxSalary }),
+      // Units follow the amounts and only the amounts. Writing a currency or a period
+      // for a job whose pay we do not know would describe a number that is not there.
+      ...(job.minSalary != null || job.maxSalary != null
+        ? {
+            ...(job.salaryCurrency != null && { salaryCurrency: job.salaryCurrency }),
+            ...(job.salaryPeriod != null && { salaryPeriod: job.salaryPeriod }),
+          }
+        : {}),
       ...(job.employmentType != null && { employmentType: job.employmentType }),
     };
 

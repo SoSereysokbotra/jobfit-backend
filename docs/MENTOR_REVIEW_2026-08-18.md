@@ -1255,17 +1255,30 @@ is to stop confident wrong numbers. Caught by running the formatter over the rea
 rather than trusting it. Now `maximumFractionDigits: 1`, so it reads `1.2M` while 140,000
 still reads `140K`.
 
-**Tests — 26 new.** 11 on `SalaryRange` and 4 on `JobMapper` (backend), 15 on the
-formatter (frontend), each case drawn from a real row rather than invented. Backend: 76
-files, 890 tests, green. Frontend: 52 tests, green; `tsc` clean apart from two
+**Tests — 32 new.** 11 on `SalaryRange`, 4 on `JobMapper` and 6 on the ingestion units
+rule (backend), 15 on the formatter (frontend), each case drawn from a real row rather
+than invented. Backend: 77 files, 896 tests, green. Frontend: 52 tests, green; `tsc` clean apart from two
 pre-existing errors in `employer/settings` and `profile.mappers`, neither touched here.
 
-**Two things this does NOT fix, stated rather than left implied:**
+#### The ingestion path can no longer write a bare number
 
-1. **Nothing populates the new columns for ingested jobs.** All 305 Cambodian postings
-   still carry no salary at all, so the currency/period work is groundwork — the honest
-   display is live today, the richer data is not. Extracting pay from posting text is a
-   separate job.
+`IngestedJob` accepted `minSalary`/`maxSalary` and nothing else, so the first adapter to
+learn how to read pay would have dropped an unlabelled integer into the column and
+reopened this finding for all future data. It now carries `salaryCurrency` and
+`salaryPeriod` too, and `persist` writes units **only alongside an amount** — a currency
+with nothing to count is not a fact about the job, and writing one for a job whose pay is
+unknown would make an empty row look partially specified.
+
+No adapter emits pay today (verified at `33f7981`); all 305 ingested postings are silent
+about it. This is the guard rail for when one does, and it matters because the boards
+disagree by three orders of magnitude: BongThom quotes MONTHLY in the hundreds, TheMuse
+quotes ANNUAL in the tens of thousands, and "500" from each is the same integer.
+
+**Still NOT fixed, stated rather than left implied:**
+
+1. **No adapter extracts pay from posting text yet.** The columns and the guard rail
+   exist; the data does not. That is a separate job, and until it lands the honest
+   display is the whole of the user-visible improvement.
 2. **`TrackedJob` and `Profile` keep their own salary columns** with the same ambiguity.
    `Profile.salaryCurrency` exists; `Profile` has no period, and the onboarding slider
    still speaks in `$K/year`.
