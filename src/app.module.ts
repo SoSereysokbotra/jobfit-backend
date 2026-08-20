@@ -16,6 +16,7 @@ import { buildLoggerParams, LogFormat } from './config/logger.config';
 
 // Infra
 import { PrismaModule } from './infra/prisma/prisma.module';
+import { StorageModule } from '@infra/storage/storage.module';
 import { AiModule } from './infra/ai/ai.module';
 
 // Events
@@ -96,6 +97,7 @@ import { AlertingModule } from './modules/alerting/alerting.module';
 
     // ── Infrastructure ───────────────────────────────────────────────────────
     PrismaModule,
+    StorageModule,
     EventBusModule,
     SharedModule,
     AiModule,

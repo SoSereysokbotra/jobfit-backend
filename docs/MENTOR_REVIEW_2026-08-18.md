@@ -31,7 +31,7 @@ git** — not against the docs. Every finding cites a file, a line, or a git obj
 | 10 | The paywall gates features no payment path can unlock, and the extension serves the same AI ungated | ✅ Fixed 2026-08-20 (payment module still absent, by decision) |
 | 11 | No rate limit on any AI/GPU route | ✅ Fixed 2026-08-20 |
 | 12 | `formatSalaryRange` fabricates currency and magnitude (`$500K` for a $500 job) | ✅ Fixed 2026-08-20 |
-| 13 | The displayed match **percentage** has never been calibrated — the defect that got `fitScore` rejected | 🟡 Evidence |
+| 13 | The displayed match **percentage** has never been calibrated — the defect that got `fitScore` rejected | ✅ Fixed 2026-08-20 (and uncovered a 🔴 boot failure) |
 | 14 | Soft-deleted users can still log in, and can never re-register | 🟡 Edge case |
 | 15 | Two parallel match tables (`MatchScore` vs `Recommendation`) | 🟡 Design |
 | 16 | `SavedJob` dies with the job; `TrackedJob` survives it | 🟡 Consistency |
@@ -1316,6 +1316,121 @@ for magnitude is not, and the UI should claim exactly as much as the evidence su
 **The question you'll be asked.**
 > *"You showed me a beautiful negative result on the LLM's fit score, and you shipped a 0–100
 > match score anyway. What's the ρ on the one you shipped?"*
+
+### ✅ Resolved 2026-08-20 — the question now has an answer, and finding it broke something open
+
+#### 🔴 First: the app could not boot, and 896 tests passed anyway
+
+`scripts/eval-score-calibration.ts` boots `AppModule`. Running it to answer this finding
+produced not a calibration but a crash:
+
+```
+Nest can't resolve dependencies of the StorageService (?, ConfigService).
+Please make sure that the argument SupabaseClientService at index [0] is
+available in the EmployerModule context.
+```
+
+**§9 introduced it.** Commit `1fb194a` added the signed résumé-download route and listed
+`StorageService` in `EmployerModule`'s providers **without** `SupabaseClientService`,
+which it takes as its first constructor argument. `AppModule` could not instantiate, so
+the backend could not start at all.
+
+**Why nothing caught it.** Jest's `testRegex` is `.*\.spec\.ts$`, which does not match
+`*.e2e-spec.ts` — the e2e suite is a separate config, and it is the only thing that boots
+`AppModule`. So the unit suite is blind to wiring *by construction*, and 896 green tests
+said nothing about whether the application starts. There is no CI to catch it either. It
+was found by accident, while chasing a different finding.
+
+**Fixed structurally, not locally.** The convention had been that each consumer provides
+`StorageService` and `SupabaseClientService` locally — `resume-builder.module.ts` even
+documented it ("no shared module to import and no cross-module coupling"). That
+convention held for two modules and broke on the third. A dependency pair copied by hand
+into every consumer eventually gets copied wrong, so both now live in a `@Global`
+[`StorageModule`](../src/infra/storage/storage.module.ts): importing a module cannot be
+done by halves.
+
+**And a test that would have caught it**
+([app.module.wiring.spec.ts](../src/app.module.wiring.spec.ts)). It walks the module graph
+from decorator metadata — no database, no `NestFactory.create` — and asserts that every
+provider's constructor tokens are visible from the module declaring it. It only checks
+tokens some module actually declares, which is what keeps it quiet about
+framework-supplied ones like `ModuleRef` and `ConfigService`. Mutation-verified by
+restoring the §9 wiring exactly: 2 tests fail.
+
+#### The calibration, at last
+
+| signal | ρ vs human grade | observed spread |
+|---|---|---|
+| **TOTAL score** | **0.662** | **41–69** |
+| skills | 0.553 | 32–61 |
+| **experience** | **0.000** | **constant 40** |
+| location | 0.462 | 55–100 |
+| salary | 0.684 | 50–100 |
+| other | 0.518 | 40–100 |
+
+**The good news the finding did not expect: ρ 0.662.** The deterministic scorer is
+*strongly* correlated with human judgement — nothing like the LLM `fitScore`'s 0.137 /
+−0.065. The ordering is real, and sorting recommendations by it is defensible. That is
+worth saying plainly, because the finding's framing implies the number is probably junk.
+It is not.
+
+**Everything else confirms the finding, and one part is worse than described.**
+
+| grade | n | scored range | mean |
+|---|---|---|---|
+| GREAT | 9 | 51–69 | 60.7 |
+| OK | 3 | 46–51 | 48.7 |
+| BAD | 38 | 41–56 | 46.1 |
+
+- **The scale is a fiction.** The scorer is labelled 0–100 everywhere it is exposed and
+  empirically emits **41–69**. No job can ever be a 90% match, and "41%" reads as a
+  catastrophe when it is merely the bottom of the range.
+- **The grades overlap.** A job a human graded **BAD scored 56**; one graded **GREAT
+  scored 51**. At 54 the percentage tells a user nothing at all.
+- **`experience` is a constant 40** — 25% of the weight contributing zero signal, exactly
+  as the finding predicted, because the sole labeller has no résumé.
+- **n = 1 candidate**, 50 pairs. This measures agreement with one person about one
+  profile.
+
+#### What shipped
+
+**The standard is now executable, not a paragraph.** `eval-score-calibration.ts` reports
+**candidates as well as pairs**, prints the observed range per human grade, and ends with
+a verdict that **exits non-zero** when the evidence does not support a user-facing number
+— ρ < 0.5, fewer than 5 candidates, fewer than 150 pairs, or any inert sub-score. Today
+it fails on three of those, by design. A standard nobody runs is a preference.
+
+**The UI can stop claiming a percentage.**
+[`matchBand`](../src/modules/matching/domain/scoring/match-band.ts) turns the score into
+`STRONG` / `POSSIBLE` / `WEAK`, and both `RecommendedJobDto` and `ScoutMatchDto` now carry
+`band` alongside `match`. The thresholds are read off the distribution rather than chosen
+for roundness — each is the edge of a region where one grade never appeared:
+
+- **≥ 57** — no job scoring this was ever graded BAD (BAD topped out at 56)
+- **51–56** — both GREAT and BAD occur here; the scorer genuinely cannot separate them
+- **≤ 50** — no job scoring this was ever graded GREAT (GREAT bottomed out at 51)
+
+`match` is documented as **ordering-only**, with the observed range stated on the field
+itself so the next person reading the DTO cannot miss it. The thresholds are marked
+provisional against `MIN_CANDIDATES`; when the label set grows they must be re-derived,
+not patched.
+
+**A §12 leftover found on the way.** `recommended-job.mapper.ts` was still building
+`salaryRange` with a hardcoded `currency: 'USD'` and `min: job.minSalary ?? 0` — so a job
+stating only a minimum was published as an invalid `min–0` band. It now reads the real
+currency and period, and requires **both** bounds.
+
+**Tests — 15 new** (13 on the band, including monotonicity and that no label contains a
+digit; 3 on module wiring). Whole suite: **79 files, 911 tests, green**; lint clean.
+
+#### Still open, deliberately
+
+- **The frontend still renders `{job.match}%`** in six places, and the extension badge
+  shows a percentage. The API now offers `band`; switching the UI over is a separate,
+  visible product change and belongs in the frontend repo's own PR.
+- **Re-labelling is the real unblock.** Everything above is bounded by n = 1. The fix is
+  not code — it is 4 more labellers, at least one of whom has a résumé so `experience`
+  stops being a constant.
 
 ---
 

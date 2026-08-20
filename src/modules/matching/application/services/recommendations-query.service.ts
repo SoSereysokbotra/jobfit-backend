@@ -7,6 +7,7 @@ import {
   RECOMMENDATION_JOB_INCLUDE,
   toRecommendedJobDto,
 } from '../../presentation/dtos/recommended-job.mapper';
+import { matchBand } from '../../domain/scoring/match-band';
 
 const DEFAULT_LIMIT = 50;
 
@@ -161,6 +162,7 @@ export class RecommendationsQueryService {
             title: job.title,
             company: job.company?.name ?? null,
             score: Math.round(s.score),
+            band: matchBand(s.score),
             url: job.externalUrl ?? (base ? `${base}/jobs/${job.id}` : ''),
           },
         ];

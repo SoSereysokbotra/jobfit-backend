@@ -35,7 +35,6 @@ import { EmployerApplicationRepository } from './infrastructure/repositories/emp
 import { ApplicationTransitionModule } from '../application/application-transition.module';
 
 // Signs the short-lived résumé download URLs the pipeline hands an employer.
-import { StorageService } from '@infra/storage/storage.service';
 
 @Module({
   imports: [JobModule, ApplicationTransitionModule],
@@ -45,7 +44,8 @@ import { StorageService } from '@infra/storage/storage.service';
     EmployerApplicationController,
   ],
   providers: [
-    StorageService,
+    // StorageService comes from the @Global StorageModule. It was listed HERE, without
+    // the SupabaseClientService it depends on, which stopped AppModule booting entirely.
     // services
     EmployerContextService,
     EmployerCompanyService,
