@@ -19,16 +19,16 @@ git** — not against the docs. Every finding cites a file, a line, or a git obj
 
 | # | Finding | Severity |
 |---|---|---|
-| 1 | No email is ever sent, but login requires a verified email → **no new user can sign in** | 🔴 Product-fatal |
-| 2 | `PATCH /users/:id/subscription` has no role or ownership check → free Premium; any user can retier or delete any other user | 🔴 Security |
-| 3 | `GET /users/email/:email` is `@Public()`; `GET /users` lists everyone; `POST /users` accepts `role: ADMIN` | 🔴 Security |
-| 4 | No single backend branch serves both the web app and the extension | 🔴 Release |
-| 5 | Screening ignores `application.resumeId` — the employer judges a CV the candidate did not submit | 🟠 The mentor's question, one layer down |
-| 6 | `recommendations` is a write-once cache: changing your CV never moves your matches | 🟠 Correctness |
-| 7 | `GET /recommendations/scout` structurally cannot return a new job | 🟠 Correctness |
-| 8 | `PRIVACY.md` states something the code no longer does, and omits four hosts | 🟠 Legal / store review |
-| 9 | Employers cannot see a candidate's résumé anywhere in the API | 🟠 Missing requirement |
-| 10 | The paywall gates features no payment path can unlock, and the extension serves the same AI ungated | 🟠 Contradiction |
+| 1 | No email is ever sent, but login requires a verified email → **no new user can sign in** | ✅ Fixed 2026-08-20 |
+| 2 | `PATCH /users/:id/subscription` has no role or ownership check → free Premium; any user can retier or delete any other user | ✅ Fixed 2026-08-20 |
+| 3 | `GET /users/email/:email` is `@Public()`; `GET /users` lists everyone; `POST /users` accepts `role: ADMIN` | ✅ Fixed 2026-08-20 |
+| 4 | No single backend branch serves both the web app and the extension | ✅ Fixed 2026-08-20 |
+| 5 | Screening ignores `application.resumeId` — the employer judges a CV the candidate did not submit | ✅ Fixed 2026-08-20 (match score: stated limit) |
+| 6 | `recommendations` is a write-once cache: changing your CV never moves your matches | ✅ Fixed 2026-08-20 (migration pending) |
+| 7 | `GET /recommendations/scout` structurally cannot return a new job | ✅ Fixed 2026-08-20 |
+| 8 | `PRIVACY.md` states something the code no longer does, and omits four hosts | ⚠️ Verified + drafted 2026-08-20 — extension repo absent, NOT fixed |
+| 9 | Employers cannot see a candidate's résumé anywhere in the API | ✅ Fixed 2026-08-20 |
+| 10 | The paywall gates features no payment path can unlock, and the extension serves the same AI ungated | ✅ Fixed 2026-08-20 (payment module still absent, by decision) |
 | 11 | No rate limit on any AI/GPU route | 🟠 Cost |
 | 12 | `formatSalaryRange` fabricates currency and magnitude (`$500K` for a $500 job) | 🟠 Honesty |
 | 13 | The displayed match **percentage** has never been calibrated — the defect that got `fitScore` rejected | 🟡 Evidence |
@@ -76,6 +76,49 @@ than one that throws.
 > ready: no test covers register→verify→login end to end, because every test seeds a verified
 > user.)
 
+### ✅ Resolved 2026-08-20 — and two of the premises were already stale
+
+Two claims in this finding did not hold when we went to fix it:
+
+- **Mail *is* wired.** A real nodemailer transport exists at
+  [email.service.ts](../src/shared/services/email.service.ts), driven by
+  [auth-events.listener.ts](../src/modules/auth/infrastructure/event-handlers/auth-events.listener.ts)
+  off `UserRegisteredEvent` (`EventEmitterModule` is registered globally by
+  [event-bus.module.ts](../src/events/event-bus.module.ts)). `cloudbuild.yaml` sets
+  `EMAIL_HOST/PORT/USER/SMTP_FROM` and pulls `EMAIL_PASS` from Secret Manager. We ran the
+  real SMTP handshake against the configured Gmail account: **OK**.
+- **`MailerService` was never the delivery channel.** The `console.log` stub the finding
+  cites (`src/infra/mailer/mailer.service.ts`) had zero importers — dead scaffolding that
+  read like the live path. Deleted, along with the empty
+  `auth/infrastructure/external-services/email.service.ts` placeholder.
+- **A register→verify→login e2e does exist** ([auth.e2e-spec.ts](../test/auth.e2e-spec.ts),
+  "Flow 1"). It reads the code from the DB, so it covers the *flow* but not *delivery* —
+  which is why a delivery outage would still have passed CI.
+
+What was genuinely broken is the **fail-open**: with `EMAIL_*` unset, `EmailService` logged
+a warning and skipped every send, and `send()` swallowed SMTP errors, so both a missing
+config and a bouncing mailbox looked exactly like success. Fixed:
+
+1. **Boot guard** — `NODE_ENV=production` with `EMAIL_HOST/USER/PASS` missing now **throws
+   in `onModuleInit`**. The deploy fails rather than shipping a revision that accepts
+   registrations it cannot complete. Dev/test still fail open, so the suite needs no SMTP.
+2. **`send()` throws** instead of swallowing. The event listener — the one caller that must
+   not propagate, since the user row is already committed — catches it and logs at `error`
+   naming the user-visible consequence ("cannot log in until they resend").
+3. **Boot-time SMTP handshake**, run in the background so a transient outage does not block
+   a Cloud Run cold start. Catches a rotated/wrong `EMAIL_PASS`, which the boot guard
+   cannot.
+4. **`mail` on `/health/ready`** ([mail.health-indicator.ts](../src/modules/health/indicators/mail.health-indicator.ts))
+   — soft, like Redis: never `down`, but `degraded: true` with the impact spelled out when
+   the transport is unconfigured or the handshake failed.
+5. **Tests** — 12 specs on the guard/throw/status contract, 4 on the listener's
+   swallow-and-log, 4 on the indicator.
+
+**Still open:** delivery is proven at the transport, not at the inbox — nothing asserts a
+real message arrives (Gmail may throttle or spam-file it). A synthetic
+register→receive→verify probe against a real mailbox is the next step, and is what would
+turn *"the handshake is OK"* into *"a user can actually sign in."*
+
 ---
 
 ## 2. 🔴 Any logged-in user can grant themselves Premium — or delete your account
@@ -117,6 +160,54 @@ routes are a duplicate surface that arguably should not exist.
 > `PATCH /users/<my id>/subscription` with `PROFESSIONAL`."*
 > And: *"Your global guard is 'secure by default'. Default-secure against what, exactly?"*
 
+### ✅ Resolved 2026-08-20
+
+Both holes were real and reproduced. Blast radius for the fix was zero: the frontend calls
+only `/admin/users/*` — nothing anywhere consumes `UserController`'s write routes.
+
+**The answer to "default-secure against what":** authentication only. `JwtAuthGuard`
+(APP_GUARD) demands a token; `RolesGuard` (APP_GUARD) allows any route carrying no
+`@Roles()`. So the default is *authenticated*, never *authorized*, and every route must
+state its own authorization. That distinction is now written at the top of
+[user.controller.ts](../src/modules/user/presentation/controllers/user.controller.ts) where
+the next person adding a route will read it. We left `RolesGuard` itself alone — flipping
+it to deny-by-default would 403 every unannotated route in the app.
+
+What changed:
+
+| Route | Before | After |
+|---|---|---|
+| `POST /users` | any authenticated caller | `@Roles('ADMIN')` |
+| `GET /users` | any authenticated caller | `@Roles('ADMIN')` |
+| `PATCH /users/:id/subscription` | any authenticated caller | `@Roles('ADMIN')` |
+| `DELETE /users/:id` | any authenticated caller | **removed** |
+
+- **The delete is gone, not gated.** `@Roles('ADMIN')` on it would have left *two* admin
+  delete paths, one of which writes no audit row — which is the defect `HANDOFF_2026-08-17`
+  §6 blames for the vanished user and its 50 eval pairs. Deletion is now reachable only via
+  `DELETE /admin/users/:id`, which records `USER_ACCOUNT_DELETED`. The now-dead
+  `UserService.deleteUser` was removed too, so the path cannot be re-exposed by one
+  `@Post()`.
+- `:id` on the subscription route is now `ParseUUIDPipe`, matching the admin controller.
+- **`profile.controller.ts` was already correct** — its `:userId` writes all call
+  `assertOwner()`. `UserController` was the outlier, not the norm.
+
+**Tests.** 14 specs in
+[user.controller.authz.spec.ts](../src/modules/user/presentation/controllers/user.controller.authz.spec.ts)
+drive the *real* `RolesGuard` against the *real* decorator metadata, including the original
+exploit (a `JOB_SEEKER` retiering their own id) and an assertion that no deletion route
+exists. Verified by mutation: deleting a single `@Roles('ADMIN')` fails 4 of them. A test
+against the controller *body* would have passed either way — the whole defect was that the
+body never got to decide.
+
+**Follow-ups this exposes (not done here):**
+1. `PATCH /users/:id/subscription` still writes **no audit row**. `AuditActionType` has no
+   `USER_SUBSCRIPTION_CHANGED` member, so adding one needs a Prisma migration.
+2. The payment module is an empty scaffold (`payment.controller.ts` is 4 lines). This admin
+   route is therefore the *only* way a tier can change — finding #10, confirmed.
+3. `GET /users/:id` and the `@Public()` `GET /users/email/:email` are still open. Those are
+   finding #3, deliberately untouched here.
+
 ---
 
 ## 3. 🔴 A public user-lookup, an open user list, and role-settable user creation
@@ -154,6 +245,110 @@ assignment is an admin action with an audit row, not a request field.
 > *"Which of your endpoints can I hit with no token at all? List them from memory."*
 > Then: *"What's the blast radius if I can enumerate every user's email and role?"*
 
+### ✅ Resolved 2026-08-20 — and the chain was worse than described
+
+`GET /users` and `POST /users` were already gated by §2. What remained:
+
+| Route | Before | After |
+|---|---|---|
+| `GET /users/email/:email` | `@Public()` — no token | `@Roles('ADMIN')` |
+| `GET /users/:id` | any authenticated caller, any record | own record, or `@Roles`-free ADMIN check |
+| `CreateUserDto.role` | optional `UserRole`, incl. `ADMIN` | **field removed** |
+
+- **The email oracle is gone and nothing needed it.** No consumer exists in the frontend or
+  the AI service, and `POST /auth/register` already answers "is this email taken" with
+  `EMAIL_ALREADY_REGISTERED` — which is where the review said it belongs.
+- **`GET /users/:id` now checks ownership** against the JWT subject
+  (`assertSelfOrAdmin`), mirroring what `profile.controller.ts` already did correctly. The
+  check runs *before* the lookup, so it is not a 403-vs-404 existence oracle either.
+- **`role` is off `CreateUserDto`.** Stripping it costs nothing real: this route creates a
+  row with an empty `passwordHash` that cannot log in, so it was never a working way to
+  make an employer. The working path is `prisma/seed.ts`, which sets a password and a
+  verified email. `UserController` is now the only user-writing surface outside
+  `/admin/users`, and it can mint nothing but a JOB_SEEKER.
+
+**On "two bugs holding each other shut" — the chain was live, and longer than the review
+traced.** With §1 fixed, we walked it: create the account → `request-password-reset` (which
+does not care that `passwordHash` is empty) → `reset-password` sets a real hash. That still
+leaves `login.handler.ts:68` refusing an unverified account — but
+`POST /auth/resend-email-verification` mails a code to the same attacker-controlled address,
+so `isVerified` falls too. Four public auth routes, no admin involvement after step 1. §2
+closed step 1 by requiring an ADMIN token; §3 removes the `role` field so even that step
+cannot mint a privileged account.
+
+**Tests.** [user.controller.authz.spec.ts](../src/modules/user/presentation/controllers/user.controller.authz.spec.ts)
+is now 30 specs, including a sweep asserting **no handler on this controller is `@Public()`**
+— so re-adding one fails a test rather than shipping. Both new protections were
+mutation-verified: restoring `@Public()` on the email lookup fails 4 specs; deleting the
+`assertSelfOrAdmin` call fails 2.
+
+**Answering "which endpoints can I hit with no token", for real.** Counted by decorator,
+not by grep on the string: **23 before, 18 now**, and all 18 are deliberate.
+
+| Count | Routes |
+|---|---|
+| 9 | `POST /auth/*` — register, login, refresh, and the verify/reset flows |
+| 3 | `GET /health/live · ready · heartbeat` |
+| 2 | `GET /jobs`, `GET /jobs/:id` — the public job board |
+| 1 | `POST /admin/login` |
+| 1 | `GET /metrics` — separately gated by `METRICS_TOKEN` |
+| 1 | `GET /skills/:skillId/learning-resources` |
+| 1 | `GET /resume-builder/templates` |
+
+The 5 removed: `GET /users/email/:email` (§3 above) and the 4 profile reads (§3a below).
+
+### 3a. ✅ The profile reads, found while answering that question — gated 2026-08-20
+
+**Not in the original review.** `GET /profiles/:userId` was `@Public()` and returned
+`phone`, full name, photo, bio, location and job preferences — unauthenticated, keyed by
+user id. Its three sub-resources
+(`/profiles/:userId/education | experience | skills`) were public too, adding full work
+history, education and skill set. With `GET /users/email/:email` handing out user ids to
+anyone, **email → user id → phone number** was a complete anonymous PII harvest. §3 closed
+the first link; this closes the rest.
+
+All four now require a token and enforce **self-or-admin**, the same rule as
+`GET /users/:id`:
+
+| Route | Before | After |
+|---|---|---|
+| `GET /profiles/:userId` | `@Public()` | self or ADMIN |
+| `GET /profiles/:userId/skills` | `@Public()` | self or ADMIN |
+| `GET /profiles/:userId/education` | `@Public()` | self or ADMIN |
+| `GET /profiles/:userId/experience` | `@Public()` | self or ADMIN |
+
+**A second bug the gating exposed.** The education and experience lists carry
+`@HttpCache({ maxAge: 60, staleWhileRevalidate: 300 })`, and `cacheControlHeader` defaults
+`scope` to **`public`** ([http-cache.decorator.ts:31](../src/common/decorators/http-cache.decorator.ts#L31)).
+Turning a public list into a per-user response while it still emits
+`Cache-Control: public` would let a shared CDN or proxy store one user's work history and
+serve it to whoever asked next — a worse leak than the one being fixed. Both are now
+`scope: 'private'`. The decorator already documented this ("use `private` for anything
+scoped to one user"); nothing had needed it before.
+
+**`assertOwner` was copy-pasted in four controllers** (three module-level functions plus a
+private method). Since self-or-admin was needed in four more places, both now live in
+[ownership.util.ts](../src/common/utils/ownership.util.ts) with the reasoning attached, and
+all five call sites — including `GET /users/:id` — use it.
+
+**Deliberately NOT a role test.** `assertSelfOrAdmin` refuses an `EMPLOYER` reading a
+candidate. When "an employer may view an applicant" lands (finding #9) that must be a
+*checked relationship* — an application linking the two — because `role === 'EMPLOYER'`
+alone would re-open the entire candidate table to anyone who registers as an employer. The
+helper says so in a comment, and a test pins it.
+
+**Blast radius: none found.** Every profile read in the frontend goes through
+`use-profile.ts`, where all 11 hooks derive the id from `useUserId()` — the caller's own.
+No page reads another user's profile; the AI service does not call these routes.
+⚠️ `jobfit-extension` was not checked — it is not checked out locally.
+
+**Tests.** 20 specs in
+[profile-reads.authz.spec.ts](../src/modules/user/presentation/controllers/profile-reads.authz.spec.ts)
+(per route: `@Public()` is gone, a stranger is refused, an EMPLOYER is refused, owner and
+ADMIN pass, and the refusal happens *before* the read so it is not an existence oracle),
+plus 9 on the shared helper. Mutation-verified: deleting the `assertSelfOrAdmin` call from
+two controllers fails 4 specs.
+
 ---
 
 ## 4. 🔴 No single backend branch serves both clients
@@ -189,6 +384,74 @@ verified against**, not just a date — a date does not identify a tree.
 **The question you'll be asked.**
 > *"Your extension and your web app both talk to the same API. Which commit is deployed, and
 > which of the two is currently broken against it?"*
+
+### ✅ Resolved — merged at `560d70e`; the audit it asked for found two deploy blockers
+
+**The merge already landed.** Re-running the review's own `git ls-tree` check against every
+live ref reproduces its table exactly for the two historical commits, and clears it for the
+current ones:
+
+| Ref | `saved-external-job` | `job-tracker` |
+|---|---|---|
+| `7c145aa` (old `main`) | 6 files | absent |
+| `cbcb455` (old feature branch) | absent | 5 files |
+| `origin/main` · `main` · `fixback` | **6 files** | **5 files** |
+
+**The "which routes exist" re-audit, done properly.** File presence does not prove a route
+is reachable — a merge can bring files without wiring. Checked all four layers:
+
+| Layer | Extension (`saved-jobs/external`) | Frontend (`tracker`) |
+|---|---|---|
+| Files on the tree | 6 ✓ | 5 ✓ |
+| Module in `app.module.ts` | `SavedJobModule` ✓ | `JobTrackerModule` ✓ |
+| Controller in the module | `SavedExternalJobController` ✓ | `JobTrackerController` ✓ |
+| Routes (prefix `api/v1`) | `POST /`, `GET /`, `GET /lookup`, `DELETE /:id` ✓ | 8 routes ✓ |
+| Migration applied in DB | `20260813080000` ✓ | `20260813120000` ✓ |
+| Table exists | `saved_external_jobs` ✓ | `tracked_jobs` ✓ |
+
+**The tree also compiles and passes clean now: 62 suites, 731 tests, 0 failures.** The
+"pre-existing failures" carried through findings #1–#3 were never code — two were a stale
+local Prisma client (`prisma generate` had not been re-run after the merge added
+`TrackedJob`/`SavedExternalJob`), and two were the connection bug below.
+
+#### ⚠️ Two deploy blockers the audit surfaced — fixed in config, but needing action outside this repo
+
+**1. `prisma migrate deploy` could not have run.** `prisma/schema.prisma` declares
+`directUrl = env("DIRECT_URL")`, and Prisma validates every env var the datasource
+references before executing *any* command. `cloudbuild.yaml`'s migrate step passed only
+`DATABASE_URL`, so the step aborts with **P1012 — "Environment variable not found:
+DIRECT_URL"**. Reproduced locally with the same command. Because the pipeline is
+health-gated, a failing migrate step fails the build and nothing deploys — so this does not
+silently skip migrations, it stops releases outright.
+*Fixed here:* `DIRECT_URL` added to `availableSecrets` and to the migrate step's
+`secretEnv`. **Needs you:** create the `DIRECT_URL` secret in Secret Manager (the
+session-mode URL, port 5432) or the step will now fail on a missing secret instead.
+
+**2. `DATABASE_URL` was pointed at the session pooler.** `.env` had port **5432**, which
+Supabase caps at 15 clients — contradicting both the file's own comment and
+`schema.prisma`'s ("runtime queries go through the transaction-mode pooler (6543)"). Every
+test run exhausted it: `FATAL: (EMAXCONNSESSION) max clients reached in session mode`.
+Moving to 6543 alone then fails differently — `42P05 prepared statement "s0" already
+exists` — because Prisma sends named prepared statements that Supavisor reuses across
+clients. **Both are needed: port 6543 *and* `?pgbouncer=true`.** That second requirement is
+very likely why someone moved it back to 5432 in the first place.
+*Fixed here:* local `.env` corrected, and `.env.example` now states both failure modes
+verbatim so the next person recognises them. **Needs you:** check the production
+`DATABASE_URL` secret has `:6543/...?pgbouncer=true`. On 5432 Cloud Run will exhaust the
+pool under real traffic.
+
+#### Still open
+
+- **The extension was not verified.** `jobfit-extension` is not checked out alongside the
+  other repos, so its `PROGRESS.md` "Backend reality (verified)" column could not be
+  updated to record a **commit** rather than a date, as this finding recommends.
+- **`fixback` is 3 commits ahead of `main`** (the fixes for findings #1–#3) and 0 behind.
+  Merging it back is a separate decision.
+- **The convention worth adopting**, since this whole class of error comes from verifying
+  against "the code" without recording *which* code: any claim of the form "no code uses X"
+  carries the SHA it was checked at — `verified at 560d70e`, not `verified 2026-08-17`.
+  Applied to the two stale notes in `HANDOFF_2026-08-17.md` §10 and `JOB_TRACKER_PLAN.md`
+  §6, both of which still told a reader to merge before deploying.
 
 ---
 
@@ -242,6 +505,60 @@ path, where the answer is already sitting in a column.
 > Sharper version: *"Your `Application` table has a `resumeId` column. What is it for? Who
 > reads it?"*
 
+### ✅ Mostly resolved 2026-08-20 — one half fixed, the other half now stated rather than implied
+
+All four consequences confirmed. The write side and the requirements half are fixed; the
+match-score half cannot be, for a documented reason, so it is now declared instead of
+quietly wrong.
+
+**Write side — `submitApplication` resolves the résumé once, at submission.**
+`dto.resumeId` if the caller **owns** it (scoped `userId` + `deletedAt: null`), otherwise
+`activeResume.findActiveResumeId(userId)`. That closes two of the listed defects:
+attaching someone else's CV is refused with a 400 (not a 404 — whether that id exists is
+not the caller's business), and omitting `resumeId` no longer stores NULL when the user has
+a perfectly good default.
+
+**Deliberate deviation from the suggested fix:** the column stays **nullable**. Making it
+non-null would block a candidate who has uploaded nothing from applying at all. NULL now
+means "there was no CV to record", not "we forgot" — a distinction the back-fill makes
+true.
+
+**Read side — screening now selects `resumeId` and passes it to `SkillGapService.analyse`,**
+which grew an optional third parameter. The two live callers that legitimately want the
+*current* CV (`GET /matching/skill-gap`, the learning path) simply omit it. A named résumé
+with no parse yields `NO_PARSED_RESUME` rather than silently falling back to the active
+one — that substitution is the whole defect, so the fallback must not be reachable by
+accident.
+
+#### The match score is a different problem, and the review's diagnosis was one step off
+
+The finding says screening "resolves through `ActiveResumeService` to the user's default CV
+right now". True for the requirements half. The **match score** never touched
+`ActiveResumeService` at all: `matchForJob` runs a cosine against `profiles.embedding` —
+**one vector per user**, built from profile + active parsed résumé
+([matching-embedding.service.ts:74-83](../src/modules/matching/application/services/matching-embedding.service.ts#L74-L83))
+and recomputed whenever either changes. So it is not per-résumé and cannot be pointed at a
+submitted document without per-résumé embeddings, which `PHASE_DEFAULT_RESUME.md`
+explicitly rejected. Adding an embed call would also make `screen()` depend on the AI
+service, which it currently and deliberately does not ("no LLM call").
+
+So `screenMatchScore` remains profile-level. What changed is that
+`ScreeningSummaryDto`'s comment — the one this finding correctly called out for asserting a
+guarantee the code did not provide — now says exactly which of its fields are per-document
+and which is not, instead of implying all of them are.
+
+**Tests — 17 new, all mutation-verified.**
+7 on résumé resolution at submit (ownership, soft-deleted, back-fill, no-résumé user, and
+that a named CV skips the default lookup), 6 on screening reading the submitted CV —
+including one that pins the match score as profile-level so nobody later assumes otherwise
+— and 4 on `analyse`'s résumé selection. Removing the `resumeId` argument from screening
+fails 3; bypassing the ownership check fails 5.
+
+**Also commented, not changed:** the learning path keeps reading the *active* CV on
+purpose. It answers "what should I learn next?", where scoring an old submitted CV would
+recommend learning things the candidate has since added — same helper, different question,
+different correct résumé.
+
 ---
 
 ## 6. 🟠 `recommendations` is a write-once cache — changing your CV never moves your matches
@@ -291,6 +608,73 @@ constantly, so the dismissed-jobs table it suggests becomes a **prerequisite**, 
 > When the honest answer is "when the row count hits zero": *"So what does the reranker's +20%
 > MRR actually buy a user who signed up last month?"*
 
+### ✅ Resolved 2026-08-20 — invalidate-on-write, plus the prerequisite the review flagged
+
+Confirmed exactly as described, and it needed a schema change: making invalidation real
+without durable dismissals would have resurrected every rejected job on the next profile
+edit. Migration
+[`20260820100000_recommendation_staleness_and_dismissal`](../prisma/migrations/20260820100000_recommendation_staleness_and_dismissal/migration.sql)
+adds three nullable/defaulted columns to `recommendations` — additive, safe on a populated
+table.
+
+**Staleness is a MARKER, not a delete.** The review's tier 1 is `deleteMany({ userId })`
+and let the lazy path rebuild. We didn't, for two reasons:
+
+1. A recompute that then fails leaves the user staring at an **empty** recommendations
+   page. Slightly-old matches beat none, so stale rows keep serving until a rebuild
+   succeeds — and `getForUser` now catches a failed recompute and serves what it has.
+2. Deletion is *how a dismissal is represented*. Tier 1 as written would have wiped
+   dismissals on every profile edit.
+
+So: `staleAt` is set by
+[`RecommendationStalenessService`](../src/modules/matching/application/services/recommendation-staleness.service.ts),
+called by `UserProfileUpdatedListener` **after a successful re-embed** (marking first would
+loop the read path against an unchanged vector). `getForUser` recomputes when rows are
+missing **or** any row is stale. Recompute clears `staleAt` and stamps `computedAt`.
+
+**Tier 2, `computedAt`, is in** — so the UI can say *"matched against your CV from 3 Aug"*
+rather than implying the number is live. Nothing renders it yet; the column is there and
+populated.
+
+**The prerequisite: dismissals are now durable.** `dismissedAt` on the row instead of a
+hard delete. Reads filter it, the extension's scout filters it, recompute refreshes the
+score but never clears the flag. `recommendation-dismiss.service.ts`'s ⚠️ KNOWN LIMITATION
+header is now a ✅ RESOLVED header.
+
+#### A second bug, not in the finding: recompute never removed anything
+
+`execute()` **upserts only**. It writes the new top-N and leaves every other row untouched
+— so a job that dropped out of the ranking kept sitting in the user's list with whatever
+score it had months ago, *even on the manual recompute path the finding says is the only
+one that runs*. Recompute now deletes this user's non-dismissed rows that are not in the
+new set.
+
+#### A gap this closed for free
+
+`GET /sync/recommendations` had `deletes` permanently empty "for want of a soft delete"
+(sync.service.ts:16-17, audit §2). `dismissedAt` is exactly that soft delete, and
+`splitDelta` already turns a tombstone into a delete — so a dismissal now propagates to
+every device instead of lingering in the client cache. One mapping line.
+
+#### Known trade-off
+
+The first read after any profile/résumé change now pays for a recompute, which includes
+the LLM rerank. Previously only brand-new users ever paid it. That is the cost of the
+feature working at all; a background job (tier 3 / #7) is where it goes to stop being on
+the request path.
+
+**Tests — 22 new, mutation-verified.** 5 on the staleness service, 6 on when `getForUser`
+recomputes (including that a failed recompute still serves stale rows), 5 on the listener
+pairing, 4 on durable dismissal, plus recompute-prunes-obsolete-rows and the sync
+tombstone. Reverting the read path to the old zero-row check fails 1; removing the
+listener's invalidation fails 2. Whole suite: 68 files, 769 tests, green.
+
+**⚠️ Needs you: the migration is written but NOT applied.** The Supabase session pooler was
+saturated while this was built, so `prisma migrate dev` could not run. Apply with
+`npx prisma migrate dev` locally; production picks it up from the cloudbuild migrate step
+(which now has `DIRECT_URL` — see #4). Until it is applied, anything touching
+`recommendations` will fail on the three missing columns.
+
 ---
 
 ## 7. 🟠 The scout endpoint cannot, by construction, return a new job
@@ -322,6 +706,55 @@ is worth more than either implementation.
 **The question you'll be asked.**
 > *"Your scout tells me about new matching jobs every 3 hours. Trace the path a job takes from
 > `ingest.ts` to my notification. Where does it stop?"*
+
+### ✅ Resolved 2026-08-20 — option (a), with the tripwire for when (b) becomes right
+
+Confirmed exactly as described. **The window is now inverted:** instead of taking cached
+recommendations and filtering them by `job.createdAt`, `getScout` takes the jobs that are
+actually new and scores those. A job with no cached row — which is every job ingested
+since the user's last recompute — is now reachable.
+
+**Where the path used to stop:** `ingest.ts` → `jobs` row → `JobPublishedEvent` →
+`JobPublishedListener` embeds it → **and there it ended.** Nothing wrote a
+`recommendation` row for that job for any user, and `getScout` read only that table. The
+embedding existed; the row the endpoint queried never did.
+
+**Scoring goes through the same path that writes the cache.** The scoring half of
+`RecomputeUserMatchesUseCase.execute` is extracted into a public `scoreJobs(userId, near)`
+that both callers use, so a scout score and a `/recommendations` score for the same job
+cannot drift. `execute` was refactored to consume it; the characterisation test that pins
+its exact payloads still passes unchanged, which is the evidence the refactor was
+behaviour-preserving.
+
+**Why (a) and not (b), stated in the code.** At current corpus size a scout call scores a
+few hundred rows: one pgvector query plus arithmetic, no LLM. Fan-out on ingest moves that
+cost off the request path and amortises it across users — the right answer once the corpus
+or user base makes per-request scoring expensive — but it needs a queue, a per-user job,
+and a way not to stampede on a large import. `SCOUT_CANDIDATE_CAP = 500` is the tripwire:
+**if it starts truncating real results, live scoring has been outgrown.**
+
+Also handled:
+
+- **Dismissed jobs are excluded.** The cache read filtered them implicitly (via #6);
+  scoring live has to do it explicitly, and does — before scoring, so no number is
+  computed for a job nobody will see.
+- **A missing `since` no longer means "everything ever".** It defaults to a 7-day window.
+  The extension always sends its watermark; this covers a first run or a client that lost
+  it.
+- **No embedding, no score.** `cosineForJobs` drops jobs without embeddings and returns
+  nothing when the user has no profile vector — both correctly yield "no matches" rather
+  than a score computed from a missing input.
+
+**Tests — 15 new.** 11 on `getScout` (led by *"returns a newly ingested job that has NO
+recommendation row"*, which was the whole defect) and 4 on the extracted `scoreJobs`.
+Mutation-verified: pointing scout back at the cache fails 7. Whole suite: 69 files, 783
+tests, green.
+
+**⚠️ Not updated:** the extension's `CONTRACTS.md` P3, which describes this endpoint. That
+repo is not checked out locally. Its wording ("jobs matching the user's profile at/above
+`minScore`, created since `since`") is now *accurate* rather than aspirational, but the
+`since`-omitted default and the dismissal exclusion are new and should be written down
+there.
 
 ---
 
@@ -371,6 +804,62 @@ absolute. Add the four hosts. Re-date the file. Fix the Store copy in the same c
 > from the job description. Which is true?"* — a question with no good answer if you have not
 > already noticed it.
 
+### ⚠️ Prepared, NOT fixed — 2026-08-20. The files are in a repo that is not checked out.
+
+`PRIVACY.md`, `STORE_LISTING.md` and `manifest.json` all live in `jobfit-extension`, which
+is not present alongside `jobfit-backend`, `jobfit-frontend` and `jobfits-ai-service`. **No
+extension file was edited.** The finding stays open until someone with that repo acts on
+it.
+
+What was done instead: the claim was verified from the **receiving** side, which is the
+authoritative one and is available. Results in
+[EXTENSION_PRIVACY_FACTS.md](./EXTENSION_PRIVACY_FACTS.md), with drafted replacement text
+for both documents.
+
+**The finding is correct — both routes do receive posting text**
+([match-report.dto.ts](../src/modules/match-report/presentation/dto/match-report.dto.ts),
+[save-external-job.dto.ts](../src/modules/saved-job/dto/save-external-job.dto.ts)). The
+bolded sentence in `PRIVACY.md` is false. Two corrections to the detail, though:
+
+#### 🔴 The suggested replacement wording is itself wrong, and would have shipped
+
+§8 proposes saying the posting body is *"sent once, **never stored as a listing**, and only
+the derived report is kept on your own account."*
+
+That is true of **Full Report** and **false of Save Job**. `SavedExternalJob.description`
+is a persisted column — *"what the user saved from the posting"* (`schema.prisma:589`),
+returned by `GET /saved-jobs/external` and kept until the user deletes it. **Storing it is
+the entire point of the feature**: it is the bookmark the user comes back to read.
+
+Adopting the proposed sentence would have replaced one incorrect privacy statement with
+another — in a document whose whole problem is that it was written without checking. The
+two routes need separate answers.
+
+#### Two further details the rewrite needs
+
+- **"Nothing from the posting is stored" is also wrong for Full Report.**
+  `match_reports.payload` holds **AI-extracted requirement phrases**, drawn from the
+  posting body and frequently near-verbatim fragments of it. The identifiers-only claim in
+  [match-report-payload.ts:24](../src/modules/match-report/domain/match-report-payload.ts#L24)
+  is true of `payload.job` and not of the payload as a whole. The honest word is *derived
+  summary*.
+- **The 8,000-char figure is the extension's cap, not the server's.** Both DTOs accept
+  **20,000**. A policy should quote the server bound, since that is what constrains any
+  caller.
+
+#### One fact that makes the story stronger, and is not currently claimed
+
+Posting text sent to `/match-report` is processed by **JobFit's own AI service running
+local models via Ollama** — never a third-party model provider. That is a materially better
+privacy position than the false absolute it would replace, and `PRIVACY.md` does not say
+it.
+
+#### Not verifiable from here
+
+The host-permissions half. `manifest.json` is in the extension repo, and the four hosts
+come from `MULTI_SITE_PLAN.md` — a *plan*, which may not match what shipped. Whoever fixes
+this must diff the policy against the **shipped manifest**, not the plan.
+
 ---
 
 ## 9. 🟠 An employer cannot see the candidate's résumé
@@ -400,6 +889,42 @@ application is for.
 
 **The question you'll be asked.**
 > *"I'm an employer. Ten people applied. How do I read their CVs?"*
+
+### ✅ Resolved 2026-08-20 — the answer is now a route
+
+Confirmed: `grep -rn "resume" src/modules/employer` returned nothing. Both missing pieces
+were already on the `Application` row and simply never projected.
+
+**On the board — `GET /employer/applications`:**
+
+- `resume` — `{ id, fileName, fileType, fileSize }`, or `null`. **Metadata only, no URL.**
+  A board load lists every application; minting a signed download credential per card
+  would put dozens of live URLs into a response the employer will mostly not open, and
+  which may be cached or logged. `null` also covers "applied without a CV" and "has since
+  deleted it", so the card never shows a dead link.
+- `coverLetter` — the string was on the row the whole time.
+
+**On demand — `GET /employer/applications/:id/resume`:** a signed, expiring URL plus the
+filename and type.
+
+| Decision | Why |
+|---|---|
+| **Which CV** | `Application.resumeId` — the one actually submitted, fixed at submission by §5. Never the candidate's current default; an employer has to be able to explain a decision from the document they were shown. **This finding depended on §5 and could not have been done correctly before it.** |
+| **Authorisation** | The same `companyId` check every other write on this service uses. An employer reaches only a résumé attached to an application to **their own** job. |
+| **Order of operations** | The URL is minted **after** the company check, never before. Tested explicitly — on any refusal path `getSignedUrl` must not have been called. |
+| **Path construction** | From the résumé's **owner** (`resume.userId`), not the requesting employer. |
+| **TTL** | 300s. It is a bearer credential to a third party's private file: long enough to click, short enough that a URL recovered from a log or browser history is worthless. |
+| **404 wording** | "applied without one" and "has deleted the résumé they applied with" are separate messages. Conflating them would misdescribe the candidate. |
+
+**Tests — 12, mutation-verified.** 8 on the download route (three of them pure
+authorisation) and 4 on the list projection. Deleting the company check from
+`getResumeDownload` fails the test that matters. Whole suite: 70 files, 795 tests, green.
+
+**Still open, deliberately:** this closes the *access* gap, not the *audit* gap. Nothing
+records that an employer viewed a candidate's CV. `AuditActionType` has no member for it,
+so it needs a Prisma migration — the same blocker as the subscription-change audit noted
+under §2. For a hiring product handling CVs, "who opened whose résumé, and when" is worth
+having.
 
 ---
 
@@ -437,6 +962,58 @@ payment module has to exist. Either is defensible; the current state is the one 
 
 **The question you'll be asked.**
 > *"Cover letters are Premium. Show me a user who is Premium, and show me how they got there."*
+
+### ✅ Resolved 2026-08-20 — tiers are REAL; the bypass is closed and the shop is explicitly shut
+
+All three facts confirmed. The decision the finding asks for has been made: **tiers are a
+real product**, so the gate stays and the holes get closed — rather than deleting
+`assertPremium` and the tier language.
+
+Where the three holes stand:
+
+| Hole | Status |
+|---|---|
+| (a) no legitimate way to become Premium | **Open, and now stated.** An ADMIN grant is the only path. Documented in code, not implied. |
+| (b) free via one unguarded `PATCH` | **Closed by §2** — `PATCH /users/:id/subscription` is `@Roles('ADMIN')`. |
+| (c) the same AI free via the extension routes | **Closed here.** |
+
+**One entitlement rule, in one place.**
+[`EntitlementService`](../src/modules/user/application/services/entitlement.service.ts)
+replaces two independent copies of the tier comparison —
+`GenerationController.assertPremium` (threw 403) and `ResumeController.hasPremiumAccess`
+(degraded, dropping AI suggestions). Both behaviours are correct for their route and are
+kept; what is no longer duplicated is *the definition of "paid"*. It exposes
+`hasPaidPlan()` for the degrading caller and `requirePaidPlan()` for the throwing one.
+
+It **fails closed**: an unknown or deleted user is not entitled. The old inline checks used
+`account?.subscriptionTier === …`, which is the same outcome by accident rather than by
+decision, and the kind of thing a later refactor gets wrong.
+
+**The extension routes are gated.** `POST /generate/cover-letter` and
+`POST /generate/interview-prep` run the *same* `GenerationService` as the two paid routes
+directly above them. `PROGRESS.md` recorded their being open as an *"accepted caveat"* —
+but that trade-off assumed a working paywall elsewhere, so in practice it read as *"the
+paywall is optional if you know the other URL"*. **A different client is not a different
+entitlement.** `extensionInterview` did not previously use the authenticated user at all
+(the questions come from the job title); it takes it now purely to answer *may you run
+this*.
+
+**"No self-serve payment" is now a written fact.** `EntitlementService`'s header states
+plainly that `PaymentService` is an empty class, `StripeAdapter.createSubscription` returns
+`''`, `PaymentController` declares no routes, and the schema has no Subscription or Payment
+model — so an admin grant is the only way in. The gate being real and the shop being shut
+are both intentional, and neither should be inferred from the other.
+
+**Tests — 18, mutation-verified.** 9 on the entitlement rule (including failing closed on
+an unknown user), 5 on the newly gated extension routes, plus the two existing tier specs
+rebuilt to drive the **real** `EntitlementService` over a stub repository rather than
+restating the rule. One test asserts the *whole route surface* of the controller, so a new
+generation route added without a check fails it rather than quietly reopening the hole.
+Removing both extension guards fails 2. Whole suite: 71 files, 809 tests, green.
+
+**What is still needed to answer the interviewer's question with a demo:** the payment
+module. Choosing option 3 (build Stripe) needs plan/price decisions and a Stripe account
+before any of it can be correct, which is why it was not bundled in here.
 
 ---
 

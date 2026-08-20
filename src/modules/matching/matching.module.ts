@@ -11,6 +11,7 @@ import { RecomputeUserMatchesUseCase } from './application/use-cases/recompute-u
 import { MatchingEmbeddingService } from './application/services/matching-embedding.service';
 import { RecommendationsQueryService } from './application/services/recommendations-query.service';
 import { RecommendationDismissService } from './application/services/recommendation-dismiss.service';
+import { RecommendationStalenessService } from './application/services/recommendation-staleness.service';
 import { SkillGapService } from './application/services/skill-gap.service';
 import { JobMatchService } from './application/services/job-match.service';
 import { ApplicationScreeningService } from './application/services/application-screening.service';
@@ -31,6 +32,7 @@ import { UserProfileUpdatedListener } from './listeners/user-profile-updated.lis
     RecomputeUserMatchesUseCase,
     RecommendationsQueryService,
     RecommendationDismissService,
+    RecommendationStalenessService,
     SkillGapService,
     JobMatchService,
     ApplicationScreeningService,

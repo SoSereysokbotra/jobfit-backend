@@ -164,18 +164,18 @@ model User {
   refreshTokens    RefreshToken[]
 
   // ── User module (Phase 3) ──────────────────────────────────────────────────
-  profile         Profile?
-  experiences     Experience[]
-  educations      Education[]
-  certifications  Certification[]
-  skills          UserSkill[]
-  analytics       UserAnalytics?
-  resumes         Resume[]
-  applications    Application[]
-  savedJobs       SavedJob[]
-  recommendations Recommendation[]
-  matchLabels     MatchLabel[]
-  matchReports    MatchReport[]
+  profile           Profile?
+  experiences       Experience[]
+  educations        Education[]
+  certifications    Certification[]
+  skills            UserSkill[]
+  analytics         UserAnalytics?
+  resumes           Resume[]
+  applications      Application[]
+  savedJobs         SavedJob[]
+  recommendations   Recommendation[]
+  matchLabels       MatchLabel[]
+  matchReports      MatchReport[]
   savedExternalJobs SavedExternalJob[]
   trackedJobs       TrackedJob[]
 
@@ -911,11 +911,37 @@ model Recommendation {
   breakdown         Json? // sub-scores: skills, experience, location, salary
   reasonExplanation String? // human-readable "why this matched"
 
+  // When the score was last computed. Distinct from updatedAt, which any write bumps —
+  // this one answers "what CV/profile is this number actually about?", so the UI can say
+  // "matched against your CV from 3 Aug" instead of implying the number is live.
+  computedAt DateTime @default(now())
+
+  // Set when something the score depends on changes (profile, preferences, résumé,
+  // default-résumé switch). The next read recomputes.
+  //
+  // A MARKER, NOT A DELETE. Deleting on change would be simpler, but a recompute that
+  // then failed would leave the user staring at zero recommendations — strictly worse
+  // than slightly old ones. Stale rows keep serving until a recompute succeeds.
+  staleAt DateTime?
+
+  // "Not interested". Dismissal used to be represented by the row's ABSENCE, which meant
+  // any recompute resurrected it — harmless only because recomputes essentially never
+  // happened (MENTOR_REVIEW_2026-08-18 §6). Now that invalidation is real, absence can no
+  // longer carry that meaning: a dismissed row survives as a tombstone that recompute
+  // refreshes but never un-dismisses, and reads filter out.
+  //
+  // This also closes the GET /sync/recommendations gap (sync.service.ts:16-17), whose
+  // `deletes` was permanently empty for want of a soft delete.
+  dismissedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([userId, jobId])
   @@index([userId, score])
+  // Reads are "this user's live recommendations, best first"; dismissed rows are
+  // tombstones and must not cost anything to skip.
+  @@index([userId, dismissedAt, score])
   @@map("recommendations")
 }
 

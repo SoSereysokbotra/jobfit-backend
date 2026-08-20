@@ -13,6 +13,22 @@ import { ApplicationStatus as DomainStatus } from '@shared/kernel/enums/applicat
  *
  * A SNAPSHOT of that moment, never recomputed — so an employer can always explain a
  * decision they made on it, even after the candidate edits their résumé.
+ *
+ * WHICH RÉSUMÉ THE SNAPSHOT IS OF — the two fields differ, so do not read them as one
+ * number about one document:
+ *
+ *  - `requirementsTotal` / `requirementsCovered` / `missingRequirements` are computed
+ *    from `Application.resumeId` — the CV the candidate actually submitted. Fixed at
+ *    submission and unaffected by anything they change later.
+ *  - `matchScore` is NOT per-résumé. It is a cosine against `profiles.embedding`, one
+ *    vector per user built from their profile plus their ACTIVE résumé at screening
+ *    time. It was frozen with the rest of the snapshot, but the document behind it was
+ *    whichever CV was default then — not necessarily the submitted one.
+ *
+ * Until this comment said so, the guarantee above was simply false: screening read the
+ * active résumé for BOTH halves (MENTOR_REVIEW_2026-08-18 §5). Closing the remaining gap
+ * needs per-résumé embeddings, which PHASE_DEFAULT_RESUME.md deliberately rejected — so
+ * it is a stated limitation, not an oversight.
  */
 export class ScreeningSummaryDto {
   @ApiProperty({ description: 'When screening ran. Null means it never did.' })
@@ -44,6 +60,34 @@ export class ScreeningSummaryDto {
       'description by AI. The employer is entitled to know which they are judging on.',
   })
   requirementsSource: string;
+}
+
+/**
+ * The résumé the candidate submitted with this application — metadata only.
+ *
+ * NO URL HERE, on purpose. A board load lists every application; minting a signed
+ * download credential for each one would put dozens of live URLs into a response that may
+ * be cached, logged or shared, when the employer will open at most one or two. Ask for the
+ * URL when you actually want the file: `GET /employer/applications/:id/resume`.
+ */
+export class SubmittedResumeDto {
+  @ApiProperty() id: string;
+  @ApiProperty({ description: 'As the candidate named it — shown on the card.' })
+  fileName: string;
+  @ApiProperty({ description: 'PDF | DOCX' }) fileType: string;
+  @ApiProperty({ description: 'Bytes.' }) fileSize: number;
+
+  constructor(row: {
+    id: string;
+    fileName: string;
+    fileType: string;
+    fileSize: number;
+  }) {
+    this.id = row.id;
+    this.fileName = row.fileName;
+    this.fileType = row.fileType;
+    this.fileSize = row.fileSize;
+  }
 }
 
 export class EmployerApplicationResponseDto {
@@ -84,6 +128,26 @@ export class EmployerApplicationResponseDto {
   })
   screening: ScreeningSummaryDto;
 
+  @ApiPropertyOptional({
+    type: SubmittedResumeDto,
+    nullable: true,
+    description:
+      'The CV this candidate applied with — the one recorded on the application, not ' +
+      'whichever résumé is their default today. Null when they had none to send, or when ' +
+      'they have since deleted it. Call GET /employer/applications/{id}/resume for a ' +
+      'short-lived download URL.',
+  })
+  resume: SubmittedResumeDto | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description:
+      'The cover letter the candidate wrote for this application. It was on the ' +
+      'Application row all along and simply never reached the employer.',
+  })
+  coverLetter: string | null;
+
   @ApiProperty() appliedAt: Date;
 
   @ApiProperty({
@@ -110,6 +174,8 @@ export class EmployerApplicationResponseDto {
     unreadMessages: number;
     employerNotes: string | null;
     screening: ScreeningSummaryDto;
+    resume: SubmittedResumeDto | null;
+    coverLetter: string | null;
     appliedAt: Date;
   }) {
     this.id = row.id;
@@ -121,6 +187,8 @@ export class EmployerApplicationResponseDto {
     this.unreadMessages = row.unreadMessages;
     this.employerNotes = row.employerNotes;
     this.screening = row.screening;
+    this.resume = row.resume;
+    this.coverLetter = row.coverLetter;
     this.appliedAt = row.appliedAt;
     this.availableActions = employerActionsFrom(
       row.status as unknown as DomainStatus,

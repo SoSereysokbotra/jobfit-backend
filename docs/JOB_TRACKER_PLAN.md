@@ -145,6 +145,11 @@ The claim that no code uses it is true on `feat/external-job-tracker` and **fals
 to `"real"`. The two branches are disjoint: neither can serve both clients. Merge before
 deploying either. Details in the review, finding #4.
 
+> ✅ **Resolved 2026-08-20 — merged at `560d70e`.** Both features now exist, are mounted,
+> and are routable on the same tree; both tables exist in the database. The claim is
+> therefore false everywhere now: **`saved_external_jobs` is in use — do not drop it.**
+> Verified at `560d70e`, not "on 2026-08-20" — a date does not identify a tree.
+
 ### §7 "no match score on the card" — the design answer got harder
 
 The open design question (a ring for cards with a `jobId`, nothing for hand-entered ones) now

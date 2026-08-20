@@ -5,13 +5,15 @@
 // AUTH NOTE: the docs use @UseGuards(SupabaseAuthGuard); this project is self-managed JWT
 // with JwtAuthGuard registered GLOBALLY (secure-by-default). Write routes keep an explicit
 // @UseGuards(JwtAuthGuard) to mirror intent and enforce "own profile only" (JWT subject ==
-// :userId). The list route is @Public().
+// :userId).
+//
+// The list route USED TO BE @Public(). A user's skill set is profile PII keyed by user id
+// (MENTOR_REVIEW_2026-08-18 §3), so it is now self-or-admin, matching the profile read.
 
 import {
   Body,
   Controller,
   Delete,
-  ForbiddenException,
   Get,
   HttpCode,
   HttpStatus,
@@ -20,9 +22,14 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Public } from '@common/decorators/public.decorator';
+import {
+  ApiBearerAuth,
+  ApiForbiddenResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
+import { assertOwner, assertSelfOrAdmin } from '@common/utils/ownership.util';
 import {
   AuthenticatedUser,
   JwtAuthGuard,
@@ -52,11 +59,16 @@ export class SkillsController {
   }
 
   @Get()
-  @Public()
-  @ApiOperation({ summary: 'List a user’s skills (public)' })
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'List a user’s skills (own, or any as ADMIN)' })
+  @ApiForbiddenResponse({
+    description: 'Not your profile, and you are not an ADMIN.',
+  })
   async list(
+    @CurrentUser() caller: AuthenticatedUser,
     @Param('userId') userId: string,
   ): Promise<SkillResponseDto[]> {
+    assertSelfOrAdmin(caller, userId);
     const skills = await this.skillsService.getSkills(userId);
     return skills.map((skill) => new SkillResponseDto(skill));
   }
@@ -88,9 +100,3 @@ export class SkillsController {
   }
 }
 
-/** "Own profile only" — the JWT subject must match the path userId. */
-function assertOwner(user: AuthenticatedUser, userId: string): void {
-  if (user.id !== userId) {
-    throw new ForbiddenException('You can only modify your own profile');
-  }
-}

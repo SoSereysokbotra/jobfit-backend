@@ -65,7 +65,16 @@ export class ApplicationScreeningService {
     try {
       const application = await this.prisma.application.findUnique({
         where: { id: applicationId },
-        select: { id: true, userId: true, jobId: true, status: true, screenedAt: true },
+        select: {
+          id: true,
+          userId: true,
+          jobId: true,
+          // The CV the candidate actually submitted. Screening reads THIS, not whichever
+          // résumé is default at read time — see the note above the two calls below.
+          resumeId: true,
+          status: true,
+          screenedAt: true,
+        },
       });
       if (!application) return { ...EMPTY, skipped: 'NOT_FOUND' };
 
@@ -73,9 +82,27 @@ export class ApplicationScreeningService {
       // the record the employer already acted on.
       if (application.screenedAt) return { ...EMPTY, skipped: 'ALREADY_SCREENED' };
 
+      // WHICH CV EACH HALF READS — they differ, and the difference is not yet closed.
+      //
+      // `skillGap.analyse` is given `application.resumeId`, so the requirements-coverage
+      // half judges the document the candidate actually sent. It used to omit it and read
+      // the user's active résumé instead, which meant applying with a design CV and being
+      // screened on an engineering one (MENTOR_REVIEW_2026-08-18 §5).
+      //
+      // `jobMatch.matchForJob` CANNOT yet do the same. Its score comes from a cosine
+      // against `profiles.embedding` — one vector per USER, built from the profile plus
+      // the ACTIVE parsed résumé (matching-embedding.service.ts:74-83) and recomputed
+      // whenever either changes. Scoring the submitted résumé would need a per-résumé
+      // embedding, which PHASE_DEFAULT_RESUME.md deliberately rejected. So
+      // `screenMatchScore` remains a snapshot of a profile-level number, and only the
+      // requirement counts are per-document. Anything shown to an employer should say so.
       const [match, gap] = await Promise.all([
         this.jobMatch.matchForJob(application.userId, application.jobId),
-        this.skillGap.analyse(application.userId, application.jobId),
+        this.skillGap.analyse(
+          application.userId,
+          application.jobId,
+          application.resumeId,
+        ),
       ]);
 
       const outcome: ScreeningOutcome = {

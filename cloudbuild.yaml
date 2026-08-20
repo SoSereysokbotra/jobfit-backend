@@ -26,6 +26,14 @@ availableSecrets:
   secretManager:
     - versionName: projects/$PROJECT_ID/secrets/DATABASE_URL/versions/latest
       env: DATABASE_URL
+    # DIRECT_URL is REQUIRED by the migrate step, not optional. prisma/schema.prisma
+    # declares `directUrl = env("DIRECT_URL")`, and Prisma validates every env var the
+    # datasource references before it runs — so `migrate deploy` aborts with P1012
+    # ("Environment variable not found: DIRECT_URL") when it is absent, regardless of
+    # DATABASE_URL being set. It must be the SESSION-mode connection (port 5432):
+    # migrations need a real session, which the transaction pooler cannot give.
+    - versionName: projects/$PROJECT_ID/secrets/DIRECT_URL/versions/latest
+      env: DIRECT_URL
 
 steps:
   # 1) Build the image (tagged with the commit SHA + latest).
@@ -51,7 +59,8 @@ steps:
     name: node:22
     entrypoint: npx
     args: ['--yes', 'prisma@5.22.0', 'migrate', 'deploy']
-    secretEnv: ['DATABASE_URL']
+    # Both, and DIRECT_URL is not decorative — see availableSecrets above.
+    secretEnv: ['DATABASE_URL', 'DIRECT_URL']
 
   # 4) Deploy a new revision WITHOUT traffic, addressable via the `candidate` tag.
   #    Secrets are wired from Secret Manager; non-secret config via env vars.
@@ -75,7 +84,11 @@ steps:
       # Delimiter is ^|^ (not the default comma) because CORS_ORIGIN is itself a
       # comma-separated list. It cannot be ^@^ either: EMAIL_USER/SMTP_FROM contain '@'.
       # EMAIL_* (minus the password, which is a secret below) enables verification and
-      # password-reset mail — without it EmailService silently skips every send.
+      # password-reset mail. These are REQUIRED: email verification gates login, so
+      # EmailService refuses to boot under NODE_ENV=production when HOST/USER/PASS are
+      # missing — the deploy fails loudly instead of shipping a revision that accepts
+      # registrations it can never complete. A *wrong* EMAIL_PASS still boots (the SMTP
+      # handshake is async); that surfaces as mail.degraded on /health/ready.
       # SMTP_FROM must match the authenticated Gmail account, otherwise Gmail rewrites it.
       - '--set-env-vars=^|^NODE_ENV=production|LOG_FORMAT=json|LOG_LEVEL=info|METRICS_ENABLED=true|TRACE_ENABLED=false|SERVICE_NAME=${_SERVICE}|SERVICE_VERSION=$BUILD_ID|GCP_PROJECT_ID=$PROJECT_ID|CORS_ORIGIN=${_CORS_ORIGIN}|EMAIL_HOST=smtp.gmail.com|EMAIL_PORT=587|EMAIL_USER=soviseth869@gmail.com|SMTP_FROM=JobFit Support <soviseth869@gmail.com>'
       # REDIS_URL still omitted — the secret exists but its value is unverified, and a bad

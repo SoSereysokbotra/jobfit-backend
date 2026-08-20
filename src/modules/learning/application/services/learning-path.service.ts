@@ -170,6 +170,13 @@ export class LearningPathService {
 
     // One analysis per application. Applications per user are single digits today, so a loop
     // is honest and readable; batch this if that ever stops being true.
+    //
+    // DELIBERATELY the active résumé, not `application.resumeId`. Screening passes the
+    // submitted CV because it answers "what did this candidate send me?"
+    // (MENTOR_REVIEW_2026-08-18 §5) — but this feature answers "what should I learn
+    // next?", and that is about the CV you have NOW. Scoring an old submitted CV would
+    // recommend learning things the candidate has since added. Same helper, different
+    // question, different correct résumé.
     const analyses = await Promise.all(
       applications.map(async (a) => ({
         applicationId: a.id,

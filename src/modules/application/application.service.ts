@@ -29,6 +29,8 @@ import { ApplicationStatus } from '@shared/kernel/enums/application-status.enum'
 import { SubmitApplicationDto } from './dto/submit-application.dto';
 import { DuplicateApplicationDto } from './dto/similar-application.dto';
 import { ApplicationScreeningService } from '@modules/matching/application/services/application-screening.service';
+import { ActiveResumeService } from '@modules/resume/application/services/active-resume.service';
+import { PrismaService } from '@infra/prisma/prisma.service';
 import { AddContactPersonDto } from './dto/add-contact-person.dto';
 import { ERROR_MESSAGES } from '@common/constants/error-messages';
 
@@ -43,6 +45,8 @@ export class ApplicationService {
     @Inject(JOB_REPOSITORY) private readonly jobRepository: IJobRepository,
     private readonly eventBus: DomainEventBus,
     private readonly screening: ApplicationScreeningService,
+    private readonly activeResume: ActiveResumeService,
+    private readonly prisma: PrismaService,
   ) {}
 
   async submitApplication(
@@ -75,10 +79,12 @@ export class ApplicationService {
       throw new BadRequestException('You have already applied to this job');
     }
 
+    const resumeId = await this.resolveResumeId(userId, dto.resumeId);
+
     const application = Application.create({
       userId,
       jobId: dto.jobId,
-      resumeId: dto.resumeId,
+      resumeId,
       notes: dto.notes,
       coverLetter: dto.coverLetter,
       status: ApplicationStatus.SUBMITTED,
@@ -103,6 +109,45 @@ export class ApplicationService {
     await this.screening.screen(application.id);
 
     return application;
+  }
+
+  /**
+   * Decide which résumé this application was sent with, at WRITE time.
+   *
+   * An application asks a different question from matching. Matching asks "which CV
+   * represents you right now?"; an application asks "which CV did you send, then?" — and
+   * the answer has to be fixed at submission, because the candidate can change their
+   * default five minutes later and the employer must still be able to explain the
+   * decision they made (MENTOR_REVIEW_2026-08-18 §5).
+   *
+   * Two things this closes:
+   *
+   *  - `dto.resumeId` used to reach the row with NO OWNERSHIP CHECK. Nothing read the
+   *    column, so it was harmless — right up until screening started reading it, which is
+   *    this same change. Attaching someone else's CV to your application is now refused.
+   *  - Omitting `resumeId` used to store NULL even when the user had a perfectly good
+   *    default, leaving the application permanently unattributable. It now back-fills.
+   *
+   * Still nullable, deliberately: a user who has uploaded nothing must still be able to
+   * apply. NULL here means "there was no CV to record", not "we forgot".
+   */
+  private async resolveResumeId(
+    userId: string,
+    requested?: string,
+  ): Promise<string | undefined> {
+    if (requested) {
+      const owned = await this.prisma.resume.findFirst({
+        where: { id: requested, userId, deletedAt: null },
+        select: { id: true },
+      });
+      // Not 404: whether that résumé exists is not the caller's business.
+      if (!owned) {
+        throw new BadRequestException('That résumé does not belong to you');
+      }
+      return owned.id;
+    }
+    // Back-fill from the default so the row records something reviewable.
+    return (await this.activeResume.findActiveResumeId(userId)) ?? undefined;
   }
 
   async getApplication(applicationId: string): Promise<Application> {

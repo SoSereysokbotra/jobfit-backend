@@ -16,16 +16,40 @@ const OFFER_UNREAD = {
   },
 } as const;
 
+// The résumé the candidate ACTUALLY SUBMITTED — `Application.resumeId`, fixed at
+// submission (MENTOR_REVIEW_2026-08-18 §5), not whichever CV is their default today.
+// Metadata only: enough for the board to say "CV.pdf, 240 KB" without minting a download
+// credential for every card on every page load. The URL is a separate, deliberate request.
+const SUBMITTED_RESUME = {
+  select: {
+    id: true,
+    userId: true,
+    fileName: true,
+    fileType: true,
+    fileSize: true,
+    deletedAt: true,
+  },
+} as const;
+
 export type PipelineApplicationRow = Prisma.ApplicationGetPayload<{
   include: {
     user: { select: { id: true; name: true; email: true } };
     job: { select: { id: true; title: true; companyId: true } };
     offer: typeof OFFER_UNREAD;
+    resume: typeof SUBMITTED_RESUME;
   };
 }>;
 
 export type ApplicationWithJob = Prisma.ApplicationGetPayload<{
   include: { job: { select: { companyId: true } } };
+}>;
+
+/** An application plus the résumé it was submitted with, for the download route. */
+export type ApplicationWithResume = Prisma.ApplicationGetPayload<{
+  include: {
+    job: { select: { companyId: true } };
+    resume: typeof SUBMITTED_RESUME;
+  };
 }>;
 
 @Injectable()
@@ -37,6 +61,17 @@ export class EmployerApplicationRepository {
     return this.prisma.application.findFirst({
       where: { id, deletedAt: null },
       include: { job: { select: { companyId: true } } },
+    });
+  }
+
+  /** Same, plus the submitted résumé — for minting a download URL. */
+  findByIdWithResume(id: string): Promise<ApplicationWithResume | null> {
+    return this.prisma.application.findFirst({
+      where: { id, deletedAt: null },
+      include: {
+        job: { select: { companyId: true } },
+        resume: SUBMITTED_RESUME,
+      },
     });
   }
 
@@ -66,6 +101,7 @@ export class EmployerApplicationRepository {
         user: { select: { id: true, name: true, email: true } },
         job: { select: { id: true, title: true, companyId: true } },
         offer: OFFER_UNREAD,
+        resume: SUBMITTED_RESUME,
       },
       // Best-first: most requirements evidenced, then match score, then recency.
       //

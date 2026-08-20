@@ -14,6 +14,15 @@ export interface NearJobRow {
   cosine_sim: number;
 }
 
+/** One job scored for one user by {@link RecomputeUserMatchesUseCase.scoreJobs}. */
+export interface ScoredJob {
+  jobId: string;
+  /** 0-100 weighted total, same scale the recommendations cache stores. */
+  score: number;
+  breakdown: SubScores;
+  reasonExplanation: string;
+}
+
 export interface RetrievalOptions {
   /**
    * Apply the LLM reranker to the fused shortlist (Phase B).
@@ -66,6 +75,85 @@ export class RecomputeUserMatchesUseCase {
   }
 
   async execute(userId: string, limit = 50): Promise<number> {
+    const near = await this.retrieveRankedJobs(userId, limit);
+    if (near.length === 0) {
+      this.logger.warn(
+        `No recommendations for user ${userId} (missing candidate/job embeddings?)`,
+      );
+      return 0;
+    }
+
+    const scored = await this.scoreJobs(userId, near);
+    if (scored === null) return 0; // no profile — nothing to match against
+
+    let written = 0;
+    // One timestamp for the whole batch: these scores describe the same moment, and
+    // per-row now() would make them look staggered in the UI.
+    const now = new Date();
+    const keptJobIds: string[] = [];
+    for (const { jobId, score, breakdown, reasonExplanation } of scored) {
+      // Prisma's Json input wants an index-signature type; SubScores is fixed-shape.
+      const breakdownJson = breakdown as unknown as Record<string, number>;
+
+      // `dismissedAt` is deliberately absent from `update`: refreshing the score of a
+      // job the user rejected is fine, un-rejecting it is not. Clearing `staleAt` here
+      // is what actually ends the recompute-on-read loop.
+      await this.prisma.recommendation.upsert({
+        where: { userId_jobId: { userId, jobId } },
+        update: {
+          score,
+          breakdown: breakdownJson,
+          reasonExplanation,
+          computedAt: now,
+          staleAt: null,
+        },
+        create: {
+          userId,
+          jobId,
+          score,
+          breakdown: breakdownJson,
+          reasonExplanation,
+          computedAt: now,
+        },
+      });
+      written++;
+      keptJobIds.push(jobId);
+    }
+
+    // Rows for jobs that did NOT survive this recompute are obsolete — the upsert above
+    // only ever writes the new top-N, so without this a job that fell out of the ranking
+    // kept sitting in the user's list with whatever score it had months ago. Dismissed
+    // rows are exempt: they are tombstones, and deleting one would let the job come back.
+    const { count: removed } = await this.prisma.recommendation.deleteMany({
+      where: { userId, dismissedAt: null, jobId: { notIn: keptJobIds } },
+    });
+
+    this.logger.log(
+      `Recomputed ${written} recommendations for user ${userId}` +
+        (removed > 0 ? ` (dropped ${removed} no longer ranked)` : ''),
+    );
+    return written;
+  }
+
+  /**
+   * Score a set of already-retrieved jobs for one user. Returns null when the user has no
+   * profile — there is nothing to match against.
+   *
+   * SINGLE SCORING PATH, ON PURPOSE. `execute` (which writes the recommendations cache)
+   * and the extension's scout both go through here, so a job scored in one place and the
+   * same job scored in the other cannot disagree. Scout used to sidestep this entirely by
+   * reading the cache — which is why it could never return a job ingested after the
+   * user's last recompute (MENTOR_REVIEW_2026-08-18 §7).
+   *
+   * Output preserves the order of `near`, so a caller that retrieved in rank order keeps
+   * it.
+   */
+  async scoreJobs(
+    userId: string,
+    near: NearJobRow[],
+  ): Promise<ScoredJob[] | null> {
+    if (near.length === 0) return [];
+
     const profile = await this.prisma.profile.findUnique({
       where: { userId },
       select: {
@@ -77,15 +165,7 @@ export class RecomputeUserMatchesUseCase {
         desiredIndustries: true,
       },
     });
-    if (!profile) return 0;
-
-    const near = await this.retrieveRankedJobs(userId, limit);
-    if (near.length === 0) {
-      this.logger.warn(
-        `No recommendations for user ${userId} (missing candidate/job embeddings?)`,
-      );
-      return 0;
-    }
+    if (!profile) return null;
 
     const candidate: CandidateContext = {
       city: profile.city,
@@ -118,7 +198,7 @@ export class RecomputeUserMatchesUseCase {
       jobs.map((j) => j.company?.industry).filter((i): i is string => !!i),
     );
 
-    let written = 0;
+    const scored: ScoredJob[] = [];
     for (const row of near) {
       const job = jobById.get(row.id);
       if (!job) continue;
@@ -137,20 +217,14 @@ export class RecomputeUserMatchesUseCase {
         job: jobCtx,
         cosineSim: Number(row.cosine_sim),
       });
-      const reasonExplanation = this.explain(job.title, breakdown);
-      // Prisma's Json input wants an index-signature type; SubScores is fixed-shape.
-      const breakdownJson = breakdown as unknown as Record<string, number>;
-
-      await this.prisma.recommendation.upsert({
-        where: { userId_jobId: { userId, jobId: row.id } },
-        update: { score, breakdown: breakdownJson, reasonExplanation },
-        create: { userId, jobId: row.id, score, breakdown: breakdownJson, reasonExplanation },
+      scored.push({
+        jobId: job.id,
+        score,
+        breakdown,
+        reasonExplanation: this.explain(job.title, breakdown),
       });
-      written++;
     }
-
-    this.logger.log(`Recomputed ${written} recommendations for user ${userId}`);
-    return written;
+    return scored;
   }
 
   /**

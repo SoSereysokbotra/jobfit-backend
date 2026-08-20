@@ -4,28 +4,47 @@
 //
 // AUTH NOTE: the docs' controller uses @UseGuards(SupabaseAuthGuard), but this project is
 // self-managed JWT (app-JWT canonical) and JwtAuthGuard is registered GLOBALLY (APP_GUARD,
-// secure-by-default). So every route here already requires a JWT unless marked @Public().
-// The write routes keep an explicit @UseGuards(JwtAuthGuard) to mirror the docs' intent;
-// GET /users/email/:email is @Public().
+// secure-by-default). Nothing here is @Public(): every route requires a JWT.
+//
+// AUTHORIZATION — read this before adding a route. The global guards are secure-by-default
+// for AUTHENTICATION only: JwtAuthGuard demands a token, but RolesGuard allows any route
+// that carries no @Roles() metadata (roles.guard.ts:23-25). "Logged in" is therefore NOT a
+// permission. Every route below states its own rule — @Roles('ADMIN'), or an explicit
+// ownership check against the JWT subject. A new route with no @Roles() is open to every
+// authenticated user, which is how `PATCH /users/:id/subscription` once let any user grant
+// themselves PROFESSIONAL (MENTOR_REVIEW_2026-08-18 §2), and how `GET /users/:id` let
+// anyone read anyone (§3).
+//
+// There is deliberately NO `DELETE /users/:id` here. Account deletion lives only on
+// `DELETE /admin/users/:id`, which writes a USER_ACCOUNT_DELETED audit row
+// (admin-user.service.ts:111-120). A second, unaudited delete path is what HANDOFF §6
+// blames for a user row vanishing with 50 hand-labelled eval pairs — so the fix is one
+// audited path, not two gated ones.
 
 import {
   Body,
   Controller,
-  Delete,
   Get,
   HttpCode,
   HttpStatus,
   NotFoundException,
   BadRequestException,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
-  UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Public } from '@common/decorators/public.decorator';
-import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
+import {
+  ApiBearerAuth,
+  ApiForbiddenResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
+import { CurrentUser } from '@common/decorators/current-user.decorator';
+import { assertSelfOrAdmin } from '@common/utils/ownership.util';
+import { Roles } from '@common/decorators/roles.decorator';
+import type { AuthenticatedUser } from '@common/guards/jwt-auth.guard';
 import { SubscriptionTier } from '@shared/kernel/enums/subscription-tier.enum';
 import { ERROR_MESSAGES } from '@common/constants/error-messages';
 import { UserService } from '../../application/services/user.service';
@@ -38,35 +57,59 @@ import { UserResponseDto } from '../../application/dtos/user-response.dto';
 export class UserController {
   constructor(private readonly userService: UserService) {}
 
+  // ADMIN-only, and it can only ever mint a JOB_SEEKER — CreateUserDto has no `role`
+  // field (see that file for why). The row it creates has an empty passwordHash, so the
+  // account cannot log in until someone claims it through the password-reset flow; that
+  // is exactly why it must not be able to name a privileged role. Self-signup is
+  // POST /auth/register, which hashes a password and requires email verification.
   @Post()
+  @Roles('ADMIN')
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Create a new user' })
+  @ApiOperation({ summary: 'Create a new user (admin only)' })
+  @ApiForbiddenResponse({ description: 'Caller is not an ADMIN.' })
   async create(@Body() dto: CreateUserDto): Promise<UserResponseDto> {
     const user = await this.userService.createUser(dto);
     return new UserResponseDto(user);
   }
 
+  // ADMIN-only, and NOT @Public(). Unauthenticated, this was an account-existence oracle:
+  // anyone could probe whether an address had a JobFits account and harvest the id, role
+  // and subscriptionTier behind it. If a client needs "this email is already registered",
+  // that belongs in the registration response — POST /auth/register already answers it
+  // with EMAIL_ALREADY_REGISTERED — not in a public read of the user record.
+  //
   // Declared before ':id' so the two-segment path is matched explicitly.
   @Get('email/:email')
-  @Public()
-  @ApiOperation({ summary: 'Get a user by email (public)' })
-  async getByEmail(
-    @Param('email') email: string,
-  ): Promise<UserResponseDto> {
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Get a user by email (admin only)' })
+  @ApiForbiddenResponse({ description: 'Caller is not an ADMIN.' })
+  async getByEmail(@Param('email') email: string): Promise<UserResponseDto> {
     const user = await this.userService.getUserByEmail(email);
     if (!user) throw new NotFoundException(ERROR_MESSAGES.USER_NOT_FOUND);
     return new UserResponseDto(user);
   }
 
+  // Self-service read, so this one is NOT @Roles('ADMIN') — but "logged in" is not a
+  // permission to read someone else's record, which is what it used to be. Ownership is
+  // checked against the JWT subject, the same way profile.controller.ts does it.
   @Get(':id')
-  @ApiOperation({ summary: 'Get a user by id' })
-  async getById(@Param('id') id: string): Promise<UserResponseDto> {
+  @ApiOperation({ summary: 'Get a user by id (own record, or any as ADMIN)' })
+  @ApiForbiddenResponse({ description: 'Not your record, and you are not an ADMIN.' })
+  async getById(
+    @CurrentUser() caller: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<UserResponseDto> {
+    assertSelfOrAdmin(caller, id, 'You can only read your own user record');
     const user = await this.userService.getUserById(id); // throws NotFound if absent
     return new UserResponseDto(user);
   }
 
+  // ADMIN-only: an unfiltered roster of every account. GET /admin/users is the richer,
+  // searchable equivalent.
   @Get()
-  @ApiOperation({ summary: 'List users (paginated)' })
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'List users, paginated (admin only)' })
+  @ApiForbiddenResponse({ description: 'Caller is not an ADMIN.' })
   async list(
     @Query('skip') skip = '0',
     @Query('take') take = '20',
@@ -77,11 +120,19 @@ export class UserController {
     return users.map((user) => new UserResponseDto(user));
   }
 
+  // ADMIN-only. This is the value the paywall reads
+  // (generation.controller.ts:126-136, resume.controller.ts:224-228), so a caller who can
+  // set it can unlock every paid feature for free. It must never be reachable by the user
+  // it describes: an id in the URL plus "is logged in" is not a permission.
+  //
+  // Manual grants and support fixes only — a real purchase should move the tier through
+  // the payment module, not here.
   @Patch(':id/subscription')
-  @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Change a user subscription tier' })
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Change a user subscription tier (admin only)' })
+  @ApiForbiddenResponse({ description: 'Caller is not an ADMIN.' })
   async updateSubscription(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body('tier') tier: SubscriptionTier,
   ): Promise<UserResponseDto> {
     if (!Object.values(SubscriptionTier).includes(tier)) {
@@ -89,13 +140,5 @@ export class UserController {
     }
     const user = await this.userService.upgradeSubscription(id, tier);
     return new UserResponseDto(user);
-  }
-
-  @Delete(':id')
-  @UseGuards(JwtAuthGuard)
-  @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Delete a user' })
-  async remove(@Param('id') id: string): Promise<void> {
-    await this.userService.deleteUser(id);
   }
 }

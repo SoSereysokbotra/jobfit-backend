@@ -44,7 +44,10 @@ describe('RecomputeUserMatchesUseCase', () => {
         // scoring. Empty here: this candidate states no desired industries, so the
         // sub-score is the neutral 50 either way and the payloads below are unchanged.
         industry: { findMany: jest.fn().mockResolvedValue([]) },
-        recommendation: { upsert: jest.fn().mockResolvedValue(undefined) },
+        recommendation: {
+          upsert: jest.fn().mockResolvedValue(undefined),
+          deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+        },
       };
       service = new RecomputeUserMatchesUseCase(prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, activeResume());
       // Isolate scoring from the retriever internals.
@@ -59,16 +62,34 @@ describe('RecomputeUserMatchesUseCase', () => {
       expect(written).toBe(2);
       expect(prisma.recommendation.upsert).toHaveBeenCalledTimes(2);
 
+      // computedAt is a real Date stamped per batch, so match it loosely; every other
+      // field stays pinned exactly.
       expect(prisma.recommendation.upsert.mock.calls[0][0]).toEqual({
         where: { userId_jobId: { userId: 'u1', jobId: 'jobA' } },
-        update: { score: 77, breakdown: { skills: 80, experience: 80, location: 100, salary: 50, other: 50 }, reasonExplanation: 'Backend Engineer: strong skills match, location fits.' },
-        create: { userId: 'u1', jobId: 'jobA', score: 77, breakdown: { skills: 80, experience: 80, location: 100, salary: 50, other: 50 }, reasonExplanation: 'Backend Engineer: strong skills match, location fits.' },
+        update: { score: 77, breakdown: { skills: 80, experience: 80, location: 100, salary: 50, other: 50 }, reasonExplanation: 'Backend Engineer: strong skills match, location fits.', computedAt: expect.any(Date), staleAt: null },
+        create: { userId: 'u1', jobId: 'jobA', score: 77, breakdown: { skills: 80, experience: 80, location: 100, salary: 50, other: 50 }, reasonExplanation: 'Backend Engineer: strong skills match, location fits.', computedAt: expect.any(Date) },
       });
       expect(prisma.recommendation.upsert.mock.calls[1][0]).toEqual({
         where: { userId_jobId: { userId: 'u1', jobId: 'jobB' } },
-        update: { score: 58, breakdown: { skills: 50, experience: 80, location: 50, salary: 50, other: 50 }, reasonExplanation: 'Frontend Engineer: partial skills match.' },
-        create: { userId: 'u1', jobId: 'jobB', score: 58, breakdown: { skills: 50, experience: 80, location: 50, salary: 50, other: 50 }, reasonExplanation: 'Frontend Engineer: partial skills match.' },
+        update: { score: 58, breakdown: { skills: 50, experience: 80, location: 50, salary: 50, other: 50 }, reasonExplanation: 'Frontend Engineer: partial skills match.', computedAt: expect.any(Date), staleAt: null },
+        create: { userId: 'u1', jobId: 'jobB', score: 58, breakdown: { skills: 50, experience: 80, location: 50, salary: 50, other: 50 }, reasonExplanation: 'Frontend Engineer: partial skills match.', computedAt: expect.any(Date) },
       });
+
+      // §6: the upsert only ever writes the new top-N, so anything else the user still
+      // has is a leftover from an older ranking and has to go — except dismissals, which
+      // are tombstones. Without this a job that fell out kept its months-old score.
+      expect(prisma.recommendation.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'u1', dismissedAt: null, jobId: { notIn: ['jobA', 'jobB'] } },
+      });
+
+      // update carries staleAt: null — clearing the flag is what ends the
+      // recompute-on-every-read loop. create does not: a new row is fresh by default.
+      expect(prisma.recommendation.upsert.mock.calls[0][0].update.staleAt).toBeNull();
+      // dismissedAt is absent from update: refreshing a rejected job's score is fine,
+      // un-rejecting it is not.
+      expect(
+        'dismissedAt' in prisma.recommendation.upsert.mock.calls[0][0].update,
+      ).toBe(false);
     });
 
     it('returns 0 when the user has no profile', async () => {
@@ -256,5 +277,93 @@ describe('RecomputeUserMatchesUseCase', () => {
 
       expect(result.map((r) => r.id)).toEqual(['a', 'b', 'c']);
     });
+  });
+});
+
+// ── scoreJobs: the single scoring path (MENTOR_REVIEW_2026-08-18 §7) ──────────
+//
+// Extracted out of execute() so the extension's scout can score jobs that have no cached
+// recommendation row. Both callers must go through here, or a scout score and a
+// /recommendations score for the same job can drift apart.
+describe('RecomputeUserMatchesUseCase.scoreJobs', () => {
+  const buildPrisma = (profile: unknown) => ({
+    profile: { findUnique: jest.fn().mockResolvedValue(profile) },
+    experience: { count: jest.fn().mockResolvedValue(2) },
+    parsedResumeData: { findUnique: jest.fn().mockResolvedValue(null) },
+    industry: { findMany: jest.fn().mockResolvedValue([]) },
+    job: {
+      findMany: jest.fn().mockResolvedValue([
+        {
+          id: 'jobA',
+          title: 'Backend Engineer',
+          remoteType: 'REMOTE',
+          location: 'Phnom Penh',
+          minSalary: null,
+          maxSalary: null,
+          company: { industry: null },
+        },
+      ]),
+    },
+    recommendation: {
+      upsert: jest.fn().mockResolvedValue(undefined),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+  });
+
+  const PROFILE = {
+    city: 'Phnom Penh',
+    country: 'KH',
+    desiredRemoteTypes: ['REMOTE'],
+    minSalary: null,
+    maxSalary: null,
+    desiredIndustries: [],
+  };
+
+  const make = (profile: unknown) => {
+    const prisma = buildPrisma(profile);
+    const activeResumeStub = { findActiveResumeId: jest.fn().mockResolvedValue(null) };
+    return new RecomputeUserMatchesUseCase(
+      prisma as never,
+      new ComputeMatchScoreUseCase(),
+      { rerank: jest.fn() } as never,
+      activeResumeStub as never,
+    );
+  };
+
+  it('scores the jobs it is given, without touching the recommendations cache', async () => {
+    const service = make(PROFILE);
+
+    const scored = await service.scoreJobs('u1', [{ id: 'jobA', cosine_sim: 0.8 }]);
+
+    expect(scored).toHaveLength(1);
+    expect(scored![0]).toMatchObject({
+      jobId: 'jobA',
+      score: expect.any(Number),
+      reasonExplanation: expect.stringContaining('Backend Engineer'),
+    });
+  });
+
+  it('returns null when the user has no profile — nothing to match against', async () => {
+    const service = make(null);
+
+    await expect(service.scoreJobs('u1', [{ id: 'jobA', cosine_sim: 0.8 }])).resolves
+      .toBeNull();
+  });
+
+  it('short-circuits on an empty input rather than querying', async () => {
+    const service = make(PROFILE);
+
+    await expect(service.scoreJobs('u1', [])).resolves.toEqual([]);
+  });
+
+  it('skips an id with no matching job row', async () => {
+    const service = make(PROFILE);
+
+    const scored = await service.scoreJobs('u1', [
+      { id: 'jobA', cosine_sim: 0.8 },
+      { id: 'ghost', cosine_sim: 0.9 },
+    ]);
+
+    expect(scored!.map((s) => s.jobId)).toEqual(['jobA']);
   });
 });

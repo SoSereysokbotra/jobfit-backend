@@ -5,7 +5,8 @@
 //                       dependency outage — used by Cloud Run liveness/startup probes so a
 //                       transient DB/Redis blip doesn't kill the container).
 //   GET /health/ready — readiness: should this instance receive traffic? HARD-gates on the
-//                       database (503 if down); Redis + queue are soft (degraded, still 200).
+//                       database (503 if down); Redis, queue and mail are soft (degraded,
+//                       still 200).
 //
 // Both are @Public() (no JWT) so probes and the load balancer can reach them.
 
@@ -15,6 +16,7 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Public } from '@common/decorators/public.decorator';
 import { DatabaseHealthIndicator } from './indicators/database.health-indicator';
 import { RedisHealthIndicator } from './indicators/redis.health-indicator';
+import { MailHealthIndicator } from './indicators/mail.health-indicator';
 import { HeartbeatService } from './heartbeat.service';
 
 @ApiTags('Health')
@@ -24,6 +26,7 @@ export class HealthController {
     private readonly health: HealthCheckService,
     private readonly db: DatabaseHealthIndicator,
     private readonly redis: RedisHealthIndicator,
+    private readonly mail: MailHealthIndicator,
     private readonly heartbeat: HeartbeatService,
   ) {}
 
@@ -40,13 +43,15 @@ export class HealthController {
   @Public()
   @HealthCheck()
   @ApiOperation({
-    summary: 'Readiness probe — DB hard-gated (503 if down); Redis/queue soft (degraded)',
+    summary:
+      'Readiness probe — DB hard-gated (503 if down); Redis/queue/mail soft (degraded)',
   })
   readiness() {
     return this.health.check([
       () => this.db.isHealthy('database'),
       () => this.redis.isHealthy('redis'),
       () => this.redis.isQueueHealthy('queue'),
+      () => this.mail.isHealthy('mail'),
     ]);
   }
 

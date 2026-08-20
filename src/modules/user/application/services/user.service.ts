@@ -19,9 +19,14 @@ export class UserService {
     private readonly eventBus: DomainEventBus,
   ) {}
 
-  /** Create a new user, persist it, and publish its creation event. */
+  /**
+   * Create a new user, persist it, and publish its creation event.
+   *
+   * The role is NOT taken from the caller — CreateUserDto has no `role` field, so this
+   * always produces the aggregate's default (JOB_SEEKER). See create-user.dto.ts for why.
+   */
   async createUser(dto: CreateUserDto): Promise<User> {
-    const user = User.create({ email: dto.email, role: dto.role });
+    const user = User.create({ email: dto.email });
     await this.userRepository.save(user);
     await this.publishEvents(user);
     return user;
@@ -58,11 +63,12 @@ export class UserService {
     return user;
   }
 
-  /** Soft-delete a user after verifying it exists. */
-  async deleteUser(id: string): Promise<void> {
-    await this.getUserById(id); // verify exists (throws NotFound)
-    await this.userRepository.delete(id);
-  }
+  // NO deleteUser() here, deliberately. Account deletion goes through
+  // AdminUserService.deleteAccount, which is @Roles('ADMIN') and writes a
+  // USER_ACCOUNT_DELETED audit row. A convenience wrapper on this service would be a
+  // second, unaudited path one @Post() away from being exposed again
+  // (MENTOR_REVIEW_2026-08-18 §2). UserRepository.delete is left in place as a repository
+  // primitive, but nothing in this module calls it.
 
   /** Publish and then clear the aggregate's pending domain events. */
   private async publishEvents(user: User): Promise<void> {

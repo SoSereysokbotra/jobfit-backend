@@ -34,6 +34,9 @@ import { EmployerApplicationRepository } from './infrastructure/repositories/emp
 // The one road to a status write — the employer pipeline moves candidates through it.
 import { ApplicationTransitionModule } from '../application/application-transition.module';
 
+// Signs the short-lived résumé download URLs the pipeline hands an employer.
+import { StorageService } from '@infra/storage/storage.service';
+
 @Module({
   imports: [JobModule, ApplicationTransitionModule],
   controllers: [
@@ -42,6 +45,7 @@ import { ApplicationTransitionModule } from '../application/application-transiti
     EmployerApplicationController,
   ],
   providers: [
+    StorageService,
     // services
     EmployerContextService,
     EmployerCompanyService,
