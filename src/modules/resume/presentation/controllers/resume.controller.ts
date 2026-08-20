@@ -39,8 +39,7 @@ import { ResumeResponseDto } from '../../application/dtos/resume-response.dto';
 import { ParsedResumeDataResponseDto } from '../../application/dtos/parsed-resume-data-response.dto';
 import { ParsedResumeDataRepository } from '../../infrastructure/repositories/parsed-resume-data.repository';
 import { Resume } from '../../domain/entities/resume.entity';
-import { UserRepository } from '../../../user/infrastructure/repositories/user.repository';
-import { SubscriptionTier } from '@shared/kernel/enums/subscription-tier.enum';
+import { EntitlementService } from '../../../user/application/services/entitlement.service';
 
 const MAX_RESUME_SIZE = 5 * 1024 * 1024; // 5 MB
 
@@ -52,7 +51,7 @@ export class ResumeController {
   constructor(
     private readonly resumeService: ResumeService,
     private readonly resumeScorer: ResumeScorerService,
-    private readonly userRepository: UserRepository,
+    private readonly entitlements: EntitlementService,
     private readonly parsedResumeDataRepository: ParsedResumeDataRepository,
   ) {}
 
@@ -213,19 +212,15 @@ export class ResumeController {
       scoredBy: result.scoredBy,
     };
     // Gate AI suggestions behind subscription tier — enforced server-side.
-    if (await this.hasPremiumAccess(user.id)) {
+    //
+    // DEGRADES rather than throwing, unlike the generation routes: the scores are still
+    // the user's own analysis and worth returning. Only the AI suggestions are withheld.
+    // Same entitlement rule either way — EntitlementService owns it, so the two cannot
+    // drift into disagreeing about who is paid.
+    if (await this.entitlements.hasPaidPlan(user.id)) {
       return { ...base, suggestions: result.suggestions };
     }
     return base;
-  }
-
-  /** True when the user's tier entitles them to AI suggestions (PREMIUM/PROFESSIONAL). */
-  private async hasPremiumAccess(userId: string): Promise<boolean> {
-    const account = await this.userRepository.findById(userId);
-    return (
-      account?.subscriptionTier === SubscriptionTier.PREMIUM ||
-      account?.subscriptionTier === SubscriptionTier.PROFESSIONAL
-    );
   }
 
   /** Load a resume and assert the caller owns it (404 if missing, 403 if not owner). */

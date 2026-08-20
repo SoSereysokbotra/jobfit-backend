@@ -21,6 +21,9 @@ import { SkillsService } from './application/services/skills.service';
 import { EducationService } from './application/services/education.service';
 import { ProfileService } from './application/services/profile.service';
 import { UserAnalyticsService } from './application/services/user-analytics.service';
+// "Is this user on a paid plan?" — one definition, consumed by generation and résumé
+// scoring. Lives here because it reads UserRepository.
+import { EntitlementService } from './application/services/entitlement.service';
 
 @Module({
   controllers: [
@@ -46,6 +49,7 @@ import { UserAnalyticsService } from './application/services/user-analytics.serv
     EducationService,
     ProfileService,
     UserAnalyticsService,
+    EntitlementService,
   ],
   exports: [
     // Services other modules consume.
@@ -55,6 +59,8 @@ import { UserAnalyticsService } from './application/services/user-analytics.serv
     ExperienceService,
     EducationService,
     UserAnalyticsService,
+    // The single entitlement rule — GenerationController and ResumeController both ask it.
+    EntitlementService,
     // Repositories other modules read (e.g. auth/matching cross-references).
     UserRepository,
     UserSkillRepository,

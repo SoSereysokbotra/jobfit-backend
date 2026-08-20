@@ -1,22 +1,35 @@
 // src/modules/generation/generation.controller.ts
 //
-// Phase 4 AI generation endpoints. Both are premium features — gated to
-// PREMIUM/PROFESSIONAL tiers server-side (never trust the UI).
+// Phase 4 AI generation endpoints. ALL FOUR are paid features, gated server-side to
+// PREMIUM/PROFESSIONAL via EntitlementService (never trust the UI).
+//
+// THE EXTENSION ROUTES USED TO BE UNGATED. `generate/cover-letter` and
+// `generate/interview-prep` ran the same GenerationService as the two paid routes above
+// them, with no tier check — a documented "accepted caveat" that assumed a working
+// paywall on the other side. There wasn't one (MENTOR_REVIEW_2026-08-18 §10), so the
+// caveat was really "the paywall is optional if you know the other URL". They are gated
+// now. A different CLIENT is not a different ENTITLEMENT.
+//
+// How anyone becomes entitled today: an ADMIN grants the tier. There is no self-serve
+// purchase — see the note on EntitlementService before assuming otherwise.
 
 import {
   Body,
   Controller,
-  ForbiddenException,
   HttpCode,
   HttpStatus,
   Param,
   Post,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiForbiddenResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { AuthenticatedUser } from '@common/guards/jwt-auth.guard';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
-import { SubscriptionTier } from '@shared/kernel/enums/subscription-tier.enum';
-import { UserRepository } from '../user/infrastructure/repositories/user.repository';
+import { EntitlementService } from '../user/application/services/entitlement.service';
 import { GenerationService } from './generation.service';
 import { GenerateCoverLetterDto } from './dto/generate-cover-letter.dto';
 import { GenerateInterviewDto } from './dto/generate-interview.dto';
@@ -42,7 +55,7 @@ function titleCase(s: string): string {
 export class GenerationController {
   constructor(
     private readonly generation: GenerationService,
-    private readonly userRepository: UserRepository,
+    private readonly entitlements: EntitlementService,
   ) {}
 
   @Post('applications/:id/cover-letter')
@@ -55,7 +68,7 @@ export class GenerationController {
     @Param('id') id: string,
     @Body() dto: GenerateCoverLetterDto,
   ) {
-    await this.assertPremium(user.id);
+    await this.entitlements.requirePaidPlan(user.id);
     return this.generation.coverLetterForApplication(user.id, id, dto.tone);
   }
 
@@ -70,23 +83,26 @@ export class GenerationController {
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: GenerateInterviewDto,
   ) {
-    await this.assertPremium(user.id);
+    await this.entitlements.requirePaidPlan(user.id);
     return this.generation.interview(dto.jobId, dto.level, dto.kind, dto.answer);
   }
 
-  // ── Browser extension: UNGATED, job-context generation (no premium tier) ──────
+  // ── Browser extension: job-context generation. Same AI, same entitlement. ─────
 
   @Post('generate/cover-letter')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Generate a cover letter for an external job (browser extension). Ungated; ' +
-      'composed from the user’s résumé + the job’s title/company (no stored application).',
+      'Generate a cover letter for an external job (browser extension). Paid plan ' +
+      'required; composed from the user’s résumé + the job’s title/company (no stored ' +
+      'application).',
   })
+  @ApiForbiddenResponse({ description: 'Requires a Premium or Professional plan.' })
   async extensionCoverLetter(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: ExtCoverLetterDto,
   ): Promise<ExtCoverLetterResponseDto> {
+    await this.entitlements.requirePaidPlan(user.id);
     const result = await this.generation.coverLetterForExternalJob(
       user.id,
       dto.role ?? '',
@@ -99,13 +115,18 @@ export class GenerationController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Interview prep for an external job (browser extension). Ungated; questions ' +
-      'from the job title, mapped to question-type shares + a top-questions list.',
+      'Interview prep for an external job (browser extension). Paid plan required; ' +
+      'questions from the job title, mapped to question-type shares + a top-questions ' +
+      'list.',
   })
+  @ApiForbiddenResponse({ description: 'Requires a Premium or Professional plan.' })
   async extensionInterview(
-    @CurrentUser() _user: AuthenticatedUser,
+    @CurrentUser() user: AuthenticatedUser,
     @Body() dto: ExtInterviewDto,
   ): Promise<ExtInterviewResponseDto> {
+    // This route does not otherwise need the user — the questions come from the job
+    // title alone. It needs them to answer "may you run this at all".
+    await this.entitlements.requirePaidPlan(user.id);
     const result = await this.generation.interviewForExternalJob(dto.role ?? '');
     const total = result.questions.length || 1;
     const byCategory = new Map<string, number>();
@@ -122,16 +143,4 @@ export class GenerationController {
     };
   }
 
-  /** Gate AI generation behind PREMIUM/PROFESSIONAL — enforced server-side. */
-  private async assertPremium(userId: string): Promise<void> {
-    const account = await this.userRepository.findById(userId);
-    const entitled =
-      account?.subscriptionTier === SubscriptionTier.PREMIUM ||
-      account?.subscriptionTier === SubscriptionTier.PROFESSIONAL;
-    if (!entitled) {
-      throw new ForbiddenException(
-        'Cover letters and interview coaching require a Premium or Professional plan.',
-      );
-    }
-  }
 }

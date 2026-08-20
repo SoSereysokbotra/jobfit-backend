@@ -28,7 +28,7 @@ git** — not against the docs. Every finding cites a file, a line, or a git obj
 | 7 | `GET /recommendations/scout` structurally cannot return a new job | ✅ Fixed 2026-08-20 |
 | 8 | `PRIVACY.md` states something the code no longer does, and omits four hosts | ⚠️ Verified + drafted 2026-08-20 — extension repo absent, NOT fixed |
 | 9 | Employers cannot see a candidate's résumé anywhere in the API | ✅ Fixed 2026-08-20 |
-| 10 | The paywall gates features no payment path can unlock, and the extension serves the same AI ungated | 🟠 Contradiction |
+| 10 | The paywall gates features no payment path can unlock, and the extension serves the same AI ungated | ✅ Fixed 2026-08-20 (payment module still absent, by decision) |
 | 11 | No rate limit on any AI/GPU route | 🟠 Cost |
 | 12 | `formatSalaryRange` fabricates currency and magnitude (`$500K` for a $500 job) | 🟠 Honesty |
 | 13 | The displayed match **percentage** has never been calibrated — the defect that got `fitScore` rejected | 🟡 Evidence |
@@ -962,6 +962,58 @@ payment module has to exist. Either is defensible; the current state is the one 
 
 **The question you'll be asked.**
 > *"Cover letters are Premium. Show me a user who is Premium, and show me how they got there."*
+
+### ✅ Resolved 2026-08-20 — tiers are REAL; the bypass is closed and the shop is explicitly shut
+
+All three facts confirmed. The decision the finding asks for has been made: **tiers are a
+real product**, so the gate stays and the holes get closed — rather than deleting
+`assertPremium` and the tier language.
+
+Where the three holes stand:
+
+| Hole | Status |
+|---|---|
+| (a) no legitimate way to become Premium | **Open, and now stated.** An ADMIN grant is the only path. Documented in code, not implied. |
+| (b) free via one unguarded `PATCH` | **Closed by §2** — `PATCH /users/:id/subscription` is `@Roles('ADMIN')`. |
+| (c) the same AI free via the extension routes | **Closed here.** |
+
+**One entitlement rule, in one place.**
+[`EntitlementService`](../src/modules/user/application/services/entitlement.service.ts)
+replaces two independent copies of the tier comparison —
+`GenerationController.assertPremium` (threw 403) and `ResumeController.hasPremiumAccess`
+(degraded, dropping AI suggestions). Both behaviours are correct for their route and are
+kept; what is no longer duplicated is *the definition of "paid"*. It exposes
+`hasPaidPlan()` for the degrading caller and `requirePaidPlan()` for the throwing one.
+
+It **fails closed**: an unknown or deleted user is not entitled. The old inline checks used
+`account?.subscriptionTier === …`, which is the same outcome by accident rather than by
+decision, and the kind of thing a later refactor gets wrong.
+
+**The extension routes are gated.** `POST /generate/cover-letter` and
+`POST /generate/interview-prep` run the *same* `GenerationService` as the two paid routes
+directly above them. `PROGRESS.md` recorded their being open as an *"accepted caveat"* —
+but that trade-off assumed a working paywall elsewhere, so in practice it read as *"the
+paywall is optional if you know the other URL"*. **A different client is not a different
+entitlement.** `extensionInterview` did not previously use the authenticated user at all
+(the questions come from the job title); it takes it now purely to answer *may you run
+this*.
+
+**"No self-serve payment" is now a written fact.** `EntitlementService`'s header states
+plainly that `PaymentService` is an empty class, `StripeAdapter.createSubscription` returns
+`''`, `PaymentController` declares no routes, and the schema has no Subscription or Payment
+model — so an admin grant is the only way in. The gate being real and the shop being shut
+are both intentional, and neither should be inferred from the other.
+
+**Tests — 18, mutation-verified.** 9 on the entitlement rule (including failing closed on
+an unknown user), 5 on the newly gated extension routes, plus the two existing tier specs
+rebuilt to drive the **real** `EntitlementService` over a stub repository rather than
+restating the rule. One test asserts the *whole route surface* of the controller, so a new
+generation route added without a check fails it rather than quietly reopening the hole.
+Removing both extension guards fails 2. Whole suite: 71 files, 809 tests, green.
+
+**What is still needed to answer the interviewer's question with a demo:** the payment
+module. Choosing option 3 (build Stripe) needs plan/price decisions and a Stripe account
+before any of it can be correct, which is why it was not bundled in here.
 
 ---
 

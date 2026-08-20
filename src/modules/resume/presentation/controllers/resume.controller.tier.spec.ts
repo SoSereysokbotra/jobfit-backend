@@ -2,6 +2,7 @@
 // AI suggestions are returned only for PREMIUM/PROFESSIONAL; FREE gets scores only.
 
 import { ResumeController } from './resume.controller';
+import { EntitlementService } from '../../../user/application/services/entitlement.service';
 import { SubscriptionTier } from '@shared/kernel/enums/subscription-tier.enum';
 import { AuthenticatedUser } from '@common/guards/jwt-auth.guard';
 
@@ -19,14 +20,16 @@ describe('ResumeController score suggestions gating', () => {
   const build = (tier: SubscriptionTier) => {
     const resumeService = { getResume: jest.fn().mockResolvedValue({ userId: 'u1' }) };
     const resumeScorer = { scoreResume: jest.fn().mockResolvedValue(scoreResult) };
-    const userRepository = {
+    // The REAL EntitlementService over a stub repository — so the tier rule under test is
+    // the one that ships, not a re-statement of it here.
+    const entitlements = new EntitlementService({
       findById: jest.fn().mockResolvedValue({ subscriptionTier: tier }),
-    };
+    } as never);
     const parsedRepo = { findByResumeId: jest.fn() };
     const controller = new ResumeController(
       resumeService as never,
       resumeScorer as never,
-      userRepository as never,
+      entitlements,
       parsedRepo as never,
     );
     return { controller };
