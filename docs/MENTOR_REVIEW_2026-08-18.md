@@ -26,7 +26,7 @@ git** — not against the docs. Every finding cites a file, a line, or a git obj
 | 5 | Screening ignores `application.resumeId` — the employer judges a CV the candidate did not submit | ✅ Fixed 2026-08-20 (match score: stated limit) |
 | 6 | `recommendations` is a write-once cache: changing your CV never moves your matches | ✅ Fixed 2026-08-20 (migration pending) |
 | 7 | `GET /recommendations/scout` structurally cannot return a new job | ✅ Fixed 2026-08-20 |
-| 8 | `PRIVACY.md` states something the code no longer does, and omits four hosts | ⚠️ Verified + drafted 2026-08-20 — extension repo absent, NOT fixed |
+| 8 | `PRIVACY.md` states something the code no longer does, and omits four hosts | ✅ Fixed 2026-08-20 (and the fix's own first draft was wrong — see §8) |
 | 9 | Employers cannot see a candidate's résumé anywhere in the API | ✅ Fixed 2026-08-20 |
 | 10 | The paywall gates features no payment path can unlock, and the extension serves the same AI ungated | ✅ Fixed 2026-08-20 (payment module still absent, by decision) |
 | 11 | No rate limit on any AI/GPU route | 🟠 Cost |
@@ -804,61 +804,77 @@ absolute. Add the four hosts. Re-date the file. Fix the Store copy in the same c
 > from the job description. Which is true?"* — a question with no good answer if you have not
 > already noticed it.
 
-### ⚠️ Prepared, NOT fixed — 2026-08-20. The files are in a repo that is not checked out.
+### ✅ Resolved 2026-08-20 — and the repo was there all along
 
-`PRIVACY.md`, `STORE_LISTING.md` and `manifest.json` all live in `jobfit-extension`, which
-is not present alongside `jobfit-backend`, `jobfit-frontend` and `jobfits-ai-service`. **No
-extension file was edited.** The finding stays open until someone with that repo acts on
-it.
+`jobfit-extension` **was** checked out, at `D:/Year2/Jobfit/jobfit-extension`. The earlier
+"repo absent" note came from checking only the siblings of the working directory, which is
+the same class of error as §4's branch-local verification: a negative claim made from an
+incomplete search. `PRIVACY.md`, `docs/STORE_LISTING.md` and `manifest.config.ts` are all
+fixed; the full before/after is in
+[EXTENSION_PRIVACY_FACTS.md](./EXTENSION_PRIVACY_FACTS.md).
 
-What was done instead: the claim was verified from the **receiving** side, which is the
-authoritative one and is available. Results in
-[EXTENSION_PRIVACY_FACTS.md](./EXTENSION_PRIVACY_FACTS.md), with drafted replacement text
-for both documents.
+**The finding was right on both counts.** Both routes do receive posting text, and the
+host list was under-declared. Four things it did not have, in ascending order of how badly
+they would have hurt:
 
-**The finding is correct — both routes do receive posting text**
-([match-report.dto.ts](../src/modules/match-report/presentation/dto/match-report.dto.ts),
-[save-external-job.dto.ts](../src/modules/saved-job/dto/save-external-job.dto.ts)). The
-bolded sentence in `PRIVACY.md` is false. Two corrections to the detail, though:
+#### 1. There is no `manifest.json`
 
-#### 🔴 The suggested replacement wording is itself wrong, and would have shipped
+The manifest is generated from `manifest.config.ts` by `@crxjs/vite-plugin`. Anyone
+following the instruction to "diff against the shipped manifest" would find no file. The
+real `content_scripts.matches` is `*.linkedin.com`, `*.khmer24.com`, `*.bongthom.com`,
+`*.jobnet.com.kh`, `*.indeed.com` — so the four extra hosts were real. Two extras the
+review could not have seen: the policy said `www.linkedin.com` where the manifest matches
+**every** `linkedin.com` subdomain, and `host_permissions` also carries the JobFit **web**
+origin, declared-but-unused.
 
-§8 proposes saying the posting body is *"sent once, **never stored as a listing**, and only
-the derived report is kept on your own account."*
+#### 2. The manifest description was 136 characters against a 132-character limit
 
-That is true of **Full Report** and **false of Save Job**. `SavedExternalJob.description`
-is a persisted column — *"what the user saved from the posting"* (`schema.prisma:589`),
-returned by `GET /saved-jobs/external` and kept until the user deletes it. **Storing it is
-the entire point of the feature**: it is the bookmark the user comes back to read.
+Sitting directly under a comment reading *"Store limit is 132 chars"*. That is a rejection
+on submission, unrelated to privacy, found only because the listing copy was being checked
+against the manifest. Now 128, and pinned to the `STORE_LISTING.md` copy.
 
-Adopting the proposed sentence would have replaced one incorrect privacy statement with
-another — in a document whose whole problem is that it was written without checking. The
-two routes need separate answers.
+#### 3. `STORE_LISTING.md` ticked "Website content — not collected"
 
-#### Two further details the rewrite needs
+The review flagged the one false sentence in the listing's prose. The **dashboard
+questionnaire** underneath it was worse: posting title, company, location and body are all
+page content sent off-device, and the disclosure said none was collected. A false sentence
+in marketing copy gets you asked to reword it; a false data disclosure is what gets an
+extension **pulled after publication**. Now ticked.
 
-- **"Nothing from the posting is stored" is also wrong for Full Report.**
-  `match_reports.payload` holds **AI-extracted requirement phrases**, drawn from the
-  posting body and frequently near-verbatim fragments of it. The identifiers-only claim in
-  [match-report-payload.ts:24](../src/modules/match-report/domain/match-report-payload.ts#L24)
-  is true of `payload.job` and not of the payload as a whole. The honest word is *derived
-  summary*.
-- **The 8,000-char figure is the extension's cap, not the server's.** Both DTOs accept
-  **20,000**. A policy should quote the server bound, since that is what constrains any
-  caller.
+#### 4. 🔴 The suggested replacement wording was wrong — and so was our own first draft
 
-#### One fact that makes the story stronger, and is not currently claimed
+§8 proposes saying the posting body is *"never stored as a listing"*. That is false for
+Save Job, where storing it **is** the feature. `EXTENSION_PRIVACY_FACTS.md` caught that —
+and then proposed its own replacement claiming the text is *"processed by our own AI
+service on local models via Ollama, never a third-party provider."*
 
-Posting text sent to `/match-report` is processed by **JobFit's own AI service running
-local models via Ollama** — never a third-party model provider. That is a materially better
-privacy position than the false absolute it would replace, and `PRIVACY.md` does not say
-it.
+**Also false.** `jobfits-ai-service/app/services/chat_router.py` routes per task;
+`deepseek_tasks` defaults to `interview,job_requirements`; `job_requirements` is exactly
+the task carrying the posting body from `POST /match-report`; `DEEPSEEK_API_KEY` is set. So
+the chain is:
 
-#### Not verifiable from here
+```
+extension → POST /match-report → AiClient.extractJobRequirements
+          → AI service POST /job/requirements → ChatRouter → api.deepseek.com
+```
 
-The host-permissions half. `manifest.json` is in the extension repo, and the four hosts
-come from `MULTI_SITE_PLAN.md` — a *plan*, which may not match what shipped. Whoever fixes
-this must diff the policy against the **shipped manifest**, not the plan.
+Three consecutive attempts to write this policy — the original, the review's fix, and the
+fix's fix — were each wrong because each was written from what the author believed the
+system did. The shipped policy names DeepSeek.
+
+**What is defensible, and is what shipped.** The boundary is structural rather than a
+convention: `ResumeService`, `EmbedService`, `RerankService` and `MatchReasonService` take
+`OllamaClient` directly and are never handed a `ChatRouter`, so adding `resume_parse` to
+`DEEPSEEK_TASKS` does nothing — there is no wire. The résumé cannot reach DeepSeek by
+configuration alone. Saying *"the employer's public posting text may go to DeepSeek; your
+résumé structurally cannot"* is a stronger and truer story than either absolute.
+
+**The generalisable trap:** a privacy claim about *where data is processed* can be
+falsified by an environment variable **in a different repository**. `DEEPSEEK_TASKS` is now
+on the pre-submission checklist for that reason.
+
+**Still needs a human:** host `PRIVACY.md` at a public URL, and confirm the **deployed**
+AI service's `DEEPSEEK_TASKS` matches the local default the policy describes.
 
 ---
 

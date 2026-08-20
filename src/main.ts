@@ -1,16 +1,17 @@
 // Tracing must be imported FIRST so OpenTelemetry can patch http/pg/ioredis before they load
 // (self-starting; no-op unless TRACE_ENABLED=true). Phase 3.
-import './tracing';
-import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, Logger } from '@nestjs/common';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { Logger as PinoAppLogger } from 'nestjs-pino';
-import * as cookieParser from 'cookie-parser';
-import { AppModule } from './app.module';
-import { TransformInterceptor } from './common/interceptors/transform.interceptor';
+//.\.venv\Scripts\python.exe -m uvicorn app.main:app --port 8000 --reload
+import "./tracing";
+import { NestFactory } from "@nestjs/core";
+import { ValidationPipe, Logger } from "@nestjs/common";
+import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
+import { Logger as PinoAppLogger } from "nestjs-pino";
+import * as cookieParser from "cookie-parser";
+import { AppModule } from "./app.module";
+import { TransformInterceptor } from "./common/interceptors/transform.interceptor";
 
 async function bootstrap() {
-  const logger = new Logger('Bootstrap');
+  const logger = new Logger("Bootstrap");
   // bufferLogs: hold early bootstrap logs until the pino logger is installed, then
   // flush them through it — so every line (including startup) is structured.
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
@@ -18,7 +19,7 @@ async function bootstrap() {
   app.flushLogs();
 
   // Global prefix
-  app.setGlobalPrefix('api/v1');
+  app.setGlobalPrefix("api/v1");
 
   // Cookie parsing — the auth flow uses httpOnly cookies (refresh token, verification
   // sessions). Must run before guards/controllers read req.cookies.
@@ -29,8 +30,8 @@ async function bootstrap() {
   // Vercel app and a local frontend can both reach this instance. It must be an exact
   // origin list rather than '*': `credentials: true` makes the browser reject a wildcard.
   app.enableCors({
-    origin: (process.env.CORS_ORIGIN ?? 'http://localhost:3000')
-      .split(',')
+    origin: (process.env.CORS_ORIGIN ?? "http://localhost:3000")
+      .split(",")
       .map((o) => o.trim())
       .filter(Boolean),
     credentials: true,
@@ -61,31 +62,31 @@ async function bootstrap() {
   // default (@ApiBearerAuth()) and the named 'access-token' (@ApiBearerAuth('access-token'))
   // form — authorizing either covers every secured endpoint.
   const config = new DocumentBuilder()
-    .setTitle('JobFit API')
+    .setTitle("JobFit API")
     .setDescription(
-      'Job matching platform API. Includes the Admin (`/admin/*`) and Employer ' +
-        '(`/employer/*`) modules. Authorize with a JWT access token to call protected routes.',
+      "Job matching platform API. Includes the Admin (`/admin/*`) and Employer " +
+        "(`/employer/*`) modules. Authorize with a JWT access token to call protected routes.",
     )
-    .setVersion('1.0')
+    .setVersion("1.0")
     .addBearerAuth(
-      { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
-      'bearer',
+      { type: "http", scheme: "bearer", bearerFormat: "JWT" },
+      "bearer",
     )
     .addBearerAuth(
-      { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
-      'access-token',
+      { type: "http", scheme: "bearer", bearerFormat: "JWT" },
+      "access-token",
     )
-    .addCookieAuth('refresh_token')
+    .addCookieAuth("refresh_token")
     .build();
   const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/docs', app, document, {
+  SwaggerModule.setup("api/docs", app, document, {
     // Keep the entered token across page reloads so you don't re-authorize each time.
     swaggerOptions: {
       persistAuthorization: true,
-      tagsSorter: 'alpha',
-      operationsSorter: 'alpha',
+      tagsSorter: "alpha",
+      operationsSorter: "alpha",
     },
-    customSiteTitle: 'JobFit API — Docs',
+    customSiteTitle: "JobFit API — Docs",
   });
 
   // Graceful shutdown — lets Nest run onModuleDestroy / onApplicationShutdown
@@ -93,17 +94,17 @@ async function bootstrap() {
   app.enableShutdownHooks();
 
   const port = process.env.PORT ?? 3000;
-  const environment = process.env.NODE_ENV ?? 'development';
+  const environment = process.env.NODE_ENV ?? "development";
 
   try {
     await app.listen(port);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EADDRINUSE') {
+    if ((error as NodeJS.ErrnoException).code === "EADDRINUSE") {
       logger.error(
         `Port ${port} is already in use — is another instance running?`,
       );
     } else {
-      logger.error('Failed to start application', (error as Error).stack);
+      logger.error("Failed to start application", (error as Error).stack);
     }
     process.exit(1);
   }
