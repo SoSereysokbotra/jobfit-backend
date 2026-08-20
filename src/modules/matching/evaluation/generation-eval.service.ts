@@ -22,6 +22,7 @@ import { MatchLabelValue } from '@prisma/client';
 import { AiClient } from '@infra/ai/ai.client';
 import { MatchReasonResponse } from '@infra/ai/ai.types';
 import { PrismaService } from '@infra/prisma/prisma.service';
+import { ActiveResumeService } from '../../resume/application/services/active-resume.service';
 
 import { toExperienceTitles, toStringArray } from '../domain/parsed-resume-json';
 import { spearman } from './metrics';
@@ -105,6 +106,7 @@ export class GenerationEvalService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly aiClient: AiClient,
+    private readonly activeResume: ActiveResumeService,
   ) {}
 
   async evaluate(
@@ -298,22 +300,24 @@ export class GenerationEvalService {
       where: { userId },
       select: { headline: true, bio: true, city: true, country: true },
     });
-    const resume = await this.prisma.resume.findFirst({
-      where: { userId, parsingStatus: 'SUCCESS' },
-      orderBy: { updatedAt: 'desc' },
-      select: { parsedData: { select: { summary: true, skills: true, experiences: true } } },
-    });
+    const resumeId = await this.activeResume.findActiveResumeId(userId);
+    const parsed = resumeId
+      ? await this.prisma.parsedResumeData.findUnique({
+          where: { resumeId },
+          select: { summary: true, skills: true, experiences: true },
+        })
+      : null;
 
     const parts: string[] = [];
     if (profile?.headline) parts.push(profile.headline);
     const location = [profile?.city, profile?.country].filter(Boolean).join(', ');
     if (location) parts.push(`Location: ${location}.`);
     if (profile?.bio) parts.push(profile.bio);
-    if (resume?.parsedData?.summary) parts.push(resume.parsedData.summary);
+    if (parsed?.summary) parts.push(parsed.summary);
 
-    const skills = toStringArray(resume?.parsedData?.skills ?? null);
+    const skills = toStringArray(parsed?.skills ?? null);
     if (skills.length > 0) parts.push(`Skills: ${skills.join(', ')}.`);
-    const titles = toExperienceTitles(resume?.parsedData?.experiences ?? null);
+    const titles = toExperienceTitles(parsed?.experiences ?? null);
     if (titles.length > 0) parts.push(`Experience: ${titles.join('; ')}.`);
 
     return parts.join('\n').slice(0, CV_TEXT_LIMIT);

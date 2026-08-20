@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@infra/prisma/prisma.service';
+import { ActiveResumeService } from '../../../resume/application/services/active-resume.service';
 import { AiClient } from '@infra/ai/ai.client';
 import { CandidateContext, JobContext, SubScores } from '../../domain/scoring/types';
 import { cosineSimilarity } from '../../domain/scoring/skills-scorer';
@@ -126,6 +127,7 @@ export class MatchExternalJobUseCase {
   constructor(
     private readonly prisma: PrismaService,
     private readonly aiClient: AiClient,
+    private readonly activeResume: ActiveResumeService,
   ) {}
 
   async execute(
@@ -268,12 +270,13 @@ export class MatchExternalJobUseCase {
     const structured = await this.prisma.experience.count({ where: { userId } });
     if (structured > 0) return structured;
 
-    const resume = await this.prisma.resume.findFirst({
-      where: { userId, parsingStatus: 'SUCCESS' },
-      orderBy: { updatedAt: 'desc' },
-      select: { parsedData: { select: { experiences: true } } },
+    const resumeId = await this.activeResume.findActiveResumeId(userId);
+    if (!resumeId) return 0;
+    const parsed = await this.prisma.parsedResumeData.findUnique({
+      where: { resumeId },
+      select: { experiences: true },
     });
-    const json = resume?.parsedData?.experiences;
+    const json = parsed?.experiences;
     if (!json) return 0;
     try {
       const parsed: unknown = JSON.parse(json);

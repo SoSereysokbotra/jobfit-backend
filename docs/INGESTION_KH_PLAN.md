@@ -250,19 +250,41 @@ application going nowhere. Now set explicitly; verified — all 15 new rows are 
 | | bongthom | jobnet |
 |---|---|---|
 | Unit tests (real captured fixtures) | ✅ 12 | ✅ 18 |
-| Live run | ✅ **15 fetched, 15 created, 0 skipped** | ❌ **not verified** |
+| Live run | ✅ **276 fetched, 261 created, 15 updated, 0 skipped** | ✅ **30 links, 29 created, 1 skipped, 0 errors** |
 
-**jobnet's live run could not be completed.** The whole site became unreachable mid-session
-— the listing page, a detail page that had worked minutes earlier, and the homepage all
-timed out at 60 s, on two different User-Agents. Roughly 8–10 requests had been made in
-total, spaced ≥1 s apart, which is below ordinary browsing volume, so a rate-limit block is
-unlikely but cannot be ruled out. **Retrying was deliberately not attempted**: if they are
-struggling or have blocked us, hammering is the wrong response.
+Both verified against the live sites. The 15 "updated" on bongthom are the rows from an
+earlier smaller run, which is dedup on `(source, externalId)` working.
 
-The adapter is fully unit-tested against an unmodified captured page — including the two
-quirks that break naive parsers — so the parsing is verified. **What is unverified is
-fetching**: whether the listing page reliably yields links, and whether the site tolerates
-us at all.
+jobnet's single skip is a posting with no usable `JobPosting` JSON-LD — the designed
+refusal, not a failure. **3% skip, well inside the 20% stop condition of §5.**
+
+**jobnet was briefly unreachable earlier** — listing, detail and homepage all timing out at
+60 s on two User-Agents, after ~8–10 requests spaced ≥1 s apart. Retrying was deliberately
+not attempted. It returned to normal ~25 minutes later (0.8 s response), so it was a
+transient outage on their side, **not** a block. Worth remembering: this ingestion has to
+tolerate the source simply being down, and it does — the run reports the error and stores
+nothing.
+
+### 7.3b — What each source actually contributes
+
+| source | jobs | `employmentType` | `location` | avg description |
+|---|---|---|---|---|
+| internal (employer-posted) | 19 | 0 | 19 | 84 |
+| **BONGTHOM** | **276** | 0 | 0 | **45** |
+| **JOBNET** | **29** | **29** | **29** | **2,099** |
+| THEMUSE | 43 | 0 | 43 | 4,562 |
+
+Corpus went from 61 to **367 jobs, 305 of them Cambodian** — the point of the exercise.
+
+Two things this table says plainly:
+
+- **jobnet is the first source ever to populate `employmentType`.** That column was added in
+  E3 and had been NULL on every one of the 61 existing jobs, because nothing could fill it.
+  29 of 29 jobnet postings state it, along with a location and a real 2 k-character
+  description.
+- **bongthom's 45-character "descriptions" are titles**, exactly as the feed-only decision
+  requires. They are now **75% of the corpus by row count and ~1% by text**. That is a
+  known and accepted trade, but see §7.5 — it is not free.
 
 ### 7.4 — The corpus change could NOT be measured, because the eval set shrank
 
@@ -293,3 +315,68 @@ calibration  TOTAL ρ 0.662 · skills 0.553 · salary 0.684 · other 0.518 · ex
 were exactly the ones who did not exhibit the BM25 bug). The eval set is one candidate, no
 résumé, no Cambodian jobs. **Re-labelling is the highest-value next step for matching
 work** — every retrieval or scoring change is currently unmeasurable.
+
+### 7.5 — A retrieval drop here would NOT mean the product got worse
+
+Before running the harness again, check what it can even see. Every labelled job comes from
+the **pre-existing** corpus:
+
+| label | sources | n |
+|---|---|---|
+| GREAT | internal 6, THEMUSE 3 | 9 |
+| OK | THEMUSE 2, internal 1 | 3 |
+| BAD | THEMUSE 37, internal 1 | 38 |
+
+**Not one labelled job is from bongthom or jobnet.** The corpus went 62 → 367, so the 12
+relevant jobs now compete against ~305 additional candidates that the eval set has no
+opinion about. Recall@10 can only fall.
+
+That fall would measure **"the eval set does not cover the new corpus"**, not "retrieval
+regressed". For the Cambodian user this product is for, 305 local jobs is the improvement;
+the harness simply cannot express that, because its only labelled candidate is a Senior
+Software Engineer graded against US postings.
+
+**Do not tune anything on the post-ingestion retrieval number.** It is reported below for
+the record and is not a baseline worth defending. The baseline to rebuild is a label set
+that includes Cambodian jobs.
+
+### 7.6 — What happened, and the measurement that actually answers the question
+
+All 367 jobs embedded; 500 recommendations recomputed across 10 profiles.
+
+| | before ingestion | after |
+|---|---|---|
+| Recall@10 | 0.500 | **0.333** |
+| MRR@10 | 0.500 | 0.500 |
+| nDCG@10 | 0.606 | **0.425** |
+
+The predicted fall, for the predicted reason: 12 labelled-relevant jobs now compete with
+~305 candidates the eval set has never seen. **This is not a regression** and must not be
+treated as one.
+
+**So the real question was asked directly instead: what does a user actually get?**
+
+`strong@seed.jobfits.test` (Senior Full-Stack Engineer), top 10:
+
+```
+83  internal  Full-Stack Engineer (Demo)
+79  internal  Full-Stack Engineer
+77  internal  React Specialist Developer
+69  JOBNET    Platform Engineer                          ← new
+69  JOBNET    Junior Data Engineer                       ← new
+69  internal  Senior Frontend Engineer
+68  internal  Backend Engineer (Phase7)
+68  internal  Software Engineer – Platforms
+67  JOBNET    Senior Officer (Lead), Native Mobile Dev    ← new
+67  JOBNET    Senior Officer, Android Development         ← new
+```
+
+**Four real Cambodian software jobs in the top ten, where there were none.** That is the
+outcome the retrieval metric cannot express.
+
+**And the dilution worry did not materialise.** bongthom is 276 of 367 jobs (75% of the
+corpus) and appears **zero times** in either checked user's top 10 — 22 of 81 in
+`strong@`'s full list, none near the top. Thin title-only text produces a weak embedding
+and ranks low, which is exactly correct behaviour: the postings are reachable when relevant
+without displacing richer matches. Feed-only cost bongthom its ranking power, not its
+presence — which is the trade §7.1 accepted, now confirmed rather than assumed.

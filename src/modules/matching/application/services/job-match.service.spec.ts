@@ -41,22 +41,31 @@ describe('JobMatchService', () => {
       },
       job: { findUnique: jest.fn().mockResolvedValue('job' in opts ? opts.job : job) },
       experience: { count: jest.fn().mockResolvedValue(opts.structuredExperience ?? 0) },
-      resume: {
-        findFirst: jest.fn().mockResolvedValue(
+      parsedResumeData: {
+        findUnique: jest.fn().mockResolvedValue(
           opts.experiences === undefined
-            ? { parsedData: { experiences: JSON.stringify([{}, {}]) } }
-            : opts.experiences === null
-              ? null
-              : { parsedData: { experiences: opts.experiences } },
+            ? { experiences: JSON.stringify([{}, {}]) }
+            : { experiences: opts.experiences },
         ),
       },
+    };
+    // `experiences: null` means the user has no readable résumé at all.
+    const activeResume: any = {
+      findActiveResumeId: jest
+        .fn()
+        .mockResolvedValue(opts.experiences === null ? null : 'r1'),
     };
     const recompute: any = {
       cosineForJobs: jest.fn().mockResolvedValue(
         opts.cosine === null ? [] : [{ id: 'j1', cosine_sim: opts.cosine ?? 0.8 }],
       ),
     };
-    return new JobMatchService(prisma, new ComputeMatchScoreUseCase(), recompute);
+    return new JobMatchService(
+      prisma,
+      new ComputeMatchScoreUseCase(),
+      recompute,
+      activeResume,
+    );
   };
 
   it('returns null when the user has no profile', async () => {

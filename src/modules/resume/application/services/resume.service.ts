@@ -15,6 +15,8 @@ import { ResumeRepository } from '../../infrastructure/repositories/resume.repos
 import { UserRepository } from '@modules/user/infrastructure/repositories/user.repository';
 import { StorageService } from '@infra/storage/storage.service';
 import { BullQueueService } from '@infra/queue/bull-queue.service';
+import { DomainEventBus } from '@events/domain-event-bus.service';
+import { ResumeDefaultChangedEvent } from '../../domain/events/resume-default-changed.event';
 import {
   Resume,
   ResumeFileType,
@@ -43,6 +45,7 @@ export class ResumeService {
     private readonly userRepository: UserRepository,
     private readonly storage: StorageService,
     private readonly queue: BullQueueService,
+    private readonly eventBus: DomainEventBus,
   ) {}
 
   async uploadResume(
@@ -71,6 +74,10 @@ export class ResumeService {
       file.mimetype,
     );
 
+    // A user with one CV should never have to press "set as default" for the AI to use it.
+    // Only the FIRST upload claims the flag; later uploads leave the user's choice alone.
+    const hasDefault = (await this.resumeRepository.findDefaultByUserId(userId)) !== null;
+
     const resume = new Resume(
       {
         userId,
@@ -79,6 +86,7 @@ export class ResumeService {
         fileSize: file.size,
         fileType,
         title,
+        isDefault: !hasDefault,
         parsingStatus: 'PENDING',
       },
       resumeId,
@@ -123,13 +131,18 @@ export class ResumeService {
     }
 
     const current = await this.resumeRepository.findDefaultByUserId(userId);
-    if (current && current.id !== resume.id) {
+    if (current?.id === resume.id) return; // already the default — nothing to re-embed
+
+    if (current) {
       current.unsetDefault();
       await this.resumeRepository.save(current);
     }
 
     resume.setAsDefault();
     await this.resumeRepository.save(resume);
+
+    // The candidate embedding is built from this résumé, so it must be rebuilt.
+    await this.eventBus.publish(new ResumeDefaultChangedEvent(userId, resume.id));
   }
 
   private storagePath(

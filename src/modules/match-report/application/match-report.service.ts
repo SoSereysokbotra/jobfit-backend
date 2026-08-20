@@ -198,11 +198,16 @@ export class MatchReportService {
   ): ReportMatchRate | null {
     if (!match) return null;
 
-    // Extracted requirements first: they are the posting's requirement sentences already
-    // separated from its prose, so a number in the benefits list can't pose as a bar.
-    const requiredYears = parseYearsRequired(
-      requirements && requirements.length > 0 ? requirements : [input.jobDescription],
-    );
+    // BOTH the extracted requirements and the raw description. Requirements-only was
+    // tried and is unreliable: extraction is an LLM capped at 12 items, so the same
+    // Chemical Engineer posting yielded "4+ years of professional chemical engineering
+    // experience" on one scan and dropped it on the next — the bar flickered between
+    // REQUIREMENT and CV_DEPTH for an unchanged job. The description always holds it, and
+    // the requirement-context check is what keeps a benefits-section number out.
+    const requiredYears = parseYearsRequired([
+      ...(requirements ?? []),
+      input.jobDescription,
+    ]);
     const candidateYears = totalExperienceYears(datedExperiences(parsed));
 
     if (requiredYears === null || candidateYears === null) {
