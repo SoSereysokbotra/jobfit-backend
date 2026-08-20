@@ -4,14 +4,18 @@
 //
 // AUTH NOTE: the docs use @UseGuards(SupabaseAuthGuard); this project is self-managed JWT
 // (app-JWT canonical) with JwtAuthGuard registered GLOBALLY (secure-by-default), so every
-// route requires a JWT unless marked @Public(). Write routes keep an explicit
-// @UseGuards(JwtAuthGuard) to mirror the docs' intent. GET /profiles/:userId is @Public().
-// Mutations enforce "own profile only" by comparing the JWT subject to :userId.
+// route requires a JWT. Write routes keep an explicit @UseGuards(JwtAuthGuard) to mirror
+// the docs' intent, and enforce "own profile only" by comparing the JWT subject to :userId.
+//
+// GET /profiles/:userId USED TO BE @Public(). It returns phone, full name, photo, bio,
+// location and job preferences, so unauthenticated it was a PII read keyed by user id —
+// and until the same day GET /users/email/:email handed those ids out to anyone, making
+// email -> id -> phone number a complete anonymous harvest (MENTOR_REVIEW_2026-08-18 §3).
+// It is now self-or-admin, the same rule as GET /users/:id.
 
 import {
   Body,
   Controller,
-  ForbiddenException,
   Get,
   HttpCode,
   HttpStatus,
@@ -23,11 +27,12 @@ import {
 import {
   ApiBearerAuth,
   ApiConflictResponse,
+  ApiForbiddenResponse,
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { Public } from '@common/decorators/public.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
+import { assertOwner, assertSelfOrAdmin } from '@common/utils/ownership.util';
 import {
   AuthenticatedUser,
   JwtAuthGuard,
@@ -57,11 +62,16 @@ export class ProfileController {
   }
 
   @Get(':userId')
-  @Public()
-  @ApiOperation({ summary: 'Get a user profile (public)' })
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Get a user profile (own, or any as ADMIN)' })
+  @ApiForbiddenResponse({
+    description: 'Not your profile, and you are not an ADMIN.',
+  })
   async getByUserId(
+    @CurrentUser() caller: AuthenticatedUser,
     @Param('userId') userId: string,
   ): Promise<ProfileResponseDto> {
+    assertSelfOrAdmin(caller, userId);
     const profile = await this.profileService.getProfile(userId); // throws NotFound if absent
     return new ProfileResponseDto(profile);
   }
@@ -84,7 +94,7 @@ export class ProfileController {
     @Param('userId') userId: string,
     @Body() dto: UpdateProfileDto,
   ): Promise<ProfileResponseDto> {
-    this.assertOwner(user, userId);
+    assertOwner(user, userId);
     const profile = await this.profileService.updateProfile(userId, dto);
     return new ProfileResponseDto(profile);
   }
@@ -97,7 +107,7 @@ export class ProfileController {
     @Param('userId') userId: string,
     @Body() prefs: WorkPreferences,
   ): Promise<ProfileResponseDto> {
-    this.assertOwner(user, userId);
+    assertOwner(user, userId);
     const profile = await this.profileService.updateWorkPreferences(
       userId,
       prefs,
@@ -113,7 +123,7 @@ export class ProfileController {
     @Param('userId') userId: string,
     @Body() body: { minSalary: number; maxSalary: number },
   ): Promise<ProfileResponseDto> {
-    this.assertOwner(user, userId);
+    assertOwner(user, userId);
     const profile = await this.profileService.updateSalaryExpectations(
       userId,
       body.minSalary,
@@ -122,10 +132,4 @@ export class ProfileController {
     return new ProfileResponseDto(profile);
   }
 
-  /** "Own profile only" — the JWT subject must match the target userId. */
-  private assertOwner(user: AuthenticatedUser, userId: string): void {
-    if (user.id !== userId) {
-      throw new ForbiddenException('You can only modify your own profile');
-    }
-  }
 }

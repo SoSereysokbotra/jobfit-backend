@@ -19,9 +19,14 @@ export class UserService {
     private readonly eventBus: DomainEventBus,
   ) {}
 
-  /** Create a new user, persist it, and publish its creation event. */
+  /**
+   * Create a new user, persist it, and publish its creation event.
+   *
+   * The role is NOT taken from the caller — CreateUserDto has no `role` field, so this
+   * always produces the aggregate's default (JOB_SEEKER). See create-user.dto.ts for why.
+   */
   async createUser(dto: CreateUserDto): Promise<User> {
-    const user = User.create({ email: dto.email, role: dto.role });
+    const user = User.create({ email: dto.email });
     await this.userRepository.save(user);
     await this.publishEvents(user);
     return user;

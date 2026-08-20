@@ -21,7 +21,7 @@ git** — not against the docs. Every finding cites a file, a line, or a git obj
 |---|---|---|
 | 1 | No email is ever sent, but login requires a verified email → **no new user can sign in** | ✅ Fixed 2026-08-20 |
 | 2 | `PATCH /users/:id/subscription` has no role or ownership check → free Premium; any user can retier or delete any other user | ✅ Fixed 2026-08-20 |
-| 3 | `GET /users/email/:email` is `@Public()`; `GET /users` lists everyone; `POST /users` accepts `role: ADMIN` | 🔴 Security |
+| 3 | `GET /users/email/:email` is `@Public()`; `GET /users` lists everyone; `POST /users` accepts `role: ADMIN` | ✅ Fixed 2026-08-20 |
 | 4 | No single backend branch serves both the web app and the extension | 🔴 Release |
 | 5 | Screening ignores `application.resumeId` — the employer judges a CV the candidate did not submit | 🟠 The mentor's question, one layer down |
 | 6 | `recommendations` is a write-once cache: changing your CV never moves your matches | 🟠 Correctness |
@@ -244,6 +244,110 @@ assignment is an admin action with an audit row, not a request field.
 **The question you'll be asked.**
 > *"Which of your endpoints can I hit with no token at all? List them from memory."*
 > Then: *"What's the blast radius if I can enumerate every user's email and role?"*
+
+### ✅ Resolved 2026-08-20 — and the chain was worse than described
+
+`GET /users` and `POST /users` were already gated by §2. What remained:
+
+| Route | Before | After |
+|---|---|---|
+| `GET /users/email/:email` | `@Public()` — no token | `@Roles('ADMIN')` |
+| `GET /users/:id` | any authenticated caller, any record | own record, or `@Roles`-free ADMIN check |
+| `CreateUserDto.role` | optional `UserRole`, incl. `ADMIN` | **field removed** |
+
+- **The email oracle is gone and nothing needed it.** No consumer exists in the frontend or
+  the AI service, and `POST /auth/register` already answers "is this email taken" with
+  `EMAIL_ALREADY_REGISTERED` — which is where the review said it belongs.
+- **`GET /users/:id` now checks ownership** against the JWT subject
+  (`assertSelfOrAdmin`), mirroring what `profile.controller.ts` already did correctly. The
+  check runs *before* the lookup, so it is not a 403-vs-404 existence oracle either.
+- **`role` is off `CreateUserDto`.** Stripping it costs nothing real: this route creates a
+  row with an empty `passwordHash` that cannot log in, so it was never a working way to
+  make an employer. The working path is `prisma/seed.ts`, which sets a password and a
+  verified email. `UserController` is now the only user-writing surface outside
+  `/admin/users`, and it can mint nothing but a JOB_SEEKER.
+
+**On "two bugs holding each other shut" — the chain was live, and longer than the review
+traced.** With §1 fixed, we walked it: create the account → `request-password-reset` (which
+does not care that `passwordHash` is empty) → `reset-password` sets a real hash. That still
+leaves `login.handler.ts:68` refusing an unverified account — but
+`POST /auth/resend-email-verification` mails a code to the same attacker-controlled address,
+so `isVerified` falls too. Four public auth routes, no admin involvement after step 1. §2
+closed step 1 by requiring an ADMIN token; §3 removes the `role` field so even that step
+cannot mint a privileged account.
+
+**Tests.** [user.controller.authz.spec.ts](../src/modules/user/presentation/controllers/user.controller.authz.spec.ts)
+is now 30 specs, including a sweep asserting **no handler on this controller is `@Public()`**
+— so re-adding one fails a test rather than shipping. Both new protections were
+mutation-verified: restoring `@Public()` on the email lookup fails 4 specs; deleting the
+`assertSelfOrAdmin` call fails 2.
+
+**Answering "which endpoints can I hit with no token", for real.** Counted by decorator,
+not by grep on the string: **23 before, 18 now**, and all 18 are deliberate.
+
+| Count | Routes |
+|---|---|
+| 9 | `POST /auth/*` — register, login, refresh, and the verify/reset flows |
+| 3 | `GET /health/live · ready · heartbeat` |
+| 2 | `GET /jobs`, `GET /jobs/:id` — the public job board |
+| 1 | `POST /admin/login` |
+| 1 | `GET /metrics` — separately gated by `METRICS_TOKEN` |
+| 1 | `GET /skills/:skillId/learning-resources` |
+| 1 | `GET /resume-builder/templates` |
+
+The 5 removed: `GET /users/email/:email` (§3 above) and the 4 profile reads (§3a below).
+
+### 3a. ✅ The profile reads, found while answering that question — gated 2026-08-20
+
+**Not in the original review.** `GET /profiles/:userId` was `@Public()` and returned
+`phone`, full name, photo, bio, location and job preferences — unauthenticated, keyed by
+user id. Its three sub-resources
+(`/profiles/:userId/education | experience | skills`) were public too, adding full work
+history, education and skill set. With `GET /users/email/:email` handing out user ids to
+anyone, **email → user id → phone number** was a complete anonymous PII harvest. §3 closed
+the first link; this closes the rest.
+
+All four now require a token and enforce **self-or-admin**, the same rule as
+`GET /users/:id`:
+
+| Route | Before | After |
+|---|---|---|
+| `GET /profiles/:userId` | `@Public()` | self or ADMIN |
+| `GET /profiles/:userId/skills` | `@Public()` | self or ADMIN |
+| `GET /profiles/:userId/education` | `@Public()` | self or ADMIN |
+| `GET /profiles/:userId/experience` | `@Public()` | self or ADMIN |
+
+**A second bug the gating exposed.** The education and experience lists carry
+`@HttpCache({ maxAge: 60, staleWhileRevalidate: 300 })`, and `cacheControlHeader` defaults
+`scope` to **`public`** ([http-cache.decorator.ts:31](../src/common/decorators/http-cache.decorator.ts#L31)).
+Turning a public list into a per-user response while it still emits
+`Cache-Control: public` would let a shared CDN or proxy store one user's work history and
+serve it to whoever asked next — a worse leak than the one being fixed. Both are now
+`scope: 'private'`. The decorator already documented this ("use `private` for anything
+scoped to one user"); nothing had needed it before.
+
+**`assertOwner` was copy-pasted in four controllers** (three module-level functions plus a
+private method). Since self-or-admin was needed in four more places, both now live in
+[ownership.util.ts](../src/common/utils/ownership.util.ts) with the reasoning attached, and
+all five call sites — including `GET /users/:id` — use it.
+
+**Deliberately NOT a role test.** `assertSelfOrAdmin` refuses an `EMPLOYER` reading a
+candidate. When "an employer may view an applicant" lands (finding #9) that must be a
+*checked relationship* — an application linking the two — because `role === 'EMPLOYER'`
+alone would re-open the entire candidate table to anyone who registers as an employer. The
+helper says so in a comment, and a test pins it.
+
+**Blast radius: none found.** Every profile read in the frontend goes through
+`use-profile.ts`, where all 11 hooks derive the id from `useUserId()` — the caller's own.
+No page reads another user's profile; the AI service does not call these routes.
+⚠️ `jobfit-extension` was not checked — it is not checked out locally.
+
+**Tests.** 20 specs in
+[profile-reads.authz.spec.ts](../src/modules/user/presentation/controllers/profile-reads.authz.spec.ts)
+(per route: `@Public()` is gone, a stranger is refused, an EMPLOYER is refused, owner and
+ADMIN pass, and the refusal happens *before* the read so it is not an existence oracle),
+plus 9 on the shared helper. Mutation-verified: deleting the `assertSelfOrAdmin` call from
+two controllers fails 4 specs.
 
 ---
 
