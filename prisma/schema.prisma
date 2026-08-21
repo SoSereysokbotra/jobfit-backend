@@ -170,12 +170,10 @@ model User {
   /// project does not yet have.
   deletedEmail String?
 
-  // Job seeker profile (legacy — kept for job/application/company modules)
-  jobSeekerProfile JobSeekerProfile?
   // Employer profile
-  employerProfile  EmployerProfile?
+  employerProfile EmployerProfile?
   // Auth sessions
-  refreshTokens    RefreshToken[]
+  refreshTokens   RefreshToken[]
 
   // ── User module (Phase 3) ──────────────────────────────────────────────────
   profile           Profile?
@@ -404,22 +402,6 @@ model UserAnalytics {
   @@map("user_analytics")
 }
 
-model JobSeekerProfile {
-  id        String   @id @default(uuid())
-  userId    String   @unique
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  firstName String
-  lastName  String
-  bio       String?
-  location  String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  matchScores MatchScore[]
-
-  @@map("job_seeker_profiles")
-}
-
 model EmployerProfile {
   id        String   @id @default(uuid())
   userId    String   @unique
@@ -570,7 +552,6 @@ model Job {
   searchTsv Unsupported("tsvector")?
 
   applications    Application[]
-  matchScores     MatchScore[]
   skills          JobSkill[]
   savedBy         SavedJob[]
   recommendations Recommendation[]
@@ -919,23 +900,18 @@ model ContactPerson {
   @@map("contact_persons")
 }
 
-model MatchScore {
-  id                 String           @id @default(uuid())
-  jobId              String
-  job                Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  jobSeekerProfileId String
-  jobSeekerProfile   JobSeekerProfile @relation(fields: [jobSeekerProfileId], references: [id], onDelete: Cascade)
-  score              Float // 0 - 100
-  breakdown          Json? // sub-scores e.g. skill, experience
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
-
-  @@unique([jobId, jobSeekerProfileId])
-  @@map("match_scores")
-}
-
-// Seeker-facing job recommendation (Phase 3). Keyed by (userId, jobId) so it works
-// off the populated `Profile`/User rather than the empty legacy JobSeekerProfile.
+// Seeker-facing job recommendation (Phase 3) — THE match table. There is exactly one.
+//
+// Keyed by (userId, jobId): the candidate identity for the whole matching domain is the
+// USER, and the profile row hanging off them. `MatchScore` used to sit alongside this
+// keyed by `jobSeekerProfileId` and holding the same score + breakdown, so a reader could
+// not tell which was authoritative (MENTOR_REVIEW_2026-08-18 §15). It was dropped: 0 rows,
+// no writer on any branch, and unpopulatable anyway because `job_seeker_profiles` was
+// empty and no code created one.
+//
+// If a second match table is ever proposed, the question to answer first is which identity
+// it is keyed by — that is the thing that made these two impossible to reconcile.
+//
 // Written by the matching batch; read by the /recommendations endpoint.
 model Recommendation {
   id     String @id @default(uuid())

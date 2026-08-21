@@ -33,7 +33,7 @@ git** — not against the docs. Every finding cites a file, a line, or a git obj
 | 12 | `formatSalaryRange` fabricates currency and magnitude (`$500K` for a $500 job) | ✅ Fixed 2026-08-20 |
 | 13 | The displayed match **percentage** has never been calibrated — the defect that got `fitScore` rejected | ✅ Fixed 2026-08-20 (and uncovered a 🔴 boot failure) |
 | 14 | Soft-deleted users can still log in, and can never re-register | ✅ Fixed 2026-08-20 |
-| 15 | Two parallel match tables (`MatchScore` vs `Recommendation`) | 🟡 Design |
+| 15 | Two parallel match tables (`MatchScore` vs `Recommendation`) | ✅ Fixed 2026-08-20 (drop migration awaiting approval) |
 | 16 | `SavedJob` dies with the job; `TrackedJob` survives it | 🟡 Consistency |
 | 17 | The ER diagram documents ~14 tables that do not exist — and contracts are written against them | 🟡 Docs |
 | 18 | `docs/SRS.md` is 0 bytes — the scorecard grades against a document that isn't there | 🟡 Docs |
@@ -1585,6 +1585,74 @@ document it — `TrackedJob`'s schema comments are an excellent model for exactl
 
 **The question you'll be asked.**
 > *"You have `match_scores` and `recommendations`. What's the difference?"*
+
+### ✅ Resolved 2026-08-20 — the answer is "one of them could never hold a row"
+
+**Verified at `6dcd59e`**, against the live database and **every local and remote ref**,
+not just the working tree:
+
+| table | rows | written by |
+|---|---|---|
+| `match_scores` | **0** | nothing, on any branch |
+| `job_seeker_profiles` | **0** | nothing — referenced by **no TypeScript at all** |
+| `recommendations` | **749** | the matching pipeline |
+| `profiles` | 10 | the identity the pipeline uses |
+
+#### 🔴 The finding is right that only one is written — but "nothing uses MatchScore" is false
+
+A first grep suggested nothing touched it. That would have been the §4 mistake repeated:
+`EmployerJobRepository.analytics()` **reads it on every branch, including `main`**, as
+`AVG(score)` for the employer's job dashboard. Anyone dropping the table on a
+"nothing uses it" grep would have broken a live endpoint.
+
+**What it actually returned is the more interesting part.** `match_scores` was not merely
+unused, it was **unpopulatable**: its foreign key requires a `job_seeker_profiles` row,
+that table has zero rows, and no code creates one. So the AVG was over an empty set,
+returned `NULL` every time, and the employer's **"Avg Match" stat card has rendered "—"
+on every page load since it shipped**. A dead table with a live reader that silently
+reports nothing is worse than a dead table, and the review did not have this.
+
+#### The decision the review asks for
+
+**One match table, keyed by the USER.** `Recommendation`'s own schema comment already
+half-said this ("so it works off the populated `Profile`/User rather than the empty legacy
+JobSeekerProfile"); it now says it outright, along with the question to ask before anyone
+proposes a second one — *which identity is it keyed by?*, since that is exactly what made
+these two irreconcilable.
+
+`MatchScore` is dropped. `JobSeekerProfile` goes with it: `MatchScore` was its only
+dependent, no TypeScript references it, and leaving an empty table with no code and no
+dependents behind is the dead schema this finding is about.
+
+#### What replaced the average, and why it is not an average
+
+`analytics()` now reads `recommendations` — 749 real rows, dismissed ones excluded, since
+a candidate who rejected a job is not part of its pool — and returns **band counts**, not
+a mean.
+
+Restoring `averageMatchScore` from real data was rejected on §13's evidence: the score is
+calibrated for **ordering** (ρ 0.662), its observed range is **41–69** on a scale
+presented as 0–100, and the human grades overlap inside it. A mean of numbers like that is
+a magnitude claim the calibration does not support — shipping "Avg Match 54%" would have
+replaced a blank with a wrong answer. `{ strong, possible, weak }` is defensible, and
+"12 strong candidates" is more useful to an employer than any average. The frontend's
+tile is now **"Strong Matches"**.
+
+**Tests — 6 new** on the analytics path (reads recommendations, excludes dismissals, bands
+correctly at the §13 edges, reports zeroes rather than null for an unmatched job, and
+asserts no average survives anywhere in the result). Backend: **82 files, 939 tests,
+green**; lint clean. Frontend: 52 tests green, typecheck clean apart from two pre-existing
+errors it does not touch.
+
+#### ⚠️ Needs you: the drop is written but NOT applied
+
+[`20260820200000_drop_legacy_match_score`](../prisma/migrations/20260820200000_drop_legacy_match_score/migration.sql)
+is committed and unapplied. Dropping tables is irreversible, and this project has already
+had one near-miss where a table was almost dropped on a branch-local grep, so the decision
+is left to a human even though both tables are verified empty. **The code does not depend
+on it** — nothing reads either table any more, so the application is correct whether the
+migration runs or not. Apply with `npx prisma migrate deploy` when you are satisfied with
+the evidence above.
 
 ---
 

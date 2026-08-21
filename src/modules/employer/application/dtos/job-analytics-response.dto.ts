@@ -2,7 +2,7 @@
 //
 // Read model for GET /employer/jobs/:id/analytics.
 
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty } from '@nestjs/swagger';
 
 export class JobAnalyticsResponseDto {
   @ApiProperty() jobId: string;
@@ -13,13 +13,22 @@ export class JobAnalyticsResponseDto {
   @ApiProperty({ description: 'Application counts grouped by status.' })
   applicationsByStatus: Record<string, number>;
 
-  @ApiPropertyOptional({
-    type: Number,
-    nullable: true,
+  /**
+   * The matched candidate pool, split into the bands §13's calibration supports.
+   *
+   * Replaces `averageMatchScore`, which read an AVG from `match_scores` — a table with no
+   * rows and no writer — so it was `null` on every request ever made and the UI's "Avg
+   * Match" card always showed "—" (MENTOR_REVIEW_2026-08-18 §15). Restoring it as an
+   * average from `recommendations` was rejected: the score's observed range is 41–69 on a
+   * scale presented as 0–100 and the human grades overlap inside it, so a mean would be a
+   * magnitude claim the calibration does not support (§13).
+   */
+  @ApiProperty({
     description:
-      'Average candidate match score (0-100), or null if none computed.',
+      'Matched candidates by confidence band. Counts, not an average — the score is ' +
+      'calibrated for ORDERING, not magnitude (see §13).',
   })
-  averageMatchScore: number | null;
+  candidateBands: { strong: number; possible: number; weak: number };
 
   @ApiProperty({
     description:
@@ -31,15 +40,12 @@ export class JobAnalyticsResponseDto {
     jobId: string;
     applicationsCount: number;
     applicationsByStatus: Record<string, number>;
-    averageMatchScore: number | null;
+    candidateBands: { strong: number; possible: number; weak: number };
   }) {
     this.jobId = params.jobId;
     this.applicationsCount = params.applicationsCount;
     this.applicationsByStatus = params.applicationsByStatus;
-    this.averageMatchScore =
-      params.averageMatchScore === null
-        ? null
-        : Math.round(params.averageMatchScore * 100) / 100;
+    this.candidateBands = params.candidateBands;
     this.views = 0;
   }
 }
