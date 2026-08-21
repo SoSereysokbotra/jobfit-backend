@@ -156,6 +156,20 @@ model User {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
+  /// The address this account used before it was deleted.
+  ///
+  /// Soft delete RELEASES `email` to a reserved tombstone, because `email` is @unique and
+  /// keeping it occupied meant a user who deleted their account could never register
+  /// again (MENTOR_REVIEW_2026-08-18 §14). That dead end is what forced hard deletes
+  /// through the Supabase console — and a hard delete cascades to `match_labels`, which
+  /// is how 50 hand-labelled evaluation pairs were destroyed.
+  ///
+  /// ⚠️ RETENTION. This is still personal data after a deletion request. It is kept so
+  /// support can answer "what happened to my account" and so repeat abuse is traceable;
+  /// a production deployment needs a purge policy with a stated horizon, which this
+  /// project does not yet have.
+  deletedEmail String?
+
   // Job seeker profile (legacy — kept for job/application/company modules)
   jobSeekerProfile JobSeekerProfile?
   // Employer profile

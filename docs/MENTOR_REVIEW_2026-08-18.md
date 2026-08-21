@@ -32,7 +32,7 @@ git** — not against the docs. Every finding cites a file, a line, or a git obj
 | 11 | No rate limit on any AI/GPU route | ✅ Fixed 2026-08-20 |
 | 12 | `formatSalaryRange` fabricates currency and magnitude (`$500K` for a $500 job) | ✅ Fixed 2026-08-20 |
 | 13 | The displayed match **percentage** has never been calibrated — the defect that got `fitScore` rejected | ✅ Fixed 2026-08-20 (and uncovered a 🔴 boot failure) |
-| 14 | Soft-deleted users can still log in, and can never re-register | 🟡 Edge case |
+| 14 | Soft-deleted users can still log in, and can never re-register | ✅ Fixed 2026-08-20 |
 | 15 | Two parallel match tables (`MatchScore` vs `Recommendation`) | 🟡 Design |
 | 16 | `SavedJob` dies with the job; `TrackedJob` survives it | 🟡 Consistency |
 | 17 | The ER diagram documents ~14 tables that do not exist — and contracts are written against them | 🟡 Docs |
@@ -1467,6 +1467,103 @@ nullable `userId`, or export the label set to a file no `DELETE` can reach.
 **The question you'll be asked.**
 > *"A user asks you to delete their account. Walk me through what happens — then tell me what
 > happens when they sign up again next month."*
+
+### ✅ Resolved 2026-08-20 — and this is not an edge case, it is an auth bypass
+
+Both halves confirmed, and the first is worse than 🟡 suggests: **a deleted account could
+still log in.** Not "until a cache expired" — indefinitely, because nothing anywhere on
+the auth path looked at `deletedAt`.
+
+#### The lookups: five, not two
+
+The finding names `findByEmail` and `findById`. Every lookup in
+[user.repository.ts](../src/modules/auth/infrastructure/persistence/user.repository.ts)
+ignored `deletedAt`, and two of the others matter more than the named ones:
+
+| Lookup | Why it matters |
+|---|---|
+| `findByEmail` | the login path |
+| `findById` | every authenticated request |
+| **`findByPasswordResetCode`** | a deleted user could set a new password |
+| **`findByVerificationCode`** | a deleted user could verify and re-enter |
+| `existsByEmail` | the re-registration block — deliberately left unfiltered, below |
+
+**A sixth hole found while fixing it: `isActive` was never checked either.** `softDelete`
+sets it false, but an admin can deactivate *without* deleting, and login had no opinion
+about that at all.
+
+#### The Redis cache would have defeated a SQL-only fix
+
+`findById` serves from Redis for **300 seconds**, and the entry is written while the user
+is still live — so its `deletedAt` is `null` whatever the database now says. Adding
+`deletedAt: null` to the queries, which is what the finding proposes, leaves a five-minute
+window where a just-deleted account still authenticates.
+
+Worse, `softDelete` lives in a **different repository** (`AdminUserRepository`) that
+writes through Prisma directly and never touched the auth cache. So the fix is in two
+places, on purpose:
+
+1. `liveOnly()` is applied to the **entity**, not the query — one chokepoint that covers
+   the cached path and the database path identically, and that a caller in another module
+   cannot forget.
+2. `softDelete` now invalidates the three auth cache keys, logging at `error` if that
+   fails, because the account is deleted either way and a stale cache is a
+   security-relevant window rather than a cosmetic one.
+
+#### `existsByEmail` is deliberately NOT filtered
+
+It answers a question about the **unique index**, not about who may log in. Filtering
+`deletedAt` there would report a taken address as free and turn a clean "already
+registered" into a 500 at the constraint. Re-registration works because the address is
+actually released — not because a lookup pretends the row is gone.
+
+#### Releasing the address, which is the whole second half
+
+Soft delete now rewrites `email` to `deleted+<id>@deleted.invalid` and moves the original
+to a new `users.deletedEmail` column
+([migration](../prisma/migrations/20260820180000_release_email_on_soft_delete/migration.sql)).
+
+- **`.invalid` is reserved by RFC 2606**, so a tombstone can never collide with a real
+  address and can never be mailed by accident.
+- **The user id is in the tombstone** because `email` is `@unique` — a fixed placeholder
+  would let exactly one account ever be deleted.
+- **`deletedEmail` is not unique**, deliberately. The same person may register and delete
+  more than once, and a unique index there would recreate the dead end one column over.
+- ⚠️ **Retention is a real trade-off, and is written down rather than glossed.** Keeping
+  the original address is still personal data after a deletion request. It is kept so
+  support can answer "what happened to my account"; a production deployment needs a purge
+  horizon this project does not have.
+
+#### The eval-set loss was the same bug, and now has a real defence
+
+The finding's reasoning is right: a *working* soft delete cannot produce
+"row deleted, email re-registered" — the unique index would block it — so the row was
+**hard-deleted out-of-band**, which is exactly what a permanently-occupied address forces.
+Freeing the address removes the reason to reach for the console.
+
+**On `MatchLabel`: the review offers `onDelete: SetNull` or an export. We did the export,
+and the choice is not arbitrary.** A label's value is the whole triple — *this* person
+judged *this* job *this* way. Nulling `userId` keeps a row and throws away the half that
+makes it evidence: calibration scores a candidate's profile against a job, so an orphaned
+label cannot be used for anything. `SetNull` would preserve the record, destroy the
+research data, and look like a fix.
+[`scripts/export-match-labels.ts`](../scripts/export-match-labels.ts) copies the triple —
+with the labeller's email and the job's title, so it survives the rows it points at —
+to a timestamped file that no `DELETE` can reach. Run against the live database: **50
+labels, 1 candidate, GREAT=9 OK=3 BAD=38**, matching §13 exactly. `eval-exports/` is
+gitignored, because the file carries a real email address.
+
+**Tests — 22 new, all mutation-relevant.** 12 on the repository (including three that
+drive the *cached* path specifically, since that is where a SQL-only fix leaks, and one
+asserting `existsByEmail` stays unfiltered) and 10 on the delete path (address released,
+tombstone unique per user, original retained, caches invalidated, and deletion still
+reported as successful when Redis is down). Whole suite: **81 files, 933 tests, green**;
+`src` lint clean.
+
+**⚠️ A note on running the suite.** In parallel mode two integration specs now
+intermittently fail with `Can't reach database server` — Supabase pooler exhaustion, the
+family of problems §4 documents, **not** a logic failure. `npx jest --runInBand` passes
+all 933. Worth fixing separately; a shared test database is the real answer.
 
 ---
 

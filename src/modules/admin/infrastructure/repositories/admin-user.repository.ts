@@ -5,9 +5,23 @@
 // (name, lastLogin, verification/active flags, related counts) than those minimal
 // aggregates expose, and only ever touches non-secret columns.
 
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@infra/prisma/prisma.service';
+import { RedisService } from '@shared/services/redis.service';
+import { authCacheKeys } from '@modules/auth/infrastructure/persistence/auth-cache.keys';
+
+/**
+ * The address a deleted account's email is moved to.
+ *
+ * `.invalid` is reserved by RFC 2606 and can never resolve, so a tombstone can never
+ * collide with a real user's address and can never receive mail. The user id keeps every
+ * tombstone unique, which matters because `users.email` is @unique — a fixed placeholder
+ * would let exactly one account be deleted.
+ */
+function tombstoneEmail(userId: string): string {
+  return `deleted+${userId}@deleted.invalid`;
+}
 
 // Non-secret user columns the admin surface is allowed to read.
 const ADMIN_USER_SELECT = {
@@ -28,7 +42,12 @@ export type AdminUserRow = Prisma.UserGetPayload<{
 
 @Injectable()
 export class AdminUserRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(AdminUserRepository.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+  ) {}
 
   /** Search users by email / name substrings and signup date range. */
   search(params: {
@@ -87,12 +106,63 @@ export class AdminUserRepository {
   }
 
   /** GDPR soft delete: mark deleted and deactivate. Idempotent-safe via updateMany. */
+  /**
+   * GDPR soft delete — and it RELEASES THE EMAIL.
+   *
+   * Setting `deletedAt` alone left the address occupied by a row nobody could log into,
+   * so the user could never register again (MENTOR_REVIEW_2026-08-18 §14). That dead end
+   * is what pushed people to hard-delete through the Supabase console, and a hard delete
+   * cascades to `match_labels` — the documented cause of 50 hand-labelled evaluation
+   * pairs being lost. Freeing the address here removes the reason to reach for the
+   * console.
+   *
+   * The original goes to `deletedEmail` rather than being discarded, so support can still
+   * answer "what happened to my account".
+   */
   async softDelete(id: string): Promise<boolean> {
+    // Read first: the tombstone must not overwrite an ALREADY-saved original if this
+    // somehow runs twice, and `updateMany` cannot copy a column onto another column.
+    const existing = await this.prisma.user.findFirst({
+      where: { id, deletedAt: null },
+      select: { email: true },
+    });
+    if (!existing) return false;
+
     const result = await this.prisma.user.updateMany({
       where: { id, deletedAt: null },
-      data: { deletedAt: new Date(), isActive: false },
+      data: {
+        deletedAt: new Date(),
+        isActive: false,
+        email: tombstoneEmail(id),
+        deletedEmail: existing.email,
+      },
     });
-    return result.count > 0;
+    if (result.count === 0) return false;
+
+    // The auth repository caches the user entity and an email→id lookup for 300s, and it
+    // is a DIFFERENT repository that knows nothing about this write. Without this, a
+    // just-deleted user could still log in until those keys expired.
+    await this.invalidateAuthCache(id, existing.email);
+    return true;
+  }
+
+  /** Best-effort: a cache failure must not make the deletion itself fail. */
+  private async invalidateAuthCache(userId: string, email: string): Promise<void> {
+    try {
+      const keys = [
+        authCacheKeys.authUserEntity(userId),
+        authCacheKeys.safeUserEntity(userId),
+        authCacheKeys.authUserEmailLookup(email.toLowerCase().trim()),
+      ];
+      await Promise.all(keys.map((key) => this.redis.del(key)));
+    } catch (err) {
+      // Logged loudly: the account IS deleted, but a stale cache means it can still
+      // authenticate for up to the TTL, which is a security-relevant window.
+      this.logger.error(
+        `Auth cache invalidation failed after deleting ${userId} — the account may still ` +
+          `authenticate for up to 300s: ${(err as Error).message}`,
+      );
+    }
   }
 
   private buildWhere(params: {
