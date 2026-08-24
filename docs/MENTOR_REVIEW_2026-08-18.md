@@ -29,15 +29,15 @@ git** — not against the docs. Every finding cites a file, a line, or a git obj
 | 8 | `PRIVACY.md` states something the code no longer does, and omits four hosts | ✅ Fixed 2026-08-20 (and the fix's own first draft was wrong — see §8) |
 | 9 | Employers cannot see a candidate's résumé anywhere in the API | ✅ Fixed 2026-08-20 |
 | 10 | The paywall gates features no payment path can unlock, and the extension serves the same AI ungated | ✅ Fixed 2026-08-20 (payment module still absent, by decision) |
-| 11 | No rate limit on any AI/GPU route | 🟠 Cost |
-| 12 | `formatSalaryRange` fabricates currency and magnitude (`$500K` for a $500 job) | 🟠 Honesty |
-| 13 | The displayed match **percentage** has never been calibrated — the defect that got `fitScore` rejected | 🟡 Evidence |
-| 14 | Soft-deleted users can still log in, and can never re-register | 🟡 Edge case |
-| 15 | Two parallel match tables (`MatchScore` vs `Recommendation`) | 🟡 Design |
-| 16 | `SavedJob` dies with the job; `TrackedJob` survives it | 🟡 Consistency |
-| 17 | The ER diagram documents ~14 tables that do not exist — and contracts are written against them | 🟡 Docs |
+| 11 | No rate limit on any AI/GPU route | ✅ Fixed 2026-08-20 |
+| 12 | `formatSalaryRange` fabricates currency and magnitude (`$500K` for a $500 job) | ✅ Fixed 2026-08-20 |
+| 13 | The displayed match **percentage** has never been calibrated — the defect that got `fitScore` rejected | ✅ Fixed 2026-08-20 (and uncovered a 🔴 boot failure) |
+| 14 | Soft-deleted users can still log in, and can never re-register | ✅ Fixed 2026-08-20 |
+| 15 | Two parallel match tables (`MatchScore` vs `Recommendation`) | ✅ Fixed 2026-08-20 (drop applied — see §15 note) |
+| 16 | `SavedJob` dies with the job; `TrackedJob` survives it | ✅ Fixed 2026-08-20 |
+| 17 | The ER diagram documents ~14 tables that do not exist — and contracts are written against them | ✅ Fixed 2026-08-20 |
 | 18 | `docs/SRS.md` is 0 bytes — the scorecard grades against a document that isn't there | 🟡 Docs |
-| 19 | Khmer postings get a confident score and a silently wrong skills table | 🟡 Known-limit, under-surfaced |
+| 19 | Khmer postings get a confident score and a silently wrong skills table | ✅ Fixed 2026-08-20 |
 
 ---
 
@@ -1061,6 +1061,96 @@ exists.
 **The question you'll be asked.**
 > *"What's the most money one signed-up user can cost you in an hour?"*
 
+### ✅ Resolved 2026-08-20 — and the question now has a number
+
+Confirmed exactly as described: `@RateLimit` existed, and not one AI route used it.
+
+**Per USER, not per IP.** The finding asks what one *signed-up user* can cost, which is a
+question about an account. The stock `ThrottlerGuard` keys on IP and answers it wrongly in
+both directions — a shared office NAT is one IP and fifty honest users who would throttle
+each other, while one abusive account on a hotspot, a VPN and a café is a dozen IPs and a
+dozen fresh budgets. [`AiThrottlerGuard`](../src/common/guards/ai-throttler.guard.ts)
+keys on the JWT subject instead. The auth limiters deliberately stay per-IP: the whole
+point of a login limiter is to stop someone who has no account yet.
+
+**13 routes, five limiters.** Two that the review did not list turned out to matter more
+than some that it did:
+
+| Limiter | Per user/hour | Routes |
+|---|---|---|
+| `aiGenerate` | 10 | the 4 cover-letter / interview routes |
+| `aiReport` | 30 | `POST /match-report` |
+| `aiResume` | 20 | **6 résumé routes** |
+| `aiRecommendations` | 60 | `GET /recommendations` |
+| `aiMatch` | 120 | `GET /recommendations/by-job` |
+
+- **The résumé routes were the quiet one.** `ResumeScorerService.scoreResume` has **no
+  cache** — it re-runs the model on every call and only then persists. So `/ats-score`,
+  `/quality-score`, `/scores`, `POST /:id/score` *and* `PATCH /:id/set-default` each spend
+  a full scoring call, and any client polling them is an open tap. The review named none
+  of them.
+- **`GET /recommendations` became expensive in §6**, where a stale row now triggers a
+  recompute — embed plus LLM rerank — **on the read path**. Fixing one finding created
+  the exposure for another.
+- **`scout` is deliberately NOT limited.** §7 made it score live, which looks expensive,
+  but `scoreJobs` never calls the AI service. Verified, and pinned by a test so nobody
+  later "fixes" it.
+
+#### The answer to the interviewer's question
+
+Per user per hour, worst case: **10 generations + 90 report calls + 20 résumé scores +
+120 recommendation calls + 120 embeds.** Multiply by cost per call. The arithmetic is in
+[throttler.config.ts](../src/config/throttler.config.ts) so it stays honest when a limit
+changes. Two caveats stated there rather than glossed: the store is **in-memory, so the
+real ceiling is N× for N Cloud Run instances** (bounded by a constant, not global — a
+shared Redis store is the follow-up, and `ioredis` is already a dependency), and `SCALE`
+still relaxes every limit outside production.
+
+#### 🔴 The cost is worse than the review knew: `match-report` spends real money
+
+The review treats this as GPU saturation. Since then, requirement extraction became the
+`job_requirements` task, which `jobfits-ai-service` routes to **DeepSeek by default** (see
+§8). `POST /match-report` is therefore a **metered third-party API call**, and the failure
+mode is not a slow box — it is an invoice.
+
+**So the dedupe cache the review asked for is implemented**, keyed on
+`(userId, source, externalId, sha256(description))` as suggested, plus the half the
+suggestion omitted: **a freshness bar**. A report is one résumé judged against one
+posting, so an unchanged posting is only half the question. The cache is only reused when
+the report is newer than the résumé row, its parse, *and* the profile. Without that,
+uploading a better CV would leave the user staring at a report about the old one — which
+is precisely the §6 defect re-entering through a cache. Whitespace is normalised so the
+same posting re-wrapped still hits; case is not folded, so "Junior" → "Senior" misses.
+
+#### On "count LLM calls per user in the metrics module" — done, but not as a label
+
+`jobfit_ai_calls_total{operation,outcome}` and `jobfit_ai_call_duration_seconds` are
+recorded in `AiClient`'s transport, which is the single door to the AI service. Retries
+count **twice**, because a retry is a second inference and a second bill.
+
+`userId` is deliberately **not** a label: unbounded cardinality is how a cost metric
+becomes a bigger cost problem than the thing it measures. The per-user question is
+answered by the ceiling above, and 429s surface as
+`http_requests_total{status_code="429"}`. `MetricsService` is injected `@Optional` so
+observability can never break an AI call — and a test asserts the client still works when
+recording throws.
+
+**Tests — 63 new, mutation-verified.** 8 on the tracker (same user across IPs shares a
+budget; different users behind one IP do not), 34 driving the **real decorator metadata**
+on the real controllers, 14 on dedupe and 7 on metrics. The decorator suite is written as
+an inventory with an invariant — *a guarded route must name exactly one limiter* — so a
+new AI route added without one fails a test instead of shipping. Deleting a single
+`@RateLimit` fails 3. Whole suite: **75 files, 872 tests, green**; lint clean.
+
+**One bug this found in itself:** the first version of the decorator test read
+`THROTTLER_SKIP` as a single map. `SkipThrottle` actually writes one key **per throttler
+name**, so the map read returned `undefined` everywhere — which would have made every
+"this route is unlimited" assertion pass whether or not it was true. It failed loudly
+instead of passing vacuously only because the positive assertions were written first.
+
+**⚠️ Needs you:** the `20260820140000_match_report_description_hash` migration is applied
+locally; production picks it up from the cloudbuild migrate step.
+
 ---
 
 ## 12. 🟠 The salary formatter invents both a currency and a scale
@@ -1096,6 +1186,103 @@ Until the column exists, print the raw number with no unit rather than asserting
 **The question you'll be asked.**
 > *"Your users are in Cambodia. This job pays $500K a year?"*
 
+### ✅ Resolved 2026-08-20 — the diagnosis was half right, and the missing half was worse
+
+The finding is correct that the currency and the magnitude were fabricated. Two of its
+specifics did not survive checking, and what replaced them is a bigger bug.
+
+**The `$500K` example does not occur.** `job.mappers.ts` ran every amount through
+`toSalaryK`, which divided by 1000 — so the API's `140000` became `140` and rendered
+`$140K`, correctly. The K suffix and the division cancelled out.
+
+**What that division actually did is destroy the Cambodian range.** `toSalaryK` is
+`Math.round(amount / 1000)`. A $300/month Phnom Penh salary became **`0`**, and a $500
+one became `1`. So the product's target market could not have its pay displayed at all:
+Low monthly figures either vanished into "$0K" — indistinguishable from *no salary stated*
+— or were inflated 2× by rounding. The review's version of the bug was cosmetic on a
+corpus we do not have; the real one silently deleted data on the corpus we do.
+
+**The null case is the dominant one, and the numbers check out.** Queried at
+2026-08-20: **19 of 367 jobs carry a salary, 348 do not.** `toSalaryK(null)` returned
+`0`, so 95% of every job card, comparison table and recommendation rendered
+**`$0K – $0K`**. That is the single most-shown wrong fact in the product.
+
+#### Backend — the columns the review asked for
+
+Migration
+[`20260820160000_job_salary_currency_and_period`](../prisma/migrations/20260820160000_job_salary_currency_and_period/migration.sql)
+adds `jobs.salaryCurrency` (default `USD`, matching `Profile`) and `jobs.salaryPeriod`
+(new `SalaryPeriod` enum).
+
+`salaryPeriod` is **nullable with no default**, deliberately. Defaulting it to ANNUAL
+would be this exact finding committed one layer down: 500-per-month and 500-per-year are
+the same integer, and the ingestion cannot currently tell which it has. Null means
+unknown, and the DTO documents that clients must not read it as annual.
+
+The back-fill is guarded rather than blanket: `ANNUAL` only where `minSalary >= 10000`.
+Every existing salaried row is INTERNAL, created through the employer form, and the
+smallest is 24,000 — no reading of 24,000 is hourly or monthly, so ANNUAL is a deduction.
+Anything below the guard stays NULL, because it could genuinely be monthly Cambodian pay.
+
+`SalaryRange` carries `period`, `SalaryRangeResponseDto` emits it, and `CreateJobDto`
+accepts `salaryCurrency` + `salaryPeriod` so an employer can state both.
+
+#### Frontend — the formatter now refuses to guess
+
+| Case | Before | After |
+|---|---|---|
+| No salary (348/367) | `$0K – $0K` | renders nothing (`null`) |
+| NY engineer `140000–185000` | `$140K – $185K` | `$140K – $185K/yr` |
+| PP monthly `300–500` | `$0K – $1K` | `$300 – $500/mo` |
+| Riel `1200000–2000000` | `$1200K – $2000K` | `KHR 1.2M – KHR 2M/mo` |
+| Period unknown | `…/yr` implied by "K" | no suffix at all |
+
+- **`formatSalaryRange` returns `string | null`**, and call sites drop the whole element
+  — icon included. Returning `"—"` would have left every caller string-comparing to find
+  out, and a lone `$` icon with no number is its own small lie.
+- **`toSalaryK` is deleted**, not just unused. A lossy helper left lying around is an
+  invitation.
+- Sorting by salary puts unknowns **last** rather than scoring them 0; an explicit salary
+  filter **excludes** them, because a job that states no pay cannot be shown to clear a
+  bar; and the comparison table gives them no midpoint, so an unpriced job can no longer
+  "lose" on salary.
+
+#### A precision bug introduced and caught during the fix
+
+The first version used `notation: "compact"` with `maximumFractionDigits: 0`, which
+renders 1,200,000 riel as **`KHR 1M`** — a 20% error, in the function whose entire purpose
+is to stop confident wrong numbers. Caught by running the formatter over the real rows
+rather than trusting it. Now `maximumFractionDigits: 1`, so it reads `1.2M` while 140,000
+still reads `140K`.
+
+**Tests — 32 new.** 11 on `SalaryRange`, 4 on `JobMapper` and 6 on the ingestion units
+rule (backend), 15 on the formatter (frontend), each case drawn from a real row rather
+than invented. Backend: 77 files, 896 tests, green. Frontend: 52 tests, green; `tsc` clean apart from two
+pre-existing errors in `employer/settings` and `profile.mappers`, neither touched here.
+
+#### The ingestion path can no longer write a bare number
+
+`IngestedJob` accepted `minSalary`/`maxSalary` and nothing else, so the first adapter to
+learn how to read pay would have dropped an unlabelled integer into the column and
+reopened this finding for all future data. It now carries `salaryCurrency` and
+`salaryPeriod` too, and `persist` writes units **only alongside an amount** — a currency
+with nothing to count is not a fact about the job, and writing one for a job whose pay is
+unknown would make an empty row look partially specified.
+
+No adapter emits pay today (verified at `33f7981`); all 305 ingested postings are silent
+about it. This is the guard rail for when one does, and it matters because the boards
+disagree by three orders of magnitude: BongThom quotes MONTHLY in the hundreds, TheMuse
+quotes ANNUAL in the tens of thousands, and "500" from each is the same integer.
+
+**Still NOT fixed, stated rather than left implied:**
+
+1. **No adapter extracts pay from posting text yet.** The columns and the guard rail
+   exist; the data does not. That is a separate job, and until it lands the honest
+   display is the whole of the user-visible improvement.
+2. **`TrackedJob` and `Profile` keep their own salary columns** with the same ambiguity.
+   `Profile.salaryCurrency` exists; `Profile` has no period, and the onboarding slider
+   still speaks in `$K/year`.
+
 ---
 
 ## 13. 🟡 The percentage you *do* show has never been calibrated
@@ -1129,6 +1316,121 @@ for magnitude is not, and the UI should claim exactly as much as the evidence su
 **The question you'll be asked.**
 > *"You showed me a beautiful negative result on the LLM's fit score, and you shipped a 0–100
 > match score anyway. What's the ρ on the one you shipped?"*
+
+### ✅ Resolved 2026-08-20 — the question now has an answer, and finding it broke something open
+
+#### 🔴 First: the app could not boot, and 896 tests passed anyway
+
+`scripts/eval-score-calibration.ts` boots `AppModule`. Running it to answer this finding
+produced not a calibration but a crash:
+
+```
+Nest can't resolve dependencies of the StorageService (?, ConfigService).
+Please make sure that the argument SupabaseClientService at index [0] is
+available in the EmployerModule context.
+```
+
+**§9 introduced it.** Commit `1fb194a` added the signed résumé-download route and listed
+`StorageService` in `EmployerModule`'s providers **without** `SupabaseClientService`,
+which it takes as its first constructor argument. `AppModule` could not instantiate, so
+the backend could not start at all.
+
+**Why nothing caught it.** Jest's `testRegex` is `.*\.spec\.ts$`, which does not match
+`*.e2e-spec.ts` — the e2e suite is a separate config, and it is the only thing that boots
+`AppModule`. So the unit suite is blind to wiring *by construction*, and 896 green tests
+said nothing about whether the application starts. There is no CI to catch it either. It
+was found by accident, while chasing a different finding.
+
+**Fixed structurally, not locally.** The convention had been that each consumer provides
+`StorageService` and `SupabaseClientService` locally — `resume-builder.module.ts` even
+documented it ("no shared module to import and no cross-module coupling"). That
+convention held for two modules and broke on the third. A dependency pair copied by hand
+into every consumer eventually gets copied wrong, so both now live in a `@Global`
+[`StorageModule`](../src/infra/storage/storage.module.ts): importing a module cannot be
+done by halves.
+
+**And a test that would have caught it**
+([app.module.wiring.spec.ts](../src/app.module.wiring.spec.ts)). It walks the module graph
+from decorator metadata — no database, no `NestFactory.create` — and asserts that every
+provider's constructor tokens are visible from the module declaring it. It only checks
+tokens some module actually declares, which is what keeps it quiet about
+framework-supplied ones like `ModuleRef` and `ConfigService`. Mutation-verified by
+restoring the §9 wiring exactly: 2 tests fail.
+
+#### The calibration, at last
+
+| signal | ρ vs human grade | observed spread |
+|---|---|---|
+| **TOTAL score** | **0.662** | **41–69** |
+| skills | 0.553 | 32–61 |
+| **experience** | **0.000** | **constant 40** |
+| location | 0.462 | 55–100 |
+| salary | 0.684 | 50–100 |
+| other | 0.518 | 40–100 |
+
+**The good news the finding did not expect: ρ 0.662.** The deterministic scorer is
+*strongly* correlated with human judgement — nothing like the LLM `fitScore`'s 0.137 /
+−0.065. The ordering is real, and sorting recommendations by it is defensible. That is
+worth saying plainly, because the finding's framing implies the number is probably junk.
+It is not.
+
+**Everything else confirms the finding, and one part is worse than described.**
+
+| grade | n | scored range | mean |
+|---|---|---|---|
+| GREAT | 9 | 51–69 | 60.7 |
+| OK | 3 | 46–51 | 48.7 |
+| BAD | 38 | 41–56 | 46.1 |
+
+- **The scale is a fiction.** The scorer is labelled 0–100 everywhere it is exposed and
+  empirically emits **41–69**. No job can ever be a 90% match, and "41%" reads as a
+  catastrophe when it is merely the bottom of the range.
+- **The grades overlap.** A job a human graded **BAD scored 56**; one graded **GREAT
+  scored 51**. At 54 the percentage tells a user nothing at all.
+- **`experience` is a constant 40** — 25% of the weight contributing zero signal, exactly
+  as the finding predicted, because the sole labeller has no résumé.
+- **n = 1 candidate**, 50 pairs. This measures agreement with one person about one
+  profile.
+
+#### What shipped
+
+**The standard is now executable, not a paragraph.** `eval-score-calibration.ts` reports
+**candidates as well as pairs**, prints the observed range per human grade, and ends with
+a verdict that **exits non-zero** when the evidence does not support a user-facing number
+— ρ < 0.5, fewer than 5 candidates, fewer than 150 pairs, or any inert sub-score. Today
+it fails on three of those, by design. A standard nobody runs is a preference.
+
+**The UI can stop claiming a percentage.**
+[`matchBand`](../src/modules/matching/domain/scoring/match-band.ts) turns the score into
+`STRONG` / `POSSIBLE` / `WEAK`, and both `RecommendedJobDto` and `ScoutMatchDto` now carry
+`band` alongside `match`. The thresholds are read off the distribution rather than chosen
+for roundness — each is the edge of a region where one grade never appeared:
+
+- **≥ 57** — no job scoring this was ever graded BAD (BAD topped out at 56)
+- **51–56** — both GREAT and BAD occur here; the scorer genuinely cannot separate them
+- **≤ 50** — no job scoring this was ever graded GREAT (GREAT bottomed out at 51)
+
+`match` is documented as **ordering-only**, with the observed range stated on the field
+itself so the next person reading the DTO cannot miss it. The thresholds are marked
+provisional against `MIN_CANDIDATES`; when the label set grows they must be re-derived,
+not patched.
+
+**A §12 leftover found on the way.** `recommended-job.mapper.ts` was still building
+`salaryRange` with a hardcoded `currency: 'USD'` and `min: job.minSalary ?? 0` — so a job
+stating only a minimum was published as an invalid `min–0` band. It now reads the real
+currency and period, and requires **both** bounds.
+
+**Tests — 15 new** (13 on the band, including monotonicity and that no label contains a
+digit; 3 on module wiring). Whole suite: **79 files, 911 tests, green**; lint clean.
+
+#### Still open, deliberately
+
+- **The frontend still renders `{job.match}%`** in six places, and the extension badge
+  shows a percentage. The API now offers `band`; switching the UI over is a separate,
+  visible product change and belongs in the frontend repo's own PR.
+- **Re-labelling is the real unblock.** Everything above is bounded by n = 1. The fix is
+  not code — it is 4 more labellers, at least one of whom has a résumé so `experience`
+  stops being a constant.
 
 ---
 
@@ -1166,6 +1468,103 @@ nullable `userId`, or export the label set to a file no `DELETE` can reach.
 > *"A user asks you to delete their account. Walk me through what happens — then tell me what
 > happens when they sign up again next month."*
 
+### ✅ Resolved 2026-08-20 — and this is not an edge case, it is an auth bypass
+
+Both halves confirmed, and the first is worse than 🟡 suggests: **a deleted account could
+still log in.** Not "until a cache expired" — indefinitely, because nothing anywhere on
+the auth path looked at `deletedAt`.
+
+#### The lookups: five, not two
+
+The finding names `findByEmail` and `findById`. Every lookup in
+[user.repository.ts](../src/modules/auth/infrastructure/persistence/user.repository.ts)
+ignored `deletedAt`, and two of the others matter more than the named ones:
+
+| Lookup | Why it matters |
+|---|---|
+| `findByEmail` | the login path |
+| `findById` | every authenticated request |
+| **`findByPasswordResetCode`** | a deleted user could set a new password |
+| **`findByVerificationCode`** | a deleted user could verify and re-enter |
+| `existsByEmail` | the re-registration block — deliberately left unfiltered, below |
+
+**A sixth hole found while fixing it: `isActive` was never checked either.** `softDelete`
+sets it false, but an admin can deactivate *without* deleting, and login had no opinion
+about that at all.
+
+#### The Redis cache would have defeated a SQL-only fix
+
+`findById` serves from Redis for **300 seconds**, and the entry is written while the user
+is still live — so its `deletedAt` is `null` whatever the database now says. Adding
+`deletedAt: null` to the queries, which is what the finding proposes, leaves a five-minute
+window where a just-deleted account still authenticates.
+
+Worse, `softDelete` lives in a **different repository** (`AdminUserRepository`) that
+writes through Prisma directly and never touched the auth cache. So the fix is in two
+places, on purpose:
+
+1. `liveOnly()` is applied to the **entity**, not the query — one chokepoint that covers
+   the cached path and the database path identically, and that a caller in another module
+   cannot forget.
+2. `softDelete` now invalidates the three auth cache keys, logging at `error` if that
+   fails, because the account is deleted either way and a stale cache is a
+   security-relevant window rather than a cosmetic one.
+
+#### `existsByEmail` is deliberately NOT filtered
+
+It answers a question about the **unique index**, not about who may log in. Filtering
+`deletedAt` there would report a taken address as free and turn a clean "already
+registered" into a 500 at the constraint. Re-registration works because the address is
+actually released — not because a lookup pretends the row is gone.
+
+#### Releasing the address, which is the whole second half
+
+Soft delete now rewrites `email` to `deleted+<id>@deleted.invalid` and moves the original
+to a new `users.deletedEmail` column
+([migration](../prisma/migrations/20260820180000_release_email_on_soft_delete/migration.sql)).
+
+- **`.invalid` is reserved by RFC 2606**, so a tombstone can never collide with a real
+  address and can never be mailed by accident.
+- **The user id is in the tombstone** because `email` is `@unique` — a fixed placeholder
+  would let exactly one account ever be deleted.
+- **`deletedEmail` is not unique**, deliberately. The same person may register and delete
+  more than once, and a unique index there would recreate the dead end one column over.
+- ⚠️ **Retention is a real trade-off, and is written down rather than glossed.** Keeping
+  the original address is still personal data after a deletion request. It is kept so
+  support can answer "what happened to my account"; a production deployment needs a purge
+  horizon this project does not have.
+
+#### The eval-set loss was the same bug, and now has a real defence
+
+The finding's reasoning is right: a *working* soft delete cannot produce
+"row deleted, email re-registered" — the unique index would block it — so the row was
+**hard-deleted out-of-band**, which is exactly what a permanently-occupied address forces.
+Freeing the address removes the reason to reach for the console.
+
+**On `MatchLabel`: the review offers `onDelete: SetNull` or an export. We did the export,
+and the choice is not arbitrary.** A label's value is the whole triple — *this* person
+judged *this* job *this* way. Nulling `userId` keeps a row and throws away the half that
+makes it evidence: calibration scores a candidate's profile against a job, so an orphaned
+label cannot be used for anything. `SetNull` would preserve the record, destroy the
+research data, and look like a fix.
+[`scripts/export-match-labels.ts`](../scripts/export-match-labels.ts) copies the triple —
+with the labeller's email and the job's title, so it survives the rows it points at —
+to a timestamped file that no `DELETE` can reach. Run against the live database: **50
+labels, 1 candidate, GREAT=9 OK=3 BAD=38**, matching §13 exactly. `eval-exports/` is
+gitignored, because the file carries a real email address.
+
+**Tests — 22 new, all mutation-relevant.** 12 on the repository (including three that
+drive the *cached* path specifically, since that is where a SQL-only fix leaks, and one
+asserting `existsByEmail` stays unfiltered) and 10 on the delete path (address released,
+tombstone unique per user, original retained, caches invalidated, and deletion still
+reported as successful when Redis is down). Whole suite: **81 files, 933 tests, green**;
+`src` lint clean.
+
+**⚠️ A note on running the suite.** In parallel mode two integration specs now
+intermittently fail with `Can't reach database server` — Supabase pooler exhaustion, the
+family of problems §4 documents, **not** a logic failure. `npx jest --runInBand` passes
+all 933. Worth fixing separately; a shared test database is the real answer.
+
 ---
 
 ## 15. 🟡 Two match tables
@@ -1187,6 +1586,86 @@ document it — `TrackedJob`'s schema comments are an excellent model for exactl
 **The question you'll be asked.**
 > *"You have `match_scores` and `recommendations`. What's the difference?"*
 
+### ✅ Resolved 2026-08-20 — the answer is "one of them could never hold a row"
+
+**Verified at `6dcd59e`**, against the live database and **every local and remote ref**,
+not just the working tree:
+
+| table | rows | written by |
+|---|---|---|
+| `match_scores` | **0** | nothing, on any branch |
+| `job_seeker_profiles` | **0** | nothing — referenced by **no TypeScript at all** |
+| `recommendations` | **749** | the matching pipeline |
+| `profiles` | 10 | the identity the pipeline uses |
+
+#### 🔴 The finding is right that only one is written — but "nothing uses MatchScore" is false
+
+A first grep suggested nothing touched it. That would have been the §4 mistake repeated:
+`EmployerJobRepository.analytics()` **reads it on every branch, including `main`**, as
+`AVG(score)` for the employer's job dashboard. Anyone dropping the table on a
+"nothing uses it" grep would have broken a live endpoint.
+
+**What it actually returned is the more interesting part.** `match_scores` was not merely
+unused, it was **unpopulatable**: its foreign key requires a `job_seeker_profiles` row,
+that table has zero rows, and no code creates one. So the AVG was over an empty set,
+returned `NULL` every time, and the employer's **"Avg Match" stat card has rendered "—"
+on every page load since it shipped**. A dead table with a live reader that silently
+reports nothing is worse than a dead table, and the review did not have this.
+
+#### The decision the review asks for
+
+**One match table, keyed by the USER.** `Recommendation`'s own schema comment already
+half-said this ("so it works off the populated `Profile`/User rather than the empty legacy
+JobSeekerProfile"); it now says it outright, along with the question to ask before anyone
+proposes a second one — *which identity is it keyed by?*, since that is exactly what made
+these two irreconcilable.
+
+`MatchScore` is dropped. `JobSeekerProfile` goes with it: `MatchScore` was its only
+dependent, no TypeScript references it, and leaving an empty table with no code and no
+dependents behind is the dead schema this finding is about.
+
+#### What replaced the average, and why it is not an average
+
+`analytics()` now reads `recommendations` — 749 real rows, dismissed ones excluded, since
+a candidate who rejected a job is not part of its pool — and returns **band counts**, not
+a mean.
+
+Restoring `averageMatchScore` from real data was rejected on §13's evidence: the score is
+calibrated for **ordering** (ρ 0.662), its observed range is **41–69** on a scale
+presented as 0–100, and the human grades overlap inside it. A mean of numbers like that is
+a magnitude claim the calibration does not support — shipping "Avg Match 54%" would have
+replaced a blank with a wrong answer. `{ strong, possible, weak }` is defensible, and
+"12 strong candidates" is more useful to an employer than any average. The frontend's
+tile is now **"Strong Matches"**.
+
+**Tests — 6 new** on the analytics path (reads recommendations, excludes dismissals, bands
+correctly at the §13 edges, reports zeroes rather than null for an unmatched job, and
+asserts no average survives anywhere in the result). Backend: **82 files, 939 tests,
+green**; lint clean. Frontend: 52 tests green, typecheck clean apart from two pre-existing
+errors it does not touch.
+
+#### ⚠️ The drop was applied by accident on 2026-08-20
+
+It was written to be left for a human to approve, for the reasons below. It ran anyway:
+`prisma migrate deploy`, invoked to apply §16's migration, applies **all** pending
+migrations, and this one was still staged. `match_scores` and `job_seeker_profiles` are
+gone.
+
+Nothing was lost — both tables were verified empty beforehand, `recommendations` still
+holds all 749 rows, and no code read either table by then. But the decision was supposed
+to be a human's and was taken by a tool default instead. **The lesson generalises: a
+migration you intend to hold back cannot simply be left in the folder**, because the next
+`migrate deploy` for unrelated work will take it. Hold it outside `prisma/migrations/`
+until it is approved.
+
+The original reasoning, kept because it is still why this deserved a decision:
+
+[`20260820200000_drop_legacy_match_score`](../prisma/migrations/20260820200000_drop_legacy_match_score/migration.sql)
+drops two tables. Dropping tables is irreversible, and this project has already had one
+near-miss where a table was almost dropped on a branch-local grep, so it deserved an
+explicit human yes even though both were verified empty. **The code never depended on it**
+— nothing reads either table, so the application is correct either way.
+
 ---
 
 ## 16. 🟡 A saved job dies with the posting; a tracked job survives it
@@ -1207,6 +1686,76 @@ would also resolve the awkward three-way split between `SavedJob`, `saved_extern
 
 **The question you'll be asked.**
 > *"Why does a tracked job survive the posting being deleted, but a saved job doesn't?"*
+
+### ✅ Resolved 2026-08-20 — latent today, and that is exactly why it was cheap
+
+Confirmed as described. `SavedJob` had `onDelete: Cascade` and **no snapshot at all**,
+while `TrackedJob` had `SetNull` plus copied `title`/`companyName`/`url`. Same user intent,
+opposite durability.
+
+**Verified at `b3d6b96`: the cascade is LATENT, not firing today.**
+
+- No route deletes a job. `JobService.delete` exists and enforces company ownership, but
+  **no controller exposes it** — there is no `@Delete` on any job or employer-job route.
+- Nothing prunes de-listed postings; `lastSeenAt` is recorded and never acted on.
+- All 3 `saved_jobs` rows still point at live postings, so the back-fill recovered a
+  complete snapshot for every one of them.
+
+Saying that plainly matters: users are **not** losing bookmarks right now, and a fix
+described as urgent when it is not is its own kind of wrong. But it will not stay latent —
+the corpus is 83% ingested from boards that delist aggressively, the tracker plan
+anticipates a prune, `JobService.delete` is one `@Delete()` decorator from being live, and
+§14 established that out-of-band console deletes are a demonstrated habit here. Fixing it
+while the table holds 3 rows is free; fixing it after a prune runs is archaeology.
+
+#### What changed
+
+[Migration `20260820220000_saved_job_survives_posting`](../prisma/migrations/20260820220000_saved_job_survives_posting/migration.sql)
+mirrors `TrackedJob` exactly: `jobId` becomes nullable, the FK becomes `SET NULL`, and
+`title`/`companyName`/`url` are added and back-filled from the postings the existing rows
+still point at. The back-fill runs **before** the FK is relaxed, while every row is still
+guaranteed to have a job to copy from.
+
+`@@unique([userId, jobId])` survives the nullability for the reason `TrackedJob` documents:
+Postgres treats every NULL as distinct, so orphans coexist instead of colliding.
+
+**The write path captures the snapshot itself.** `add()` reads the job and copies the three
+fields rather than asking callers to pass them — every caller would otherwise have to
+remember, and the one that forgets writes a bookmark that dies the way this fix exists to
+prevent. A missing job still falls through to the FK, so an unknown id stays a 400 with the
+existing message.
+
+#### The nullability exposed a live bug, which is the part worth reading
+
+Making `jobId` nullable turned `findJobIdsByUser(): Promise<string[]>` into a function that
+could return nulls, and `mapToDomain` into one that would hand the domain entity a null it
+promises never to hold. The obvious patch — `raw.jobId ?? ''` — was written and then
+removed, because of where that value goes: `findByUser` feeds `GET /sync/saved-jobs`, which
+**pushes `jobId` to every offline device**. An empty string would have satisfied the type
+and propagated a fabricated identifier to every client cache. It is the same failure as
+"$0K – $0K" in §12 — a placeholder that looks like data — one layer deeper.
+
+So orphans are **excluded** from both reads, `mapToDomain` **throws** rather than coerces,
+and `findOrphanedByUser` exists to reach them by their snapshot. The bookmark is preserved
+and reachable; it is simply not an *id*, because it no longer is one.
+
+**Tests — 8 new**, including that the domain mapper throws on a null rather than coercing,
+and that orphans are excluded from the sync feed specifically. Whole suite: **83 files, 947
+tests, green**; lint clean.
+
+#### Deliberately NOT done: the three-way split
+
+The finding also notes `SavedJob`, `saved_external_jobs` and `TrackedJob(stage=SAVED)` are
+"three tables for one user intent", and suggests folding saved jobs into the tracker.
+That is a real design question and it is **not** answered here: it needs a data migration,
+an API change and a frontend change, and this project's own rule is that refactors ship
+separately from fixes. What this change does is make the three consistent about durability,
+which is the part that loses data. The consolidation question is still open.
+
+**Also still open:** nothing *surfaces* an orphaned bookmark to a user yet. `GET
+/saved-jobs` returns ids and an orphan has none. The data is retained and readable — that
+is what the snapshot bought — but showing "this posting was taken down" in the UI is a
+follow-up.
 
 ---
 
@@ -1237,6 +1786,68 @@ each contract against it, and cut the mocks down to what the real endpoint can r
 
 **The question you'll be asked.**
 > *"Show me the salary table your salary endpoint reads."*
+
+### ✅ Resolved 2026-08-20 — measured, and worse in both directions
+
+The finding says "~14 tables that do not exist". Diffed mechanically at `b3d6b96`, the
+real numbers are:
+
+| | count |
+|---|---|
+| Tables the diagram documented that **have never existed** | **20** |
+| Real tables the diagram **omitted entirely** | **26** |
+| Real tables it described | **15 of 41** |
+
+The second row is the one the review missed. The diagram was not merely carrying fiction —
+it was **missing more than half the schema**: `tracked_jobs`, `match_reports`,
+`saved_external_jobs`, `offers`, `audit_logs`, the whole résumé-builder family, all absent.
+A reader using it to answer "what can I query?" was wrong in both directions at once.
+
+Two of the twenty were near-misses rather than fiction — the diagram used the singular
+where the schema uses the plural (`education` → `educations`, `application_timeline` →
+`application_timelines`). The other eighteen were never created.
+
+#### The fix is a generator, not a rewrite
+
+Rewriting the diagram by hand would have fixed today and guaranteed the same drift by
+Friday — that is what happened to the original. `docs/JobFits_ER_Diagram.md` is now
+**generated from `prisma/schema.prisma`** by
+[`scripts/generate-er-diagram.ts`](../scripts/generate-er-diagram.ts), and the file says so
+at the top. Re-diffed after generation: **41 documented, 41 real, zero in either
+direction.**
+
+The generator **fails loudly rather than emitting a partial diagram** — it compares the
+models it parsed against the models the schema declares and throws if they differ. That
+matters because a half-read diagram would recreate the exact problem while *looking*
+freshly generated. Verified by feeding it a model the parser cannot read: it refuses with
+*"Parsed 41 models but the schema declares 42 — the parser has fallen behind."* Output is
+reproducible: two runs are byte-identical.
+
+It also keeps a **"Not in the database"** section listing the eighteen fictional tables, so
+a reader who remembers `salary_data` learns it was aspirational rather than assuming it was
+deleted — and noting separately that `match_scores` and `job_seeker_profiles` genuinely did
+exist until §15 dropped them.
+
+#### The downstream half, now that the extension repo is available
+
+Both claims check out. `jobfit-extension/docs/CONTRACTS.md` really did specify
+`"salaryRange" // from salary_data aggregate` and a `learningPath` object.
+
+**The code was honest; the contract was not.** `SalaryService` aggregates
+`jobs.minSalary`/`maxSalary` — `learning-path.service.ts` even carries the comment *"No
+LearningPath table in the schema"* and returns `learningPath: null` on every row. So both
+endpoints degraded correctly and only the document lied about where the data came from.
+Both source claims are corrected in place, with a note explaining that the diagram they
+were written against is now generated.
+
+**Still open, and flagged in that file:** the extension's **mock** still returns the rich
+`learningPath` object, so the mock remains more capable than the real endpoint — the
+direction that turns a working demo into an empty screen at the moment it matters. Cutting
+it back is a change in `jobfit-extension/src`, not its docs, and belongs in that repo's own
+PR.
+
+Backend: **83 files, 947 tests, green**; `src` lint clean. No production code changed here
+— this finding was entirely documentation and a generator.
 
 ---
 
@@ -1294,6 +1905,87 @@ segmentation project.
 **The question you'll be asked.**
 > *"Most of your jobs are Cambodian. Open a Khmer posting and tell me what the skills table is
 > computed from."*
+
+### ✅ Resolved 2026-08-20 — and the answer to that question is now demonstrable
+
+**"Computed from whichever English brand names happened to appear."** Proven rather than
+asserted, in three lines that are now a test:
+
+```
+/\w/.test('ក')                                → false   no  boundary can apply
+'ការងារគ្រូបង្រៀន'.split(/[^a-zA-Z0-9+#]+/)    → []      zero tokens
+/Excel/i.test('ចេះប្រើ Excel និង Word')   → TRUE    Latin brands still hit
+```
+
+That third line is the bug. The table was never *empty* on a Khmer posting — it was built
+from stray English words and then given a confident `missingCount`.
+
+#### One correction to the finding's framing, and it matters
+
+The review says *"the corpus went to 83% Cambodian… the analysis layer only works in
+English"*, which reads as though most postings are affected. Measured: **31 of 367 (8.5%)
+are Khmer-script.** The rest of the Cambodian corpus is written in English and analyses
+correctly. The bug is real and worth fixing; it is not the majority case, and a fix that
+withheld the skills table from all Cambodian postings would have broken the feature for
+the market it serves.
+
+#### What shipped
+
+[`script-detection.ts`](../src/modules/match-report/domain/script-detection.ts) — a Khmer
+letter ratio, exactly as the finding suggests, with no ICU. Detection is the easy half;
+*segmenting* Khmer into words is the project, and is not attempted.
+
+`ReportSkills` gains a **`reason`**. The finding says the payload "already models
+[unavailable] as distinct from 'no requirements'" — it modelled `available: false` but not
+*why*, so the page could not tell **"try again shortly"** from **"we cannot do this yet"**.
+Those are different promises. Now `AI_UNAVAILABLE` (transient) and
+`LANGUAGE_UNSUPPORTED` (not).
+
+The script check runs **before** the AI-outcome check, deliberately: the script is a fact
+about the posting, and testing the extractor first would let an outage mask a permanent
+limitation behind a transient-sounding message.
+
+**The match score is untouched and still shown**, exactly as the finding recommends — it
+comes from cross-lingual bge-m3 embeddings, measured at cosine 0.82 for the same role
+across languages. Withholding it too would be over-correcting.
+
+#### Two measurement bugs found while measuring
+
+1. **The first ratio could exceed 1.** Khmer writes vowels and the subscript COENG as
+   combining marks (`\p{M}`), which sit in the Khmer Unicode block but are not letters —
+   so a block-count numerator over a `\p{L}` denominator gave **1.5** for the word
+   "ការងារ" (4 letters, 2 marks). Caught by a test asserting pure Khmer scores 1.0. Both
+   sides now count letters.
+2. **The corpus figures in the first draft were wrong** because they came from that same
+   block count — it reported 32 postings and "nothing between 0% and 20%". Re-measured
+   with the corrected function: **31 postings**, and the nonzero ratios begin 0.113, 0.189,
+   0.265, so the real gap is **0.113 → 0.189**. The threshold of 0.15 sits inside it, which
+   is why the exact value does not matter.
+
+   The 0.113 posting is the case the threshold exists to get right: an English job ad that
+   quotes an address in Khmer. It keeps its skills table.
+
+   Both the code comment and the test carried the wrong numbers for a few minutes, and the
+   corrected comment says where they came from — a stale measured claim is the failure mode
+   this whole review is about.
+
+**Tests — 22 new.** 15 on detection (including the three lines above as executable proof,
+the ratio-above-1 regression, and the threshold sitting in the measured gap) and 7 on the
+report (table withheld, reason set, counts zeroed, **match score still present**, and that
+an English posting with a failed extractor reports `AI_UNAVAILABLE` rather than being
+confused with a Khmer one). Whole suite: **85 files, 969 tests, green**; lint clean.
+
+#### Still open
+
+- **No client renders the reason yet.** The API says `LANGUAGE_UNSUPPORTED`; the page needs
+  to say *"skills analysis isn't available for Khmer postings yet"*. That is a change in
+  the extension and the web app.
+- **The ATS `searchability` checks have the same blind spot.** "Job title present in
+  résumé" on a Khmer title finds zero words and reports `warn` — not a false claim, but an
+  uninformative one. Narrower than the skills table, and left alone here.
+- **Segmentation remains unattempted**, which is the right call: honest refusal is a day's
+  work and buys most of the value; ICU segmentation is a project that this corpus does not
+  yet justify.
 
 ---
 

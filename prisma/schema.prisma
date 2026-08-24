@@ -156,12 +156,24 @@ model User {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  // Job seeker profile (legacy — kept for job/application/company modules)
-  jobSeekerProfile JobSeekerProfile?
+  /// The address this account used before it was deleted.
+  ///
+  /// Soft delete RELEASES `email` to a reserved tombstone, because `email` is @unique and
+  /// keeping it occupied meant a user who deleted their account could never register
+  /// again (MENTOR_REVIEW_2026-08-18 §14). That dead end is what forced hard deletes
+  /// through the Supabase console — and a hard delete cascades to `match_labels`, which
+  /// is how 50 hand-labelled evaluation pairs were destroyed.
+  ///
+  /// ⚠️ RETENTION. This is still personal data after a deletion request. It is kept so
+  /// support can answer "what happened to my account" and so repeat abuse is traceable;
+  /// a production deployment needs a purge policy with a stated horizon, which this
+  /// project does not yet have.
+  deletedEmail String?
+
   // Employer profile
-  employerProfile  EmployerProfile?
+  employerProfile EmployerProfile?
   // Auth sessions
-  refreshTokens    RefreshToken[]
+  refreshTokens   RefreshToken[]
 
   // ── User module (Phase 3) ──────────────────────────────────────────────────
   profile           Profile?
@@ -390,22 +402,6 @@ model UserAnalytics {
   @@map("user_analytics")
 }
 
-model JobSeekerProfile {
-  id        String   @id @default(uuid())
-  userId    String   @unique
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  firstName String
-  lastName  String
-  bio       String?
-  location  String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  matchScores MatchScore[]
-
-  @@map("job_seeker_profiles")
-}
-
 model EmployerProfile {
   id        String   @id @default(uuid())
   userId    String   @unique
@@ -461,6 +457,17 @@ model Company {
   @@map("companies")
 }
 
+/// How often a salary figure is paid. Cambodian postings quote MONTHLY; TheMuse and the
+/// internal employer form quote ANNUAL. The corpus already mixes them, so the period has
+/// to travel with the number — 500/month and 500/year are the same integer.
+enum SalaryPeriod {
+  HOURLY
+  DAILY
+  WEEKLY
+  MONTHLY
+  ANNUAL
+}
+
 model Job {
   id          String    @id @default(uuid())
   companyId   String
@@ -472,6 +479,18 @@ model Job {
   location    String?
   minSalary   Int?
   maxSalary   Int?
+
+  /// The unit `minSalary`/`maxSalary` are counted in. Both were bare integers, so a
+  /// Cambodian monthly figure and a US annual figure were indistinguishable in the same
+  /// column — and the frontend resolved that ambiguity by assuming USD-per-year and
+  /// appending "K" (MENTOR_REVIEW_2026-08-18 §12).
+  ///
+  /// `salaryPeriod` is NULLABLE and null means UNKNOWN, not "annual". A default of ANNUAL
+  /// would be the same fabrication in a new place: 83% of the corpus is Cambodian, where
+  /// monthly is the norm, and the ingestion cannot currently tell. Clients must render an
+  /// unknown period without implying one.
+  salaryCurrency String        @default("USD")
+  salaryPeriod   SalaryPeriod?
 
   // What the posting actually is. NULLABLE ON PURPOSE, and null must render as nothing.
   //
@@ -533,7 +552,6 @@ model Job {
   searchTsv Unsupported("tsvector")?
 
   applications    Application[]
-  matchScores     MatchScore[]
   skills          JobSkill[]
   savedBy         SavedJob[]
   recommendations Recommendation[]
@@ -550,14 +568,38 @@ model Job {
 
 // A job a seeker bookmarked for later. Simple join of (user, job); unique so a
 // job can't be saved twice, cascade so it disappears if either side is deleted.
+/// A bookmark on one of OUR job rows.
+///
+/// SURVIVES THE POSTING, like TrackedJob and for the same reason. `jobId` used to be
+/// `onDelete: Cascade` with no snapshot, so deleting a job erased the user's bookmark
+/// without a trace — while a tracked card for the identical job survived, because
+/// JOB_TRACKER_PLAN §2 had already argued that postings vanish ("bongthom returned 404
+/// for 9 of 43 postings during the ingestion work"). That argument was never back-ported
+/// here (MENTOR_REVIEW_2026-08-18 §16).
+///
+/// The corpus is 83% ingested from boards that delist aggressively, so the moment anything
+/// prunes stale jobs — or anyone exposes JobService.delete, which exists and is currently
+/// reachable by no route — a cascade would take real bookmarks with it.
 model SavedJob {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  jobId     String
-  job       Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Null once the posting is gone. The row stays; the link does not.
+  jobId String?
+  job   Job?    @relation(fields: [jobId], references: [id], onDelete: SetNull)
+
+  /// Copied at save time so the bookmark still says something after `jobId` goes null.
+  /// Nullable because rows saved before these columns existed have no snapshot beyond
+  /// what the back-fill could recover from the job they still point at.
+  title       String?
+  companyName String?
+  url         String?
+
   createdAt DateTime @default(now())
 
+  /// One bookmark per posting per user. NULLs are distinct in Postgres, so orphaned rows
+  /// coexist rather than colliding — the same trick TrackedJob uses.
   @@unique([userId, jobId])
   @@index([userId])
   @@index([jobId])
@@ -882,23 +924,18 @@ model ContactPerson {
   @@map("contact_persons")
 }
 
-model MatchScore {
-  id                 String           @id @default(uuid())
-  jobId              String
-  job                Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  jobSeekerProfileId String
-  jobSeekerProfile   JobSeekerProfile @relation(fields: [jobSeekerProfileId], references: [id], onDelete: Cascade)
-  score              Float // 0 - 100
-  breakdown          Json? // sub-scores e.g. skill, experience
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
-
-  @@unique([jobId, jobSeekerProfileId])
-  @@map("match_scores")
-}
-
-// Seeker-facing job recommendation (Phase 3). Keyed by (userId, jobId) so it works
-// off the populated `Profile`/User rather than the empty legacy JobSeekerProfile.
+// Seeker-facing job recommendation (Phase 3) — THE match table. There is exactly one.
+//
+// Keyed by (userId, jobId): the candidate identity for the whole matching domain is the
+// USER, and the profile row hanging off them. `MatchScore` used to sit alongside this
+// keyed by `jobSeekerProfileId` and holding the same score + breakdown, so a reader could
+// not tell which was authoritative (MENTOR_REVIEW_2026-08-18 §15). It was dropped: 0 rows,
+// no writer on any branch, and unpopulatable anyway because `job_seeker_profiles` was
+// empty and no code created one.
+//
+// If a second match table is ever proposed, the question to answer first is which identity
+// it is keyed by — that is the thing that made these two impossible to reconcile.
+//
 // Written by the matching batch; read by the /recommendations endpoint.
 model Recommendation {
   id     String @id @default(uuid())
@@ -968,9 +1005,16 @@ model MatchReport {
 
   payload Json // the full report — see MatchReportPayload
 
+  /// SHA-256 of the posting text this report was built from. The dedupe key, so
+  /// re-opening an unchanged posting costs no AI call (§11) while an EDITED posting
+  /// still regenerates. Null on rows written before the column existed; those are
+  /// never reused.
+  descriptionHash String?
+
   createdAt DateTime @default(now())
 
   @@index([userId])
+  @@index([userId, source, externalId, descriptionHash, createdAt])
   @@map("match_reports")
 }
 

@@ -32,7 +32,9 @@ export class UserRepository implements IUserRepository {
   async findById(id: string): Promise<UserEntity | null> {
     const cached = await this.cacheGet(authCacheKeys.authUserEntity(id));
     if (cached) {
-      return UserEntity.fromPersistence(this.reviveUserProps(JSON.parse(cached)));
+      return this.liveOnly(
+        UserEntity.fromPersistence(this.reviveUserProps(JSON.parse(cached))),
+      );
     }
 
     const row = await this.prisma.user.findUnique({ where: { id } });
@@ -40,7 +42,7 @@ export class UserRepository implements IUserRepository {
 
     const user = this.toDomain(row);
     await this.populateCache(user);
-    return user;
+    return this.liveOnly(user);
   }
 
   async findByEmail(email: string): Promise<UserEntity | null> {
@@ -51,7 +53,7 @@ export class UserRepository implements IUserRepository {
     if (cachedId) {
       const byId = await this.findById(cachedId);
       if (byId) return byId;
-      // Stale lookup pointing at a missing entity — fall through to DB.
+      // Stale lookup pointing at a missing (or now-deleted) entity — fall through to DB.
     }
 
     const row = await this.prisma.user.findUnique({ where: { email: normEmail } });
@@ -60,24 +62,35 @@ export class UserRepository implements IUserRepository {
     const user = this.toDomain(row);
     await this.populateCache(user);
     await this.cacheSet(lookupKey, user.id, CACHE_TTL.USER_EMAIL_LOOKUP_SECONDS);
-    return user;
+    return this.liveOnly(user);
   }
 
   // Code lookups are not cached (codes are short-lived and change frequently).
   async findByVerificationCode(code: string): Promise<UserEntity | null> {
     const row = await this.prisma.user.findFirst({
-      where: { verificationCode: code },
+      where: { verificationCode: code, deletedAt: null },
     });
     return row ? this.toDomain(row) : null;
   }
 
   async findByPasswordResetCode(code: string): Promise<UserEntity | null> {
     const row = await this.prisma.user.findFirst({
-      where: { passwordResetCode: code },
+      where: { passwordResetCode: code, deletedAt: null },
     });
     return row ? this.toDomain(row) : null;
   }
 
+  /**
+   * Is this address taken?
+   *
+   * Deliberately does NOT filter `deletedAt`, unlike every lookup above. This answers a
+   * question about the UNIQUE INDEX, not about who can log in: if a row holds the
+   * address, an insert will fail, and telling the caller otherwise turns a clean
+   * "already registered" into a 500 at the constraint.
+   *
+   * Re-registration after deletion works because soft delete RELEASES the address
+   * (admin-user.repository.softDelete), not because this pretends the row is gone.
+   */
   async existsByEmail(email: string): Promise<boolean> {
     const row = await this.prisma.user.findUnique({
       where: { email: this.normalizeEmail(email) },
@@ -112,6 +125,31 @@ export class UserRepository implements IUserRepository {
     } catch (err) {
       this.logger.warn(`refresh cache invalidation failed: ${(err as Error).message}`);
     }
+  }
+
+  /**
+   * A deleted account is not an account.
+   *
+   * Applied to the ENTITY rather than added as `deletedAt: null` to each query, because
+   * the query is not the only source: `findById` serves from Redis, and the entry was
+   * cached while the user was still live, so its `deletedAt` is whatever it was at cache
+   * time. Filtering in SQL alone would leave a deleted user able to log in for up to
+   * CACHE_TTL.USER_ENTITY_SECONDS (300s). Admin soft-delete also invalidates these keys;
+   * this is the belt to that braces, and it is the one that cannot be forgotten by a
+   * caller in another module.
+   *
+   * `LoginHandler` checked lockout, password and isVerified and never this
+   * (MENTOR_REVIEW_2026-08-18 §14), so a deleted account kept working indefinitely.
+   * Returning null here means every caller — login, refresh, verify, reset — sees the
+   * same thing the database would show if the row were really gone.
+   */
+  private liveOnly(user: UserEntity): UserEntity | null {
+    if (user.deletedAt) return null;
+    // A deactivated account is also not one that may authenticate. `softDelete` sets
+    // both, but an admin can deactivate WITHOUT deleting, and login never checked that
+    // either.
+    if (!user.isActive) return null;
+    return user;
   }
 
   // ----- Cache helpers (all fail open) -----

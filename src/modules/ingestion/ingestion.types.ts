@@ -39,6 +39,23 @@ export interface NormalizedJob {
    */
   minSalary?: number | null;
   maxSalary?: number | null;
+
+  /**
+   * The units `minSalary`/`maxSalary` are counted in.
+   *
+   * NO SOURCE EMITS A SALARY TODAY — all 305 ingested postings are silent about pay
+   * (verified at 33f7981). These exist so that the first adapter which DOES learn to
+   * read pay has to say what the number means, rather than dropping a bare integer into
+   * a column and leaving the client to guess (MENTOR_REVIEW_2026-08-18 §12).
+   *
+   * That guess is not hypothetical: the Cambodian boards quote MONTHLY in the hundreds
+   * and TheMuse quotes ANNUAL in the tens of thousands, so "500" from BongThom and "500"
+   * from TheMuse are three orders of magnitude apart. An adapter that states amounts and
+   * omits these is writing an ambiguous number on purpose.
+   */
+  salaryCurrency?: string | null;
+  salaryPeriod?: $Enums.SalaryPeriod | null;
+
   employmentType?: $Enums.EmploymentType | null;
 }
 

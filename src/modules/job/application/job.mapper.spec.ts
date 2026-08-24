@@ -10,6 +10,7 @@ import { JobMapper } from './job.mapper';
 import { Job } from '../domain/entities/job.entity';
 import { JobStatus } from '../domain/value-objects/job-status.vo';
 import { RemoteType } from '../domain/value-objects/remote-type.vo';
+import { SalaryRange } from '@shared-kernel/value-objects/salary-range.vo';
 
 const job = (over: Partial<Parameters<typeof Job.create>[0]> = {}) =>
   Job.create({
@@ -55,5 +56,41 @@ describe('JobMapper — unset fields stay unset', () => {
 
     expect(dto.employmentType).toBe('PART_TIME');
     expect(dto.experienceLevel).toBeUndefined();
+  });
+
+  // ── Salary: the currency and the period must reach the client (§12) ─────────
+
+  it('omits salaryRange entirely when the job has no salary', () => {
+    // 348 of 367 jobs. The client must render nothing, not "$0K – $0K".
+    expect(JobMapper.toResponse(job()).salaryRange).toBeUndefined();
+  });
+
+  it('sends the currency alongside the amounts', () => {
+    const dto = JobMapper.toResponse(
+      job({ salaryRange: SalaryRange.create(400, 800, 'KHR', 'MONTHLY').value }),
+    );
+    expect(dto.salaryRange).toEqual({
+      min: 400,
+      max: 800,
+      currency: 'KHR',
+      period: 'MONTHLY',
+    });
+  });
+
+  it('sends the amounts ABSOLUTE, never divided into thousands', () => {
+    const dto = JobMapper.toResponse(
+      job({ salaryRange: SalaryRange.create(140000, 185000, 'USD', 'ANNUAL').value }),
+    );
+    expect(dto.salaryRange?.min).toBe(140000);
+    expect(dto.salaryRange?.max).toBe(185000);
+  });
+
+  it('leaves period undefined when the posting did not state one', () => {
+    const dto = JobMapper.toResponse(
+      job({ salaryRange: SalaryRange.create(1000, 2000).value }),
+    );
+    expect(dto.salaryRange?.period).toBeUndefined();
+    // Not "ANNUAL" by way of any default between the entity and the wire.
+    expect(Object.values(dto.salaryRange ?? {})).not.toContain('ANNUAL');
   });
 });

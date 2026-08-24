@@ -15,9 +15,11 @@
 // app's own résumé endpoints gate — is surfaced in full here. That is a deliberate,
 // locked product decision, not an oversight.
 
+import { createHash } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { ParsedResumeData } from '@prisma/client';
 import { AiClient } from '@infra/ai/ai.client';
+import { PrismaService } from '@infra/prisma/prisma.service';
 import {
   blendExternal,
   ExternalMatchResult,
@@ -43,6 +45,7 @@ import {
   SearchabilityCheck,
 } from '../domain/match-report-payload';
 import { mentionCount, requirementCount, scanSoftSkills } from '../domain/keyword-scan';
+import { isKhmerScript } from '../domain/script-detection';
 import {
   DatedExperience,
   parseYearsRequired,
@@ -64,6 +67,23 @@ export interface GenerateMatchReportInput {
 /** Share of a job title's words that must appear in the résumé to count as present. */
 const TITLE_PRESENT_SHARE = 0.6;
 
+/**
+ * The dedupe key for a posting's text.
+ *
+ * Whitespace is normalised first, so the same posting re-rendered with different line
+ * wrapping (which job boards do constantly, and which every one of our five site
+ * adapters can produce from the same page) still hits the cache. Case is NOT folded —
+ * a posting edited from "Junior" to "Senior" must miss.
+ *
+ * SHA-256 rather than a cheap hash: a collision would serve one posting's report for
+ * another, and the cost of the strong hash is invisible next to the LLM call it avoids.
+ */
+export function hashDescription(description: string): string {
+  return createHash('sha256')
+    .update(description.replace(/\s+/g, ' ').trim())
+    .digest('hex');
+}
+
 @Injectable()
 export class MatchReportService {
   private readonly logger = new Logger(MatchReportService.name);
@@ -75,12 +95,35 @@ export class MatchReportService {
     private readonly scorer: ResumeScorerService,
     private readonly matchExternalJob: MatchExternalJobUseCase,
     private readonly ai: AiClient,
+    private readonly prisma: PrismaService,
   ) {}
 
   /** Generate + persist a report, returning its id for the web app URL. */
   async generate(userId: string, input: GenerateMatchReportInput): Promise<string> {
     const resume = await this.pickResume(userId);
     const parsed = resume ? await this.parsedResumes.findByResumeId(resume.id) : null;
+
+    // ── Dedupe, BEFORE anything expensive ────────────────────────────────────
+    // Re-opening the same posting is the common case and used to cost a full round of
+    // AI calls every time (MENTOR_REVIEW_2026-08-18 §11) — including the requirement
+    // extraction, which is a metered DeepSeek call by default, not just GPU time.
+    //
+    // This runs after pickResume only because the freshness bar needs the résumé; it
+    // still runs before every AI call, which is the part that matters.
+    const descriptionHash = hashDescription(input.jobDescription);
+    const cachedId = await this.reports.findReusable({
+      userId,
+      source: input.source,
+      externalId: input.externalId,
+      descriptionHash,
+      notBefore: await this.inputsChangedAt(userId, resume, parsed),
+    });
+    if (cachedId) {
+      this.logger.debug(
+        `Reusing match report ${cachedId} — posting and résumé both unchanged`,
+      );
+      return cachedId;
+    }
 
     // What the CV evidences, read out of THE RÉSUMÉ THIS REPORT IS ABOUT. Reading the
     // user's newest parse instead would let the report say "scored against cv-2024.pdf"
@@ -127,7 +170,37 @@ export class MatchReportService {
       title: input.title,
       company: input.company,
       payload,
+      descriptionHash,
     });
+  }
+
+  /**
+   * The latest moment any INPUT to a report changed, used as the cache freshness bar.
+   *
+   * A report is one résumé judged against one posting. The description hash pins the
+   * posting; this pins the candidate side — the résumé row, its parse, and the profile
+   * (which feeds the match score through `profiles.embedding`). A report created before
+   * the newest of those is stale and must be regenerated, otherwise uploading a better
+   * CV would leave the user staring at a report about the old one.
+   *
+   * Returns the epoch when there is nothing to compare against — a user with no résumé
+   * and no profile has no input that can go stale, so any prior report for the same text
+   * is still valid.
+   */
+  private async inputsChangedAt(
+    userId: string,
+    resume: Resume | null,
+    parsed: ParsedResumeData | null,
+  ): Promise<Date> {
+    const profile = await this.prisma.profile.findUnique({
+      where: { userId },
+      select: { updatedAt: true },
+    });
+    const timestamps = [resume?.updatedAt, parsed?.updatedAt, profile?.updatedAt].filter(
+      (d): d is Date => d instanceof Date,
+    );
+    if (timestamps.length === 0) return new Date(0);
+    return new Date(Math.max(...timestamps.map((d) => d.getTime())));
   }
 
   // ── Parts ──────────────────────────────────────────────────────────────────
@@ -277,8 +350,38 @@ export class MatchReportService {
     resumeSkills: string[],
     parsed: ParsedResumeData | null,
   ): ReportSkills {
+    // Khmer first: this is a fact about the POSTING, so it holds whether or not the
+    // extractor answered. Checking it second would let an AI outage mask a permanent
+    // limitation behind a "try again" message.
+    //
+    // The table is withheld ENTIRELY rather than trimmed. On a Khmer posting the matchers
+    // do not return less — they return whichever English brand names happened to appear
+    // ("Excel", "Word"), scored against the résumé and presented with a confident
+    // missingCount. A table built from that is not a partial answer, it is a wrong one
+    // (MENTOR_REVIEW_2026-08-18 §19).
+    //
+    // The match score is untouched and still shown: it comes from cross-lingual bge-m3
+    // embeddings, which are evidenced for exactly this case.
+    if (isKhmerScript(description)) {
+      return {
+        available: false,
+        reason: 'LANGUAGE_UNSUPPORTED',
+        hard: [],
+        soft: [],
+        matchedCount: 0,
+        missingCount: 0,
+      };
+    }
+
     if (requirements === null) {
-      return { available: false, hard: [], soft: [], matchedCount: 0, missingCount: 0 };
+      return {
+        available: false,
+        reason: 'AI_UNAVAILABLE',
+        hard: [],
+        soft: [],
+        matchedCount: 0,
+        missingCount: 0,
+      };
     }
 
     const hard: ReportSkill[] = matchRequirements(requirements, resumeSkills).map(

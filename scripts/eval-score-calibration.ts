@@ -26,6 +26,22 @@ import { CandidateContext, JobContext } from '../src/modules/matching/domain/sco
 /** Graded gains, matching the retrieval harness. */
 const GRADE: Record<string, number> = { GREAT: 2, OK: 1, BAD: 0 };
 
+/**
+ * THE STANDARD a user-facing number has to clear.
+ *
+ * These are the bar, not a description of where we are. The project rejected the LLM
+ * fitScore at ρ 0.137/−0.065 over 150 hand-graded pairs and made "no percentage may be
+ * shown to a user" a rule — then shipped `Recommendation.score` as a percentage without
+ * ever applying the same test to it (MENTOR_REVIEW_2026-08-18 §13).
+ *
+ * MIN_CANDIDATES is the one that actually bites. ρ over 50 pairs from ONE labeller
+ * measures whether the scorer agrees with that person, on their profile, with their
+ * résumé — it cannot tell you the scorer works for anyone else.
+ */
+const MIN_RHO = 0.5;
+const MIN_CANDIDATES = 5;
+const MIN_PAIRS = 150;
+
 async function main(): Promise<void> {
   const app = await NestFactory.createApplicationContext(AppModule, { logger: ['error'] });
   try {
@@ -49,6 +65,9 @@ async function main(): Promise<void> {
 
     const totals: number[] = [];
     const grades: number[] = [];
+    /** Scored totals bucketed by the human grade, for the distribution table. */
+    const byGrade: Record<string, number[]> = { GREAT: [], OK: [], BAD: [] };
+    const scoredCandidates = new Set<string>();
     const subs: Record<string, number[]> = {
       skills: [], experience: [], location: [], salary: [], other: [],
     };
@@ -116,6 +135,8 @@ async function main(): Promise<void> {
         const { score, breakdown } = compute.execute({ candidate, job: jobCtx, cosineSim });
         totals.push(score);
         grades.push(GRADE[row.label] ?? 0);
+        (byGrade[row.label] ??= []).push(score);
+        scoredCandidates.add(userId);
         for (const key of Object.keys(subs)) {
           subs[key].push((breakdown as unknown as Record<string, number>)[key]);
         }
@@ -124,6 +145,10 @@ async function main(): Promise<void> {
 
     console.log(`\n# Match-score calibration — Spearman ρ vs human label`);
     console.log(`\n- Pairs scored: **${totals.length}** of ${labels.length}`);
+    // n IS PART OF THE RESULT. A ρ without the number of CANDIDATES behind it says
+    // nothing about whether the scorer works for anyone but the person who labelled it
+    // (MENTOR_REVIEW_2026-08-18 §13).
+    console.log(`- Candidates: **${scoredCandidates.size}** (the labelling population)`);
     if (skippedNoProfile) console.log(`- Skipped (no profile): ${skippedNoProfile}`);
     if (skippedNoCosine) console.log(`- Skipped (no embedding on one side): ${skippedNoCosine}`);
     console.log(`- Grades: GREAT=2, OK=1, BAD=0\n`);
@@ -138,6 +163,70 @@ async function main(): Promise<void> {
       '\nA sub-score with ρ near 0 is not tracking human judgement. A sub-score with no\n' +
         'spread is a constant and cannot track anything by construction.',
     );
+
+    // ── What the score is allowed to CLAIM ────────────────────────────────────
+    //
+    // The scorer is labelled "0–100" everywhere it is exposed. What it actually produces
+    // is the range below. If that range is a narrow band in the middle, a raw percentage
+    // misdescribes the number: the worst job we have ever scored is not a "41% match",
+    // it is the bottom of a compressed band.
+    console.log('\n## Observed range per human grade\n');
+    console.log('| human grade | n | scored min–max | mean |');
+    console.log('|---|---|---|---|');
+    for (const grade of ['GREAT', 'OK', 'BAD']) {
+      const v = byGrade[grade] ?? [];
+      if (v.length === 0) {
+        console.log(`| ${grade} | 0 | — | — |`);
+        continue;
+      }
+      const mean = v.reduce((a, b) => a + b, 0) / v.length;
+      console.log(
+        `| ${grade} | ${v.length} | ${Math.min(...v)}–${Math.max(...v)} | ${mean.toFixed(1)} |`,
+      );
+    }
+
+    // ── The standard, enforced ────────────────────────────────────────────────
+    //
+    // Written as a check rather than a paragraph, because a standard nobody runs is a
+    // preference. The LLM fitScore was rejected at ρ 0.137/−0.065 over 150 pairs; the
+    // number we DO ship has to clear the bar the rejected one was held to.
+    const rhoTotal = spearman(totals, grades);
+    const failures: string[] = [];
+    if (!Number.isFinite(rhoTotal) || rhoTotal < MIN_RHO) {
+      failures.push(
+        `total ρ ${Number.isFinite(rhoTotal) ? rhoTotal.toFixed(3) : 'n/a'} < ${MIN_RHO}`,
+      );
+    }
+    if (scoredCandidates.size < MIN_CANDIDATES) {
+      failures.push(
+        `${scoredCandidates.size} candidate(s) < ${MIN_CANDIDATES} — one person's taste is not a population`,
+      );
+    }
+    if (totals.length < MIN_PAIRS) {
+      failures.push(`${totals.length} pairs < ${MIN_PAIRS}`);
+    }
+    for (const [key, values] of Object.entries(subs)) {
+      if (values.length && Math.min(...values) === Math.max(...values)) {
+        failures.push(`sub-score '${key}' is constant ${values[0]} — its weight is inert`);
+      }
+    }
+
+    console.log('\n## Verdict\n');
+    if (failures.length === 0) {
+      console.log(
+        `✅ Meets the standard: ρ ≥ ${MIN_RHO}, ≥ ${MIN_CANDIDATES} candidates, ` +
+          `≥ ${MIN_PAIRS} pairs, no inert sub-score.`,
+      );
+    } else {
+      console.log('❌ Does NOT meet the standard for showing a calibrated number:\n');
+      for (const f of failures) console.log(`- ${f}`);
+      console.log(
+        '\nOrdering evidence may still be sound — that is what ρ measures. What fails\n' +
+          'here is the claim that the MAGNITUDE means something to a user. Show a band\n' +
+          'or a rank until this passes. See MENTOR_REVIEW_2026-08-18 §13.',
+      );
+      process.exitCode = 1;
+    }
   } finally {
     await app.close();
   }

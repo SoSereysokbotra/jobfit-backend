@@ -99,12 +99,33 @@ export interface ReportSkill {
   matchQuality?: 'EXACT' | 'PARTIAL';
 }
 
+/**
+ * Why the skills table is not being shown.
+ *
+ * `available: false` alone was not enough: the page could tell that there was no table,
+ * but not whether to say "try again shortly" or "we cannot do this yet". Those are
+ * different promises to a user (MENTOR_REVIEW_2026-08-18 §19).
+ */
+export type SkillsUnavailableReason =
+  /** The AI extractor could not be reached. Transient — retrying may work. */
+  | 'AI_UNAVAILABLE'
+  /**
+   * The posting is not in a script our word matching can read — Khmer today. NOT
+   * transient: retrying changes nothing, and the honest message names the limitation.
+   */
+  | 'LANGUAGE_UNSUPPORTED';
+
 export interface ReportSkills {
   /**
-   * False when requirement extraction was unavailable (AI service down) — the page
-   * shows a soft notice instead of an empty table that would read as "no requirements".
+   * False when no trustworthy table can be produced — the page shows a soft notice
+   * instead of an empty table that would read as "no requirements".
    */
   available: boolean;
+  /**
+   * Set whenever `available` is false, absent otherwise. The client picks its wording
+   * from this rather than guessing from an empty table.
+   */
+  reason?: SkillsUnavailableReason;
   hard: ReportSkill[];
   soft: ReportSkill[];
   matchedCount: number;

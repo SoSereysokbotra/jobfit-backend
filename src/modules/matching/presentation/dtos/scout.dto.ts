@@ -10,6 +10,7 @@
 
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsInt, IsISO8601, IsOptional, Max, Min } from 'class-validator';
+import { MatchBand } from '../../domain/scoring/match-band';
 
 export class ScoutQueryDto {
   @ApiPropertyOptional({ description: 'Minimum match score 0–100', default: 0 })
@@ -35,6 +36,16 @@ export class ScoutMatchDto {
   source!: string;
   @ApiProperty() title!: string;
   @ApiPropertyOptional({ type: String, nullable: true }) company!: string | null;
-  @ApiProperty({ description: '0–100 match score' }) score!: number;
+  /**
+   * ⚠️ ORDERING, NOT DISPLAY — the observed range is 41–69, not 0–100, and human grades
+   * overlap inside it (MENTOR_REVIEW_2026-08-18 §13). `minScore` filters on this, which
+   * is a legitimate use; the badge should render `band`.
+   */
+  @ApiProperty({ description: 'Match score. For ordering/filtering — observed range 41–69.' })
+  score!: number;
+
+  /** What the score is allowed to claim. Render this, not `score`. */
+  @ApiProperty({ enum: ['STRONG', 'POSSIBLE', 'WEAK'] })
+  band!: MatchBand;
   @ApiProperty({ description: 'Where the notification click navigates' }) url!: string;
 }

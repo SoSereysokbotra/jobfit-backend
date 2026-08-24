@@ -29,7 +29,12 @@ export class CreateJobUseCase implements IUseCase<CreateJobRequest, Job> {
 
     let salaryRange: SalaryRange | undefined;
     if (dto.minSalary !== undefined && dto.maxSalary !== undefined) {
-      const salaryResult = SalaryRange.create(dto.minSalary, dto.maxSalary);
+      const salaryResult = SalaryRange.create(
+        dto.minSalary,
+        dto.maxSalary,
+        dto.salaryCurrency,
+        dto.salaryPeriod,
+      );
       if (salaryResult.isFailure) return Result.fail(salaryResult.error);
       salaryRange = salaryResult.value;
     }

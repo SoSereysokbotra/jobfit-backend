@@ -3,3 +3,8 @@ dist/
 .env
 *.log
 coverage/
+
+# Hand-labelled evaluation exports (scripts/export-match-labels.ts).
+# These contain real user email addresses and are a BACKUP of research data — they belong
+# in durable storage outside the repo, never in git history. See MENTOR_REVIEW §14.
+eval-exports/

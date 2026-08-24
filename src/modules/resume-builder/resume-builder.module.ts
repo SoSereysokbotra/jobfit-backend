@@ -25,13 +25,11 @@ import { ResumeDocumentRepository } from './infrastructure/repositories/resume-d
 // PrismaService, so no cross-module import is needed.
 import { ProfileContentRepository } from './infrastructure/repositories/profile-content.repository';
 
-// Export pipeline. StorageService + SupabaseClientService are provided locally here,
-// exactly as ResumeModule does — both depend only on the global ConfigService, so
-// there is no shared module to import and no cross-module coupling.
+// Export pipeline. StorageService now comes from the @Global StorageModule rather than
+// being provided locally alongside SupabaseClientService. The local-copy convention this
+// comment used to recommend is what broke EmployerModule — see storage.module.ts.
 import { ResumeExportService } from './application/services/resume-export.service';
 import { ResumePdfRenderer } from './application/services/resume-pdf.renderer';
-import { SupabaseClientService } from '@infra/supabase/supabase.client';
-import { StorageService } from '@infra/storage/storage.service';
 
 @Module({
   controllers: [ResumeDocumentController, ResumeTemplateController],
@@ -43,8 +41,6 @@ import { StorageService } from '@infra/storage/storage.service';
     ResumeTemplateRepository,
     ResumeExportService,
     ResumePdfRenderer,
-    SupabaseClientService,
-    StorageService,
   ],
   exports: [ResumeDocumentService],
 })

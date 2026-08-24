@@ -123,7 +123,12 @@ export class JobService {
     const remoteType = dto.remoteType ? RemoteType.fromString(dto.remoteType).value : undefined;
     let salaryRange: SalaryRange | undefined;
     if (dto.minSalary !== undefined && dto.maxSalary !== undefined) {
-      salaryRange = SalaryRange.create(dto.minSalary, dto.maxSalary).value;
+      salaryRange = SalaryRange.create(
+        dto.minSalary,
+        dto.maxSalary,
+        dto.salaryCurrency,
+        dto.salaryPeriod,
+      ).value;
     }
 
     const updateResult = job.update({

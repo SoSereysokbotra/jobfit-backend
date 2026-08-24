@@ -8,13 +8,28 @@
 import { Injectable } from '@nestjs/common';
 import { ApplicationStatus, Job, JobSkill } from '@prisma/client';
 import { PrismaService } from '@infra/prisma/prisma.service';
+import { matchBand } from '@modules/matching/domain/scoring/match-band';
 
 export type JobWithSkills = Job & { skills: JobSkill[] };
 
 export interface JobAnalytics {
   applicationsCount: number;
   applicationsByStatus: Record<string, number>;
-  averageMatchScore: number | null;
+  /**
+   * How the matched candidate pool splits across the evidence-backed bands.
+   *
+   * REPLACES `averageMatchScore`, which was never once a number: it was an AVG over
+   * `match_scores`, a table with no rows and no writer, so the employer's "Avg Match"
+   * card has always rendered "—" (MENTOR_REVIEW_2026-08-18 §15).
+   *
+   * It is counts rather than a restored average for a second reason. §13 calibrated the
+   * score at ρ 0.662 — the ORDERING is evidenced — but its observed range is 41–69 on a
+   * scale presented as 0–100, and the human grades overlap inside it. A mean of numbers
+   * like that is a magnitude claim the evidence does not support, so shipping
+   * "Avg Match 54%" would have replaced a blank with a wrong answer. "12 strong
+   * candidates" is both more useful to an employer and defensible.
+   */
+  candidateBands: { strong: number; possible: number; weak: number };
 }
 
 @Injectable()
@@ -53,7 +68,7 @@ export class EmployerJobRepository {
   }
 
   async analytics(jobId: string): Promise<JobAnalytics> {
-    const [total, byStatus, matchAgg] = await Promise.all([
+    const [total, byStatus, matchRows] = await Promise.all([
       this.prisma.application.count({
         where: { jobId, deletedAt: null },
       }),
@@ -62,9 +77,12 @@ export class EmployerJobRepository {
         where: { jobId, deletedAt: null },
         _count: { _all: true },
       }),
-      this.prisma.matchScore.aggregate({
-        where: { jobId },
-        _avg: { score: true },
+      // `recommendations` is THE match table — 749 rows, written by the pipeline, keyed
+      // by the user identity the whole matching domain uses. Dismissed rows are excluded:
+      // a candidate who rejected this job is not part of its matched pool.
+      this.prisma.recommendation.findMany({
+        where: { jobId, dismissedAt: null },
+        select: { score: true },
       }),
     ]);
 
@@ -73,10 +91,18 @@ export class EmployerJobRepository {
       applicationsByStatus[row.status as ApplicationStatus] = row._count._all;
     }
 
+    const candidateBands = { strong: 0, possible: 0, weak: 0 };
+    for (const { score } of matchRows) {
+      const band = matchBand(score);
+      if (band === 'STRONG') candidateBands.strong += 1;
+      else if (band === 'POSSIBLE') candidateBands.possible += 1;
+      else candidateBands.weak += 1;
+    }
+
     return {
       applicationsCount: total,
       applicationsByStatus,
-      averageMatchScore: matchAgg._avg.score ?? null,
+      candidateBands,
     };
   }
 }

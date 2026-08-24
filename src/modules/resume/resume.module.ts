@@ -7,8 +7,6 @@ import { ResumeController } from './presentation/controllers/resume.controller';
 import { UserModule } from '../user/user.module';
 
 // Storage infra (Supabase). Provided locally; both depend only on the global ConfigService.
-import { SupabaseClientService } from '@infra/supabase/supabase.client';
-import { StorageService } from '@infra/storage/storage.service';
 import { BullQueueService } from '@infra/queue/bull-queue.service';
 
 import { ResumeRepository } from './infrastructure/repositories/resume.repository';
@@ -36,8 +34,6 @@ import { ResumeScorerService } from './application/services/resume-scorer.servic
   ],
   controllers: [ResumeController],
   providers: [
-    SupabaseClientService,
-    StorageService,
     BullQueueService,
     ResumeRepository,
     ParsedResumeDataRepository,

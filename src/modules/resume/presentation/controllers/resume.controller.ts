@@ -6,6 +6,16 @@
 // this controller also carries an explicit class-level @UseGuards(JwtAuthGuard). Every
 // id-scoped route enforces ownership (assertOwned / the service) so a user can only touch
 // their own resumes.
+//
+// RATE LIMIT NOTE (MENTOR_REVIEW_2026-08-18 §11). SIX routes here reach the LLM, and
+// `ResumeScorerService.scoreResume` has NO CACHE — it re-runs the model every call and
+// only then persists. So `/ats-score`, `/quality-score`, `/scores`, `POST /:id/score`
+// and even `PATCH /:id/set-default` each spend a full scoring call, and a client polling
+// any of them is an open tap. All six carry `aiResume`; the pure reads (list, get,
+// parsing-status, parsed-data, delete) are untouched.
+//
+// The right long-term fix is for the scorer to return the persisted score when nothing
+// about the résumé changed — the limiter caps the damage, it does not remove the waste.
 
 import {
   BadRequestException,
@@ -40,6 +50,9 @@ import { ParsedResumeDataResponseDto } from '../../application/dtos/parsed-resum
 import { ParsedResumeDataRepository } from '../../infrastructure/repositories/parsed-resume-data.repository';
 import { Resume } from '../../domain/entities/resume.entity';
 import { EntitlementService } from '../../../user/application/services/entitlement.service';
+import { AiThrottlerGuard } from '@common/guards/ai-throttler.guard';
+import { RateLimit } from '@common/decorators/rate-limit.decorator';
+import { THROTTLERS } from '@config/throttler.config';
 
 const MAX_RESUME_SIZE = 5 * 1024 * 1024; // 5 MB
 
@@ -56,6 +69,8 @@ export class ResumeController {
   ) {}
 
   @Post()
+  @UseGuards(AiThrottlerGuard)
+  @RateLimit(THROTTLERS.aiResume.name)
   @HttpCode(HttpStatus.CREATED)
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Upload a resume (PDF or DOCX, max 5 MB)' })
@@ -111,6 +126,8 @@ export class ResumeController {
   }
 
   @Patch(':id/set-default')
+  @UseGuards(AiThrottlerGuard)
+  @RateLimit(THROTTLERS.aiResume.name)
   @ApiOperation({ summary: 'Set one of your resumes as the default' })
   async setDefault(
     @CurrentUser() user: AuthenticatedUser,
@@ -149,6 +166,8 @@ export class ResumeController {
   }
 
   @Get(':id/ats-score')
+  @UseGuards(AiThrottlerGuard)
+  @RateLimit(THROTTLERS.aiResume.name)
   @ApiOperation({ summary: 'Calculate (and cache) a resume’s ATS score' })
   async atsScore(
     @CurrentUser() user: AuthenticatedUser,
@@ -160,6 +179,8 @@ export class ResumeController {
   }
 
   @Get(':id/quality-score')
+  @UseGuards(AiThrottlerGuard)
+  @RateLimit(THROTTLERS.aiResume.name)
   @ApiOperation({ summary: 'Calculate (and cache) a resume’s quality score' })
   async qualityScore(
     @CurrentUser() user: AuthenticatedUser,
@@ -171,6 +192,8 @@ export class ResumeController {
   }
 
   @Get(':id/scores')
+  @UseGuards(AiThrottlerGuard)
+  @RateLimit(THROTTLERS.aiResume.name)
   @ApiOperation({ summary: 'Calculate both scores plus their average' })
   async scores(
     @CurrentUser() user: AuthenticatedUser,
@@ -186,6 +209,8 @@ export class ResumeController {
   }
 
   @Post(':id/score')
+  @UseGuards(AiThrottlerGuard)
+  @RateLimit(THROTTLERS.aiResume.name)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:

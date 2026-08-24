@@ -13,10 +13,14 @@ import {
   HttpStatus,
   Param,
   Post,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { AuthenticatedUser } from '@common/guards/jwt-auth.guard';
+import { AiThrottlerGuard } from '@common/guards/ai-throttler.guard';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
+import { RateLimit } from '@common/decorators/rate-limit.decorator';
+import { THROTTLERS } from '@config/throttler.config';
 import { MatchReportService } from '../../application/match-report.service';
 import { MatchReportRepository } from '../../infrastructure/match-report.repository';
 import { MatchReportPayload } from '../../domain/match-report-payload';
@@ -34,15 +38,23 @@ export class MatchReportController {
     private readonly reports: MatchReportRepository,
   ) {}
 
+  // Guard on THIS route only, not the class: GET /:id below is a plain database read.
+  // A guarded route with no @RateLimit is subject to EVERY named throttler, so a
+  // class-level guard would quietly hold the report read to the strictest auth limit.
   @Post()
+  @UseGuards(AiThrottlerGuard)
+  @RateLimit(THROTTLERS.aiReport.name)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
       'Generate a full-page match report for the job the extension is looking at. ' +
-      'Ungated (the extension has no premium tier). The posting text is used once to ' +
-      'extract requirements and is not stored as a listing.',
+      'Ungated (the extension has no premium tier) but rate limited per account. The ' +
+      'posting text is used once to extract requirements and is not stored as a listing. ' +
+      'Re-opening the SAME posting with unchanged text returns the existing report ' +
+      'without spending an AI call.',
   })
   @ApiResponse({ status: 200, type: CreateMatchReportResponseDto })
+  @ApiResponse({ status: 429, description: 'Per-account AI rate limit exceeded.' })
   async create(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CreateMatchReportDto,

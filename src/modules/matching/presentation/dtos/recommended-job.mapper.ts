@@ -6,6 +6,8 @@
 // cache would disagree with itself depending on which route last wrote it.
 
 import { RecommendedJobDto } from './recommended-job.dto';
+import { matchBand } from '../../domain/scoring/match-band';
+import { SalaryPeriodValue } from '@shared-kernel/value-objects/salary-range.vo';
 
 /** The row shape both callers query: a recommendation with its job, company name and skill ids. */
 export interface RecommendationWithJob {
@@ -23,6 +25,8 @@ export interface RecommendationWithJob {
     location: string | null;
     minSalary: number | null;
     maxSalary: number | null;
+    salaryCurrency: string;
+    salaryPeriod: SalaryPeriodValue | null;
     skills: { skillId: string }[];
     createdAt: Date;
     updatedAt: Date;
@@ -41,7 +45,10 @@ export const RECOMMENDATION_JOB_INCLUDE = {
 
 export function toRecommendedJobDto(r: RecommendationWithJob): RecommendedJobDto {
   const job = r.job;
-  const hasSalary = job.minSalary != null || job.maxSalary != null;
+  // BOTH bounds, not either. `?? 0` used to fill the missing half, so a job stating only
+  // a minimum was published as "min–0" — an invalid band, and the same class of invented
+  // fact as the "$0K – $0K" this DTO's sibling produced (MENTOR_REVIEW_2026-08-18 §12).
+  const hasSalary = job.minSalary != null && job.maxSalary != null;
 
   return {
     id: job.id,
@@ -53,12 +60,24 @@ export function toRecommendedJobDto(r: RecommendationWithJob): RecommendedJobDto
     remoteType: job.remoteType,
     location: job.location ?? undefined,
     salaryRange: hasSalary
-      ? { min: job.minSalary ?? 0, max: job.maxSalary ?? 0, currency: 'USD' }
+      ? {
+          min: job.minSalary as number,
+          max: job.maxSalary as number,
+          // Read off the job, not hardcoded. 'USD' here was a literal on a corpus that
+          // is 83% Cambodian; `period` stays undefined when unknown rather than implying
+          // per-year.
+          currency: job.salaryCurrency,
+          period: job.salaryPeriod ?? undefined,
+        }
       : undefined,
     skillIds: job.skills.map((s) => s.skillId),
     createdAt: job.createdAt.toISOString(),
     updatedAt: job.updatedAt.toISOString(),
     match: Math.round(r.score),
+    // The band travels with the score so every client makes the same claim. A client that
+    // renders `match` as a percentage is asserting precision the calibration does not
+    // support — see match-band.ts.
+    band: matchBand(r.score),
     reason: r.reasonExplanation ?? undefined,
     breakdown: (r.breakdown as Record<string, number> | null) ?? undefined,
   };
