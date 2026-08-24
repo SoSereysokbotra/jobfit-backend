@@ -568,14 +568,38 @@ model Job {
 
 // A job a seeker bookmarked for later. Simple join of (user, job); unique so a
 // job can't be saved twice, cascade so it disappears if either side is deleted.
+/// A bookmark on one of OUR job rows.
+///
+/// SURVIVES THE POSTING, like TrackedJob and for the same reason. `jobId` used to be
+/// `onDelete: Cascade` with no snapshot, so deleting a job erased the user's bookmark
+/// without a trace — while a tracked card for the identical job survived, because
+/// JOB_TRACKER_PLAN §2 had already argued that postings vanish ("bongthom returned 404
+/// for 9 of 43 postings during the ingestion work"). That argument was never back-ported
+/// here (MENTOR_REVIEW_2026-08-18 §16).
+///
+/// The corpus is 83% ingested from boards that delist aggressively, so the moment anything
+/// prunes stale jobs — or anyone exposes JobService.delete, which exists and is currently
+/// reachable by no route — a cascade would take real bookmarks with it.
 model SavedJob {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  jobId     String
-  job       Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Null once the posting is gone. The row stays; the link does not.
+  jobId String?
+  job   Job?    @relation(fields: [jobId], references: [id], onDelete: SetNull)
+
+  /// Copied at save time so the bookmark still says something after `jobId` goes null.
+  /// Nullable because rows saved before these columns existed have no snapshot beyond
+  /// what the back-fill could recover from the job they still point at.
+  title       String?
+  companyName String?
+  url         String?
+
   createdAt DateTime @default(now())
 
+  /// One bookmark per posting per user. NULLs are distinct in Postgres, so orphaned rows
+  /// coexist rather than colliding — the same trick TrackedJob uses.
   @@unique([userId, jobId])
   @@index([userId])
   @@index([jobId])

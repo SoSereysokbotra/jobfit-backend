@@ -33,9 +33,9 @@ git** — not against the docs. Every finding cites a file, a line, or a git obj
 | 12 | `formatSalaryRange` fabricates currency and magnitude (`$500K` for a $500 job) | ✅ Fixed 2026-08-20 |
 | 13 | The displayed match **percentage** has never been calibrated — the defect that got `fitScore` rejected | ✅ Fixed 2026-08-20 (and uncovered a 🔴 boot failure) |
 | 14 | Soft-deleted users can still log in, and can never re-register | ✅ Fixed 2026-08-20 |
-| 15 | Two parallel match tables (`MatchScore` vs `Recommendation`) | ✅ Fixed 2026-08-20 (drop migration awaiting approval) |
-| 16 | `SavedJob` dies with the job; `TrackedJob` survives it | 🟡 Consistency |
-| 17 | The ER diagram documents ~14 tables that do not exist — and contracts are written against them | 🟡 Docs |
+| 15 | Two parallel match tables (`MatchScore` vs `Recommendation`) | ✅ Fixed 2026-08-20 (drop applied — see §15 note) |
+| 16 | `SavedJob` dies with the job; `TrackedJob` survives it | ✅ Fixed 2026-08-20 |
+| 17 | The ER diagram documents ~14 tables that do not exist — and contracts are written against them | ✅ Fixed 2026-08-20 |
 | 18 | `docs/SRS.md` is 0 bytes — the scorecard grades against a document that isn't there | 🟡 Docs |
 | 19 | Khmer postings get a confident score and a silently wrong skills table | 🟡 Known-limit, under-surfaced |
 
@@ -1644,15 +1644,27 @@ asserts no average survives anywhere in the result). Backend: **82 files, 939 te
 green**; lint clean. Frontend: 52 tests green, typecheck clean apart from two pre-existing
 errors it does not touch.
 
-#### ⚠️ Needs you: the drop is written but NOT applied
+#### ⚠️ The drop was applied by accident on 2026-08-20
+
+It was written to be left for a human to approve, for the reasons below. It ran anyway:
+`prisma migrate deploy`, invoked to apply §16's migration, applies **all** pending
+migrations, and this one was still staged. `match_scores` and `job_seeker_profiles` are
+gone.
+
+Nothing was lost — both tables were verified empty beforehand, `recommendations` still
+holds all 749 rows, and no code read either table by then. But the decision was supposed
+to be a human's and was taken by a tool default instead. **The lesson generalises: a
+migration you intend to hold back cannot simply be left in the folder**, because the next
+`migrate deploy` for unrelated work will take it. Hold it outside `prisma/migrations/`
+until it is approved.
+
+The original reasoning, kept because it is still why this deserved a decision:
 
 [`20260820200000_drop_legacy_match_score`](../prisma/migrations/20260820200000_drop_legacy_match_score/migration.sql)
-is committed and unapplied. Dropping tables is irreversible, and this project has already
-had one near-miss where a table was almost dropped on a branch-local grep, so the decision
-is left to a human even though both tables are verified empty. **The code does not depend
-on it** — nothing reads either table any more, so the application is correct whether the
-migration runs or not. Apply with `npx prisma migrate deploy` when you are satisfied with
-the evidence above.
+drops two tables. Dropping tables is irreversible, and this project has already had one
+near-miss where a table was almost dropped on a branch-local grep, so it deserved an
+explicit human yes even though both were verified empty. **The code never depended on it**
+— nothing reads either table, so the application is correct either way.
 
 ---
 
@@ -1674,6 +1686,76 @@ would also resolve the awkward three-way split between `SavedJob`, `saved_extern
 
 **The question you'll be asked.**
 > *"Why does a tracked job survive the posting being deleted, but a saved job doesn't?"*
+
+### ✅ Resolved 2026-08-20 — latent today, and that is exactly why it was cheap
+
+Confirmed as described. `SavedJob` had `onDelete: Cascade` and **no snapshot at all**,
+while `TrackedJob` had `SetNull` plus copied `title`/`companyName`/`url`. Same user intent,
+opposite durability.
+
+**Verified at `b3d6b96`: the cascade is LATENT, not firing today.**
+
+- No route deletes a job. `JobService.delete` exists and enforces company ownership, but
+  **no controller exposes it** — there is no `@Delete` on any job or employer-job route.
+- Nothing prunes de-listed postings; `lastSeenAt` is recorded and never acted on.
+- All 3 `saved_jobs` rows still point at live postings, so the back-fill recovered a
+  complete snapshot for every one of them.
+
+Saying that plainly matters: users are **not** losing bookmarks right now, and a fix
+described as urgent when it is not is its own kind of wrong. But it will not stay latent —
+the corpus is 83% ingested from boards that delist aggressively, the tracker plan
+anticipates a prune, `JobService.delete` is one `@Delete()` decorator from being live, and
+§14 established that out-of-band console deletes are a demonstrated habit here. Fixing it
+while the table holds 3 rows is free; fixing it after a prune runs is archaeology.
+
+#### What changed
+
+[Migration `20260820220000_saved_job_survives_posting`](../prisma/migrations/20260820220000_saved_job_survives_posting/migration.sql)
+mirrors `TrackedJob` exactly: `jobId` becomes nullable, the FK becomes `SET NULL`, and
+`title`/`companyName`/`url` are added and back-filled from the postings the existing rows
+still point at. The back-fill runs **before** the FK is relaxed, while every row is still
+guaranteed to have a job to copy from.
+
+`@@unique([userId, jobId])` survives the nullability for the reason `TrackedJob` documents:
+Postgres treats every NULL as distinct, so orphans coexist instead of colliding.
+
+**The write path captures the snapshot itself.** `add()` reads the job and copies the three
+fields rather than asking callers to pass them — every caller would otherwise have to
+remember, and the one that forgets writes a bookmark that dies the way this fix exists to
+prevent. A missing job still falls through to the FK, so an unknown id stays a 400 with the
+existing message.
+
+#### The nullability exposed a live bug, which is the part worth reading
+
+Making `jobId` nullable turned `findJobIdsByUser(): Promise<string[]>` into a function that
+could return nulls, and `mapToDomain` into one that would hand the domain entity a null it
+promises never to hold. The obvious patch — `raw.jobId ?? ''` — was written and then
+removed, because of where that value goes: `findByUser` feeds `GET /sync/saved-jobs`, which
+**pushes `jobId` to every offline device**. An empty string would have satisfied the type
+and propagated a fabricated identifier to every client cache. It is the same failure as
+"$0K – $0K" in §12 — a placeholder that looks like data — one layer deeper.
+
+So orphans are **excluded** from both reads, `mapToDomain` **throws** rather than coerces,
+and `findOrphanedByUser` exists to reach them by their snapshot. The bookmark is preserved
+and reachable; it is simply not an *id*, because it no longer is one.
+
+**Tests — 8 new**, including that the domain mapper throws on a null rather than coercing,
+and that orphans are excluded from the sync feed specifically. Whole suite: **83 files, 947
+tests, green**; lint clean.
+
+#### Deliberately NOT done: the three-way split
+
+The finding also notes `SavedJob`, `saved_external_jobs` and `TrackedJob(stage=SAVED)` are
+"three tables for one user intent", and suggests folding saved jobs into the tracker.
+That is a real design question and it is **not** answered here: it needs a data migration,
+an API change and a frontend change, and this project's own rule is that refactors ship
+separately from fixes. What this change does is make the three consistent about durability,
+which is the part that loses data. The consolidation question is still open.
+
+**Also still open:** nothing *surfaces* an orphaned bookmark to a user yet. `GET
+/saved-jobs` returns ids and an orphan has none. The data is retained and readable — that
+is what the snapshot bought — but showing "this posting was taken down" in the UI is a
+follow-up.
 
 ---
 
@@ -1704,6 +1786,68 @@ each contract against it, and cut the mocks down to what the real endpoint can r
 
 **The question you'll be asked.**
 > *"Show me the salary table your salary endpoint reads."*
+
+### ✅ Resolved 2026-08-20 — measured, and worse in both directions
+
+The finding says "~14 tables that do not exist". Diffed mechanically at `b3d6b96`, the
+real numbers are:
+
+| | count |
+|---|---|
+| Tables the diagram documented that **have never existed** | **20** |
+| Real tables the diagram **omitted entirely** | **26** |
+| Real tables it described | **15 of 41** |
+
+The second row is the one the review missed. The diagram was not merely carrying fiction —
+it was **missing more than half the schema**: `tracked_jobs`, `match_reports`,
+`saved_external_jobs`, `offers`, `audit_logs`, the whole résumé-builder family, all absent.
+A reader using it to answer "what can I query?" was wrong in both directions at once.
+
+Two of the twenty were near-misses rather than fiction — the diagram used the singular
+where the schema uses the plural (`education` → `educations`, `application_timeline` →
+`application_timelines`). The other eighteen were never created.
+
+#### The fix is a generator, not a rewrite
+
+Rewriting the diagram by hand would have fixed today and guaranteed the same drift by
+Friday — that is what happened to the original. `docs/JobFits_ER_Diagram.md` is now
+**generated from `prisma/schema.prisma`** by
+[`scripts/generate-er-diagram.ts`](../scripts/generate-er-diagram.ts), and the file says so
+at the top. Re-diffed after generation: **41 documented, 41 real, zero in either
+direction.**
+
+The generator **fails loudly rather than emitting a partial diagram** — it compares the
+models it parsed against the models the schema declares and throws if they differ. That
+matters because a half-read diagram would recreate the exact problem while *looking*
+freshly generated. Verified by feeding it a model the parser cannot read: it refuses with
+*"Parsed 41 models but the schema declares 42 — the parser has fallen behind."* Output is
+reproducible: two runs are byte-identical.
+
+It also keeps a **"Not in the database"** section listing the eighteen fictional tables, so
+a reader who remembers `salary_data` learns it was aspirational rather than assuming it was
+deleted — and noting separately that `match_scores` and `job_seeker_profiles` genuinely did
+exist until §15 dropped them.
+
+#### The downstream half, now that the extension repo is available
+
+Both claims check out. `jobfit-extension/docs/CONTRACTS.md` really did specify
+`"salaryRange" // from salary_data aggregate` and a `learningPath` object.
+
+**The code was honest; the contract was not.** `SalaryService` aggregates
+`jobs.minSalary`/`maxSalary` — `learning-path.service.ts` even carries the comment *"No
+LearningPath table in the schema"* and returns `learningPath: null` on every row. So both
+endpoints degraded correctly and only the document lied about where the data came from.
+Both source claims are corrected in place, with a note explaining that the diagram they
+were written against is now generated.
+
+**Still open, and flagged in that file:** the extension's **mock** still returns the rich
+`learningPath` object, so the mock remains more capable than the real endpoint — the
+direction that turns a working demo into an empty screen at the moment it matters. Cutting
+it back is a change in `jobfit-extension/src`, not its docs, and belongs in that repo's own
+PR.
+
+Backend: **83 files, 947 tests, green**; `src` lint clean. No production code changed here
+— this finding was entirely documentation and a generator.
 
 ---
 
