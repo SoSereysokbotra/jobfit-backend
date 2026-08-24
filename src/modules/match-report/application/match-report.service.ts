@@ -45,6 +45,7 @@ import {
   SearchabilityCheck,
 } from '../domain/match-report-payload';
 import { mentionCount, requirementCount, scanSoftSkills } from '../domain/keyword-scan';
+import { isKhmerScript } from '../domain/script-detection';
 import {
   DatedExperience,
   parseYearsRequired,
@@ -349,8 +350,38 @@ export class MatchReportService {
     resumeSkills: string[],
     parsed: ParsedResumeData | null,
   ): ReportSkills {
+    // Khmer first: this is a fact about the POSTING, so it holds whether or not the
+    // extractor answered. Checking it second would let an AI outage mask a permanent
+    // limitation behind a "try again" message.
+    //
+    // The table is withheld ENTIRELY rather than trimmed. On a Khmer posting the matchers
+    // do not return less — they return whichever English brand names happened to appear
+    // ("Excel", "Word"), scored against the résumé and presented with a confident
+    // missingCount. A table built from that is not a partial answer, it is a wrong one
+    // (MENTOR_REVIEW_2026-08-18 §19).
+    //
+    // The match score is untouched and still shown: it comes from cross-lingual bge-m3
+    // embeddings, which are evidenced for exactly this case.
+    if (isKhmerScript(description)) {
+      return {
+        available: false,
+        reason: 'LANGUAGE_UNSUPPORTED',
+        hard: [],
+        soft: [],
+        matchedCount: 0,
+        missingCount: 0,
+      };
+    }
+
     if (requirements === null) {
-      return { available: false, hard: [], soft: [], matchedCount: 0, missingCount: 0 };
+      return {
+        available: false,
+        reason: 'AI_UNAVAILABLE',
+        hard: [],
+        soft: [],
+        matchedCount: 0,
+        missingCount: 0,
+      };
     }
 
     const hard: ReportSkill[] = matchRequirements(requirements, resumeSkills).map(

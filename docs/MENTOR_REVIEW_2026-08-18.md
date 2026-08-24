@@ -37,7 +37,7 @@ git** — not against the docs. Every finding cites a file, a line, or a git obj
 | 16 | `SavedJob` dies with the job; `TrackedJob` survives it | ✅ Fixed 2026-08-20 |
 | 17 | The ER diagram documents ~14 tables that do not exist — and contracts are written against them | ✅ Fixed 2026-08-20 |
 | 18 | `docs/SRS.md` is 0 bytes — the scorecard grades against a document that isn't there | 🟡 Docs |
-| 19 | Khmer postings get a confident score and a silently wrong skills table | 🟡 Known-limit, under-surfaced |
+| 19 | Khmer postings get a confident score and a silently wrong skills table | ✅ Fixed 2026-08-20 |
 
 ---
 
@@ -1905,6 +1905,87 @@ segmentation project.
 **The question you'll be asked.**
 > *"Most of your jobs are Cambodian. Open a Khmer posting and tell me what the skills table is
 > computed from."*
+
+### ✅ Resolved 2026-08-20 — and the answer to that question is now demonstrable
+
+**"Computed from whichever English brand names happened to appear."** Proven rather than
+asserted, in three lines that are now a test:
+
+```
+/\w/.test('ក')                                → false   no  boundary can apply
+'ការងារគ្រូបង្រៀន'.split(/[^a-zA-Z0-9+#]+/)    → []      zero tokens
+/Excel/i.test('ចេះប្រើ Excel និង Word')   → TRUE    Latin brands still hit
+```
+
+That third line is the bug. The table was never *empty* on a Khmer posting — it was built
+from stray English words and then given a confident `missingCount`.
+
+#### One correction to the finding's framing, and it matters
+
+The review says *"the corpus went to 83% Cambodian… the analysis layer only works in
+English"*, which reads as though most postings are affected. Measured: **31 of 367 (8.5%)
+are Khmer-script.** The rest of the Cambodian corpus is written in English and analyses
+correctly. The bug is real and worth fixing; it is not the majority case, and a fix that
+withheld the skills table from all Cambodian postings would have broken the feature for
+the market it serves.
+
+#### What shipped
+
+[`script-detection.ts`](../src/modules/match-report/domain/script-detection.ts) — a Khmer
+letter ratio, exactly as the finding suggests, with no ICU. Detection is the easy half;
+*segmenting* Khmer into words is the project, and is not attempted.
+
+`ReportSkills` gains a **`reason`**. The finding says the payload "already models
+[unavailable] as distinct from 'no requirements'" — it modelled `available: false` but not
+*why*, so the page could not tell **"try again shortly"** from **"we cannot do this yet"**.
+Those are different promises. Now `AI_UNAVAILABLE` (transient) and
+`LANGUAGE_UNSUPPORTED` (not).
+
+The script check runs **before** the AI-outcome check, deliberately: the script is a fact
+about the posting, and testing the extractor first would let an outage mask a permanent
+limitation behind a transient-sounding message.
+
+**The match score is untouched and still shown**, exactly as the finding recommends — it
+comes from cross-lingual bge-m3 embeddings, measured at cosine 0.82 for the same role
+across languages. Withholding it too would be over-correcting.
+
+#### Two measurement bugs found while measuring
+
+1. **The first ratio could exceed 1.** Khmer writes vowels and the subscript COENG as
+   combining marks (`\p{M}`), which sit in the Khmer Unicode block but are not letters —
+   so a block-count numerator over a `\p{L}` denominator gave **1.5** for the word
+   "ការងារ" (4 letters, 2 marks). Caught by a test asserting pure Khmer scores 1.0. Both
+   sides now count letters.
+2. **The corpus figures in the first draft were wrong** because they came from that same
+   block count — it reported 32 postings and "nothing between 0% and 20%". Re-measured
+   with the corrected function: **31 postings**, and the nonzero ratios begin 0.113, 0.189,
+   0.265, so the real gap is **0.113 → 0.189**. The threshold of 0.15 sits inside it, which
+   is why the exact value does not matter.
+
+   The 0.113 posting is the case the threshold exists to get right: an English job ad that
+   quotes an address in Khmer. It keeps its skills table.
+
+   Both the code comment and the test carried the wrong numbers for a few minutes, and the
+   corrected comment says where they came from — a stale measured claim is the failure mode
+   this whole review is about.
+
+**Tests — 22 new.** 15 on detection (including the three lines above as executable proof,
+the ratio-above-1 regression, and the threshold sitting in the measured gap) and 7 on the
+report (table withheld, reason set, counts zeroed, **match score still present**, and that
+an English posting with a failed extractor reports `AI_UNAVAILABLE` rather than being
+confused with a Khmer one). Whole suite: **85 files, 969 tests, green**; lint clean.
+
+#### Still open
+
+- **No client renders the reason yet.** The API says `LANGUAGE_UNSUPPORTED`; the page needs
+  to say *"skills analysis isn't available for Khmer postings yet"*. That is a change in
+  the extension and the web app.
+- **The ATS `searchability` checks have the same blind spot.** "Job title present in
+  résumé" on a Khmer title finds zero words and reports `warn` — not a false claim, but an
+  uninformative one. Narrower than the skills table, and left alone here.
+- **Segmentation remains unattempted**, which is the right call: honest refusal is a day's
+  work and buys most of the value; ICU segmentation is a project that this corpus does not
+  yet justify.
 
 ---
 
