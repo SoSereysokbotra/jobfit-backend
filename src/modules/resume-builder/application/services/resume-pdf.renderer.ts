@@ -56,16 +56,48 @@ const PRESET_COLORS: Record<string, string> = {
 };
 
 /**
- * Point sizes. Body sits at 11 rather than 10 because 10 reads cramped on screen
- * and in print, and 11 is still inside the 10–12pt band the app's own ATS guidance
- * recommends — parsers handle it, and it costs roughly 10% more vertical space.
+ * Point sizes.
+ *
+ * BODY sits at 12 — the TOP of the 10–12pt band the app's own ATS guidance
+ * recommends. It was 11. Do not raise it past 12 without revisiting that band: the
+ * guarantee this file makes is "inside 10–12", and 13 would break it, not stretch it.
+ *
+ * The cost is vertical space, and it is real: 11 → 12 is roughly 9% more height for
+ * the same content, on top of the ~10% that 10 → 11 already cost. A résumé that
+ * previously just fit on one page can spill onto a second. That is the trade being
+ * made deliberately — legibility at fit-width zoom over maximum density.
+ *
+ * HEADING and NAME move with it so the hierarchy holds its proportions (13 → 14,
+ * 22 → 24; both ≈ +8-9%, matching body's +9%). Neither is ATS-constrained — the
+ * 10–12pt band is about body copy, which is what a parser reads for content — so
+ * the only limit on NAME is the page width, and 24pt clears it comfortably.
  *
  * `lineGap` below is derived from BODY_SIZE, so line spacing scales with these
  * automatically; nothing else in the renderer hardcodes a size.
  */
-const BODY_SIZE = 11;
-const HEADING_SIZE = 13;
-const NAME_SIZE = 22;
+const BODY_SIZE = 12;
+const HEADING_SIZE = 14;
+const NAME_SIZE = 24;
+
+/**
+ * Weight of the rule under a section heading, per heading style.
+ *
+ * EVERY heading gets a rule. It used to be drawn only for `uppercase-rule` and
+ * `accent-bar`, so the seeded "Compact Professional" template — `small-caps`, which
+ * matches neither — rendered with no dividers at all, and a heading style silently
+ * decided whether a structural element existed. `headingStyle` now chooses how the
+ * heading LOOKS; it does not choose whether the résumé has section separators.
+ *
+ * `accent-bar` keeps its heavier rule because the bar is the whole point of that
+ * template. Everything else gets 0.75 rather than the old 0.5: at fit-width zoom in
+ * most viewers a 0.5pt hairline in near-black is effectively invisible, which made
+ * "Classic ATS" look like it had no dividers either. Still thin, and irrelevant to
+ * ATS parsing — a vector line is not text to a parser at any weight.
+ */
+const HEADING_RULE_WIDTH: Record<string, number> = {
+  'accent-bar': 1.5,
+};
+const DEFAULT_RULE_WIDTH = 0.75;
 
 /** Serif only when the document explicitly asks; otherwise the ATS-safest default. */
 function fontFamily(fontFamily: string | null): { regular: string; bold: string } {
@@ -123,6 +155,19 @@ export class ResumePdfRenderer {
     const info: Record<string, string> = { Title: document.title };
     if (document.fullName?.trim()) info.Author = document.fullName.trim();
 
+    // PAGE SIZE IS UNDECIDED, NOT CHOSEN. 'LETTER' has been here since this file's
+    // first commit (04e756a) and was never revisited; there is no page-size decision
+    // recorded anywhere in docs/ or in this file's own ATS-safety notes above, which
+    // are otherwise explicit about single-column, base-14 fonts and no tables.
+    //
+    // It is very likely WRONG for this product: LETTER (8.5×11in) is essentially
+    // US/Canada, and JobFits targets Cambodia — Khmer job boards, Khmer script
+    // detection, Cambodian postings — where A4 (210×297mm) is the standard. A résumé
+    // authored as LETTER prints with uneven margins on A4 paper.
+    //
+    // Not changed here because it is out of scope for the divider/font fix and it
+    // moves every line break in every exported document. If it is changed to 'A4',
+    // the frontend preview's 1/1.414 aspect ratio becomes correct as-is.
     const pdf = new PDFDocument({
       size: 'LETTER',
       margins: { top: margin, bottom: margin, left: margin, right: margin },
@@ -141,25 +186,37 @@ export class ResumePdfRenderer {
 
     const lineGap = (BODY_SIZE * spacing) - BODY_SIZE;
 
+    // Ink for headings and rules. `accent: 'none'` (Classic ATS) means near-black
+    // everywhere; anything else takes the document's colour scheme.
+    const headingInk = rules.accent === 'none' ? '#111111' : accent;
+
     /** A section heading — skipped entirely when its section has no content. */
     const heading = (label: string) => {
       pdf.moveDown(0.6);
       pdf
         .font(fonts.bold)
         .fontSize(HEADING_SIZE)
-        .fillColor(rules.accent === 'none' ? '#111111' : accent)
+        .fillColor(headingInk)
+        // Casing is the ONLY thing headingStyle decides about the text.
+        //
+        // 'small-caps' renders as title case, not small caps: the base-14 fonts this
+        // renderer is restricted to for ATS-safety carry no small-caps feature, and
+        // faking it (uppercase at a reduced size) would change how a seeded template
+        // looks for a cosmetic gain. Left as-is deliberately — if real small caps are
+        // wanted, that is a font-embedding decision, not a casing one.
         .text(rules.headingStyle === 'uppercase-rule' ? label.toUpperCase() : label);
 
-      if (rules.headingStyle === 'uppercase-rule' || rules.headingStyle === 'accent-bar') {
-        const y = pdf.y + 2;
-        pdf
-          .moveTo(margin, y)
-          .lineTo(pdf.page.width - margin, y)
-          .lineWidth(rules.headingStyle === 'accent-bar' ? 1.5 : 0.5)
-          .strokeColor(rules.accent === 'none' ? '#111111' : accent)
-          .stroke();
-        pdf.moveDown(0.4);
-      }
+      // UNCONDITIONAL. See HEADING_RULE_WIDTH for why this is not per-style.
+      const y = pdf.y + 2;
+      pdf
+        .moveTo(margin, y)
+        .lineTo(pdf.page.width - margin, y)
+        .lineWidth(
+          HEADING_RULE_WIDTH[rules.headingStyle ?? ''] ?? DEFAULT_RULE_WIDTH,
+        )
+        .strokeColor(headingInk)
+        .stroke();
+      pdf.moveDown(0.4);
 
       pdf.fillColor('#111111').font(fonts.regular).fontSize(BODY_SIZE);
       lines.push('', label.toUpperCase());
