@@ -5,8 +5,8 @@
 //                       dependency outage — used by Cloud Run liveness/startup probes so a
 //                       transient DB/Redis blip doesn't kill the container).
 //   GET /health/ready — readiness: should this instance receive traffic? HARD-gates on the
-//                       database (503 if down); Redis, queue and mail are soft (degraded,
-//                       still 200).
+//                       database (503 if down); Redis, queue, mail and AI are soft
+//                       (degraded, still 200).
 //
 // Both are @Public() (no JWT) so probes and the load balancer can reach them.
 
@@ -17,6 +17,7 @@ import { Public } from '@common/decorators/public.decorator';
 import { DatabaseHealthIndicator } from './indicators/database.health-indicator';
 import { RedisHealthIndicator } from './indicators/redis.health-indicator';
 import { MailHealthIndicator } from './indicators/mail.health-indicator';
+import { AiHealthIndicator } from './indicators/ai.health-indicator';
 import { HeartbeatService } from './heartbeat.service';
 
 @ApiTags('Health')
@@ -27,6 +28,7 @@ export class HealthController {
     private readonly db: DatabaseHealthIndicator,
     private readonly redis: RedisHealthIndicator,
     private readonly mail: MailHealthIndicator,
+    private readonly ai: AiHealthIndicator,
     private readonly heartbeat: HeartbeatService,
   ) {}
 
@@ -44,7 +46,7 @@ export class HealthController {
   @HealthCheck()
   @ApiOperation({
     summary:
-      'Readiness probe — DB hard-gated (503 if down); Redis/queue/mail soft (degraded)',
+      'Readiness probe — DB hard-gated (503 if down); Redis/queue/mail/AI soft (degraded)',
   })
   readiness() {
     return this.health.check([
@@ -52,6 +54,7 @@ export class HealthController {
       () => this.redis.isHealthy('redis'),
       () => this.redis.isQueueHealthy('queue'),
       () => this.mail.isHealthy('mail'),
+      () => this.ai.isHealthy('ai'),
     ]);
   }
 

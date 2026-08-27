@@ -3,6 +3,7 @@ import { PrismaService } from '@infra/prisma/prisma.service';
 import { RecomputeUserMatchesUseCase } from '../use-cases/recompute-user-matches.use-case';
 import { RecommendedJobDto } from '../../presentation/dtos/recommended-job.dto';
 import { ScoutMatchDto } from '../../presentation/dtos/scout.dto';
+import { MatchReadinessDto } from '../../presentation/dtos/match-readiness.dto';
 import {
   RECOMMENDATION_JOB_INCLUDE,
   toRecommendedJobDto,
@@ -66,6 +67,76 @@ export class RecommendationsQueryService {
     }
 
     return rows.map((r) => toRecommendedJobDto(r));
+  }
+
+  /**
+   * Why is the recommendations list empty?
+   *
+   * An empty array has four causes and the client used to render them identically as
+   * "no matches" — telling a brand-new candidate that a market with hundreds of live
+   * postings has nothing for them (docs/AI_DEGRADATION_PLAN.md §7).
+   *
+   * Reads the profile's own embedding columns rather than asking the AI service: the
+   * question is "is THIS USER matchable", which is a fact about their row, not about
+   * whether the AI happens to be up this second.
+   */
+  async getReadiness(userId: string): Promise<MatchReadinessDto> {
+    const [row] = await this.prisma.$queryRawUnsafe<
+      {
+        embeddingStatus: string;
+        embeddedAt: Date | null;
+        embeddingError: string | null;
+        hasEmbedding: boolean;
+      }[]
+    >(
+      `SELECT "embeddingStatus", "embeddedAt", "embeddingError",
+              (embedding IS NOT NULL) AS "hasEmbedding"
+         FROM profiles
+        WHERE "userId" = $1 AND "deletedAt" IS NULL`,
+      userId,
+    );
+
+    if (!row) {
+      return new MatchReadinessDto({
+        state: 'NO_PROFILE',
+        message:
+          'Add your profile and we can start matching you to jobs. It takes a minute.',
+        transient: false,
+        action: 'CREATE_PROFILE',
+      });
+    }
+
+    // A usable vector is the real test. Status is how we got here; the vector is whether
+    // matching can run at all — and a stale-but-present vector still matches.
+    if (row.hasEmbedding) {
+      return new MatchReadinessDto({
+        state: 'READY',
+        message: 'Your profile is ready for matching.',
+        transient: false,
+        embeddedAt: row.embeddedAt?.toISOString(),
+      });
+    }
+
+    if (row.embeddingStatus === 'FAILED') {
+      // Ours to fix, and it will NOT fix itself — the embed is a one-shot event listener
+      // with no retry. Say something true without blaming the user or promising a retry
+      // that does not exist.
+      return new MatchReadinessDto({
+        state: 'EMBEDDING_FAILED',
+        message:
+          'We could not finish setting up your matches. Updating your profile will ' +
+          'make us try again.',
+        transient: false,
+        action: 'UPDATE_PROFILE',
+        detail: row.embeddingError ?? undefined,
+      });
+    }
+
+    return new MatchReadinessDto({
+      state: 'EMBEDDING_PENDING',
+      message: "We're still setting up your matches — this usually takes a minute.",
+      transient: true,
+    });
   }
 
   /**

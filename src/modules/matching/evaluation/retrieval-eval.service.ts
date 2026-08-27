@@ -5,7 +5,7 @@
 // against hand-labeled pairs, aggregated overall and sliced by category / seniority /
 // language, with the labeled-candidate count (`n`) per slice.
 
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { MatchLabelValue } from '@prisma/client';
 import { RecomputeUserMatchesUseCase } from '../application/use-cases/recompute-user-matches.use-case';
 import { ndcgAtK, recallAtK, reciprocalRankAtK } from './metrics';
@@ -28,10 +28,31 @@ export interface SliceMetrics {
 
 export interface EvalReport {
   generatedAt: string;
-  retriever: string; // "hybrid" | "hybrid+rerank"
+  /** e.g. "hybrid", "hybrid+rerank", or "hybrid+rerank(DEGRADED)" — see {@link degraded}. */
+  retriever: string;
   k: number;
   candidates: number;
   labels: number;
+  /**
+   * Set when a rerank was requested but did not run for at least one candidate, because
+   * the AI service was unavailable.
+   *
+   * WHY THIS IS IN THE REPORT. `rerankFused` degrades to the fused order on purpose — a
+   * rerank failure must never cost a user their recommendations. But this harness used to
+   * label its output from the option it PASSED, so a run against a dead AI service
+   * reported the plain fused baseline under the name "hybrid+rerank". The measured
+   * "MRR@10 0.63 -> 0.75 (+20%)" is the headline result of this project; a harness that
+   * can silently reproduce it as 0.63 -> 0.63, or worse record a baseline as a treatment,
+   * is worse than no harness. `generation-eval.service.ts` already excluded degraded rows
+   * from its metrics; this is the same rule applied here.
+   */
+  degraded?: {
+    rerankRequested: boolean;
+    /** Candidates whose retrieval silently fell back to the fused order. */
+    rerankSkippedFor: number;
+    /** Distinct reasons, e.g. ["NETWORK"], ["MODEL_TIMEOUT"]. */
+    reasons: string[];
+  };
   overall: SliceMetrics;
   byCategory: Record<string, SliceMetrics>;
   bySeniority: Record<string, SliceMetrics>;
@@ -46,6 +67,8 @@ const GRADE: Record<MatchLabelValue, number> = {
 
 @Injectable()
 export class RetrievalEvalService {
+  private readonly logger = new Logger(RetrievalEvalService.name);
+
   constructor(private readonly recompute: RecomputeUserMatchesUseCase) {}
 
   async evaluate(
@@ -67,21 +90,55 @@ export class RetrievalEvalService {
     // "hybrid baseline" run silently inherit whatever the deployment happens to have
     // enabled. A measurement must state what it measured.
     const retrieved = new Map<string, string[]>();
+    // A rerank that was asked for and did not happen makes this run something other than
+    // what it will be labelled. Count it per candidate rather than as a boolean: "3 of 40
+    // degraded" and "40 of 40 degraded" are very different reports.
+    const rerankSkipped = new Set<string>();
+    const skipReasons = new Set<string>();
+
     for (const userId of byUser.keys()) {
       const rows = await this.recompute.retrieveRankedJobs(userId, k, {
         rerank: opts.rerank === true,
         filter: opts.filter === true,
+        onRerankSkipped: (reason) => {
+          rerankSkipped.add(userId);
+          skipReasons.add(reason);
+        },
       });
       retrieved.set(userId, rows.map((r) => r.id));
+    }
+
+    if (rerankSkipped.size > 0) {
+      this.logger.error(
+        `Rerank was requested but did not run for ${rerankSkipped.size}/${byUser.size} ` +
+          `candidate(s) [${[...skipReasons].join(', ')}]. These numbers are NOT a ` +
+          'reranked measurement — the AI service was unavailable.',
+      );
     }
 
     const overall =
       this.bucket(byUser, retrieved, k, () => 'all')['all'] ?? emptyMetrics();
 
+    const degraded =
+      rerankSkipped.size > 0
+        ? {
+            rerankRequested: opts.rerank === true,
+            rerankSkippedFor: rerankSkipped.size,
+            reasons: [...skipReasons],
+          }
+        : undefined;
+
     return {
       generatedAt: new Date().toISOString(),
+      // The name carries the caveat. A file called "hybrid+rerank" that is silently the
+      // fused baseline is the failure mode; "(DEGRADED)" makes it impossible to quote by
+      // accident.
       retriever:
-        'hybrid' + (opts.filter ? '+filter' : '') + (opts.rerank ? '+rerank' : ''),
+        'hybrid' +
+        (opts.filter ? '+filter' : '') +
+        (opts.rerank ? '+rerank' : '') +
+        (degraded ? '(DEGRADED)' : ''),
+      ...(degraded ? { degraded } : {}),
       k,
       candidates: overall.n,
       labels: labels.length,
@@ -155,6 +212,16 @@ export function formatReportMarkdown(r: EvalReport): string {
     '',
     `- Generated: ${r.generatedAt}`,
     `- Retriever: **${r.retriever}**`,
+    ...(r.degraded
+      ? [
+          '',
+          `> ⚠️ **NOT A RERANKED MEASUREMENT.** The reranker was requested but did not run for ` +
+            `${r.degraded.rerankSkippedFor} candidate(s) — the AI service was unavailable ` +
+            `(${r.degraded.reasons.join(', ')}). Retrieval fell back to the fused order, so these ` +
+            `numbers are the hybrid baseline wearing the reranker's name. Do not quote them.`,
+          '',
+        ]
+      : []),
     `- Candidates evaluated: **${r.candidates}**   ·   Labels: ${r.labels}   ·   k = ${r.k}`,
     '',
     '## Overall',

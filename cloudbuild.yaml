@@ -15,6 +15,18 @@ substitutions:
   # Browser origins allowed to call the API with credentials. Exact matches only —
   # a wildcard is invalid once cookies are in play. Deployed frontend + local dev.
   _CORS_ORIGIN: 'https://jobfit-frontend-six.vercel.app,http://localhost:3000'
+  # Versioned base URL of jobfits-ai-service — MUST include the /api/v1 suffix.
+  #
+  # DELIBERATELY EMPTY until the AI service is actually deployed. Leaving it blank makes
+  # the backend fall back to ai.config.ts's localhost default, where nothing is listening
+  # on Cloud Run: every AI call then fails NETWORK, every path degrades (template cover
+  # letters, heuristic scores, unmatched profiles) and /health/ready reports
+  # `ai.degraded: true` with the reason. That is the honest behaviour for "not deployed
+  # yet" — and pointing this at a URL that does not exist would produce the same outage
+  # while looking configured.
+  #
+  # Set it when the AI service has a host. See docs/AI_DEGRADATION_PLAN.md §6, item 5.
+  _AI_SERVICE_URL: ''
 
 options:
   logging: CLOUD_LOGGING_ONLY
@@ -90,9 +102,13 @@ steps:
       # registrations it can never complete. A *wrong* EMAIL_PASS still boots (the SMTP
       # handshake is async); that surfaces as mail.degraded on /health/ready.
       # SMTP_FROM must match the authenticated Gmail account, otherwise Gmail rewrites it.
-      - '--set-env-vars=^|^NODE_ENV=production|LOG_FORMAT=json|LOG_LEVEL=info|METRICS_ENABLED=true|TRACE_ENABLED=false|SERVICE_NAME=${_SERVICE}|SERVICE_VERSION=$BUILD_ID|GCP_PROJECT_ID=$PROJECT_ID|CORS_ORIGIN=${_CORS_ORIGIN}|EMAIL_HOST=smtp.gmail.com|EMAIL_PORT=587|EMAIL_USER=soviseth869@gmail.com|SMTP_FROM=JobFit Support <soviseth869@gmail.com>'
+      - '--set-env-vars=^|^NODE_ENV=production|LOG_FORMAT=json|LOG_LEVEL=info|METRICS_ENABLED=true|TRACE_ENABLED=false|SERVICE_NAME=${_SERVICE}|SERVICE_VERSION=$BUILD_ID|GCP_PROJECT_ID=$PROJECT_ID|CORS_ORIGIN=${_CORS_ORIGIN}|EMAIL_HOST=smtp.gmail.com|EMAIL_PORT=587|EMAIL_USER=soviseth869@gmail.com|SMTP_FROM=JobFit Support <soviseth869@gmail.com>|AI_SERVICE_URL=${_AI_SERVICE_URL}'
+      # AI_SERVICE_KEY is the shared secret for jobfits-ai-service (sent as
+      # X-AI-Service-Key). It pairs with _AI_SERVICE_URL above: the URL is public config,
+      # the key is not. Both are needed — a URL without a key gets 401 on every call
+      # except /health and /ready.
       # REDIS_URL still omitted — the secret exists but its value is unverified, and a bad
       # host is worse than none (Redis is optional/fail-open). SLACK_WEBHOOK_URL wired
       # (Phase 4 alerts). HEALTHCHECKS_PING_URL wired (dead-man's-switch heartbeat).
       # SUPABASE_* required at boot. EMAIL_PASS is the Gmail app password.
-      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,METRICS_TOKEN=METRICS_TOKEN:latest,SLACK_WEBHOOK_URL=SLACK_WEBHOOK_URL:latest,HEALTHCHECKS_PING_URL=HEALTHCHECKS_PING_URL:latest,SUPABASE_URL=SUPABASE_URL:latest,SUPABASE_SERVICE_ROLE_KEY=SUPABASE_SERVICE_ROLE_KEY:latest,SUPABASE_ANON_KEY=SUPABASE_ANON_KEY:latest,SUPABASE_JWT_SECRET=SUPABASE_JWT_SECRET:latest,EMAIL_PASS=EMAIL_PASS:latest'
+      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,METRICS_TOKEN=METRICS_TOKEN:latest,SLACK_WEBHOOK_URL=SLACK_WEBHOOK_URL:latest,HEALTHCHECKS_PING_URL=HEALTHCHECKS_PING_URL:latest,SUPABASE_URL=SUPABASE_URL:latest,SUPABASE_SERVICE_ROLE_KEY=SUPABASE_SERVICE_ROLE_KEY:latest,SUPABASE_ANON_KEY=SUPABASE_ANON_KEY:latest,SUPABASE_JWT_SECRET=SUPABASE_JWT_SECRET:latest,EMAIL_PASS=EMAIL_PASS:latest,AI_SERVICE_KEY=AI_SERVICE_KEY:latest'

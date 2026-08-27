@@ -7,6 +7,7 @@ import { MetricsService } from '@modules/metrics/metrics.service';
 import { AiErrorCode, AiServiceError } from './ai.errors';
 import {
   AiHealth,
+  AiReady,
   CoverLetterRequest,
   CoverLetterResponse,
   EmbedResponse,
@@ -63,6 +64,64 @@ export class AiClient {
   /** Liveness + loaded models. No auth required by the service. */
   health(): Promise<AiHealth> {
     return this.send<AiHealth>('GET', '/health', undefined, this.config.timeoutMsEmbed);
+  }
+
+  /**
+   * Readiness: can the service actually do work?
+   *
+   * NOT the same question as {@link health}, which returns 200 with Ollama completely
+   * offline — it answers for the FastAPI process, not the models. Use this one to decide
+   * whether AI features will function; use health() only to decide whether the process
+   * is alive.
+   *
+   * A 503 here is a real answer, not a failure: {@link AiReady} carries the reason. It
+   * still arrives as an AiServiceError (the send() contract), so callers that want the
+   * body must catch it — AiAvailabilityService does exactly that.
+   */
+  async ready(): Promise<AiReady> {
+    // Deliberately NOT send(): that throws on any non-2xx and retries 5xx, and neither
+    // is right here. A 503 from /ready is the ANSWER — it carries the reason and the
+    // missing models — not a failure to be retried. A probe should also cost exactly one
+    // round trip, never two.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.config.timeoutMsEmbed);
+    try {
+      const res = await fetch(`${this.baseUrl}/ready`, {
+        method: 'GET',
+        headers: { 'X-AI-Service-Key': this.config.serviceKey },
+        signal: controller.signal,
+      });
+      // 200 and 503 both carry an AiReady body. Anything else is a genuine surprise.
+      if (res.status === 200 || res.status === 503) {
+        return (await res.json()) as AiReady;
+      }
+      if (res.status === 404) {
+        // An older AI service that predates /ready. Not an outage — but not a
+        // confirmation either, so say so rather than guessing "ready".
+        return {
+          status: 'not_ready',
+          reason: 'READY_ENDPOINT_MISSING',
+          detail:
+            'AI service has no /ready endpoint (older build). Cannot confirm model availability.',
+        };
+      }
+      return {
+        status: 'not_ready',
+        reason: 'UNEXPECTED_STATUS',
+        detail: `/ready returned HTTP ${res.status}`,
+      };
+    } catch (err) {
+      const aborted = controller.signal.aborted;
+      return {
+        status: 'not_ready',
+        reason: aborted ? 'TIMEOUT' : 'NETWORK',
+        detail: aborted
+          ? `/ready timed out after ${this.config.timeoutMsEmbed}ms`
+          : `Cannot reach the AI service: ${(err as Error).message}`,
+      };
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   parseResume(text: string, fileType: FileType): Promise<ParseResumeResponse> {
@@ -129,12 +188,17 @@ export class AiClient {
   }
 
   /** Rerank a shortlist of documents by fit to the query (LLM-based). */
+  /**
+   * Rerank a shortlist. Uses its OWN short timeout — see ai.config.ts for why this must
+   * not ride on `timeoutMsGenerate`: this call is on the /recommendations request path,
+   * and a failure degrades to the fused order rather than losing the page.
+   */
   rerank(query: string, documents: RerankDocument[]): Promise<RerankResponse> {
     return this.send<RerankResponse>(
       'POST',
       '/rerank',
       { query, documents },
-      this.config.timeoutMsGenerate,
+      this.config.timeoutMsRerank,
     );
   }
 
@@ -202,6 +266,7 @@ export class AiClient {
             this.logRetry(method, path, attempt, lastError);
             continue;
           }
+          this.notify('error', lastError.code, lastError.message);
           throw lastError;
         }
 
@@ -210,6 +275,7 @@ export class AiClient {
             `${method} ${path} -> ${res.status} (${Date.now() - startedAt}ms)`,
           );
           this.record(path, 'success', startedAt);
+          this.notify('success');
           return (await res.json()) as TRes;
         }
 
@@ -221,6 +287,7 @@ export class AiClient {
           this.logRetry(method, path, attempt, err);
           continue;
         }
+        this.notify('error', err.code, err.message);
         throw err;
       } finally {
         clearTimeout(timer);
@@ -251,6 +318,32 @@ export class AiClient {
       );
     } catch {
       // Intentionally swallowed — see above.
+    }
+  }
+
+  /**
+   * Tell AiAvailabilityService what a real call just proved.
+   *
+   * Registered by that service rather than injected, because it depends on THIS client —
+   * injecting it here would be a cycle. A callback keeps the dependency one-directional
+   * and keeps this class usable with no availability tracking at all (every existing
+   * unit test constructs an AiClient with a config alone).
+   */
+  onOutcome(listener: (outcome: 'success' | 'error', code: string, detail: string) => void): void {
+    this.outcomeListener = listener;
+  }
+
+  private outcomeListener?: (
+    outcome: 'success' | 'error',
+    code: string,
+    detail: string,
+  ) => void;
+
+  private notify(outcome: 'success' | 'error', code = '', detail = ''): void {
+    try {
+      this.outcomeListener?.(outcome, code, detail);
+    } catch {
+      // Observability must never change behaviour.
     }
   }
 

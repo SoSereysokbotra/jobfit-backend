@@ -14,6 +14,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import { AiClient } from '@infra/ai/ai.client';
 import { AiServiceError } from '@infra/ai/ai.errors';
+import { logAiFallback } from '@infra/ai/ai-degradation.logger';
 
 /** Descriptions are truncated before extraction — the tail of a posting is boilerplate. */
 const MAX_DESCRIPTION_CHARS = 4000;
@@ -85,8 +86,11 @@ export class JobRequirementsExtractionService {
       // extracted requirements, and skill-gap reports JOB_HAS_NO_REQUIREMENTS — which is
       // honest, where writing a partial list would not be.
       if (err instanceof AiServiceError) {
-        this.logger.warn(
-          `Requirement extraction unavailable for job ${job.id} (${err.code})`,
+        logAiFallback(
+          this.logger,
+          err,
+          `Requirement extraction for job ${job.id}`,
+          'the job keeps no extracted requirements',
         );
         return { ...empty, skipped: 'AI_UNAVAILABLE' };
       }

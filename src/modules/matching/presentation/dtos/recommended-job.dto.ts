@@ -63,4 +63,21 @@ export class RecommendedJobDto {
   reason?: string;
   @ApiPropertyOptional({ description: 'Sub-scores: skills/experience/location/salary/other.' })
   breakdown?: Record<string, number>;
+
+  @ApiProperty({
+    description:
+      'When this score was computed — NOT when the row was last written. It answers ' +
+      '"which CV and profile is this number actually about?", so a client can say ' +
+      '"matched against your CV from 3 August" instead of implying the number is live.',
+  })
+  computedAt: string;
+
+  @ApiProperty({
+    description:
+      'True when an input to this score has changed (profile, preferences, résumé, ' +
+      'default-résumé switch) and a recompute has not yet succeeded. The score is real ' +
+      'but out of date. Clients MUST say so: serving stale matches is correct, ' +
+      'presenting them as fresh is not.',
+  })
+  stale: boolean;
 }
