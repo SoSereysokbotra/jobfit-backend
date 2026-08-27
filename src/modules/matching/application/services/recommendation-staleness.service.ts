@@ -57,4 +57,21 @@ export class RecommendationStalenessService {
     });
     return resume ? this.markStale(resume.userId) : 0;
   }
+
+  /** Mark every live cached result for an updated job stale. */
+  async markStaleForJob(jobId: string): Promise<number> {
+    const { count } = await this.prisma.recommendation.updateMany({
+      where: { jobId, dismissedAt: null, staleAt: null },
+      data: { staleAt: new Date() },
+    });
+    return count;
+  }
+
+  /** A closed posting must not remain in anyone's recommendation cache. */
+  async removeForClosedJob(jobId: string): Promise<number> {
+    const { count } = await this.prisma.recommendation.deleteMany({
+      where: { jobId },
+    });
+    return count;
+  }
 }

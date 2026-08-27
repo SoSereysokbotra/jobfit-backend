@@ -21,6 +21,23 @@ export interface SearchabilityCheck {
   hint?: string;
 }
 
+/**
+ * Pay as the POSTING advertises it.
+ *
+ * DISPLAYED, NEVER SCORED. `Profile.minSalary` is a bare integer with no period column,
+ * so comparing "$700/month" against it would require inventing the candidate's unit —
+ * the exact ambiguity this project's schema note calls out (a Cambodian monthly figure
+ * and a US annual one indistinguishable in one column, ~83% of the corpus Cambodian).
+ * Showing the advert's own words costs nothing and claims nothing.
+ */
+export interface PostedSalary {
+  min: number | null;
+  max: number | null;
+  currency: string | null;
+  /** "MONTH" | "YEAR" | "HOUR" … Null when the posting doesn't say — never defaulted. */
+  period: string | null;
+}
+
 /** The job as the extension saw it. Identifiers only — the description is not stored. */
 export interface ReportJob {
   externalId: string;
@@ -28,6 +45,8 @@ export interface ReportJob {
   title: string;
   company: string | null;
   location: string | null;
+  /** What the posting advertises, when it publishes it as structured data. */
+  salary: PostedSalary | null;
 }
 
 /** Overall fit, from the same external scorer the extension badge shows. */
@@ -73,6 +92,15 @@ export interface ReportExperience {
   candidateYears: number | null;
   /** Null when either side is unknown — "we can't tell" is not "you don't meet it". */
   met: boolean | null;
+  /**
+   * Where the bar came from, or null when none was found.
+   *
+   * `posting-data` — the site published it as a NUMBER (schema.org
+   *   `monthsOfExperience`). Language-proof and exact.
+   * `posting-text` — read out of the description's prose, which is guarded against
+   *   age ranges and negations but is still a reading, not a fact.
+   */
+  statedIn: 'posting-data' | 'posting-text' | null;
 }
 
 /** ATS readability of the résumé itself — independent of this particular job. */
@@ -97,6 +125,15 @@ export interface ReportSkill {
   matchedSkills?: string[];
   /** EXACT = the résumé says it verbatim; PARTIAL = only part of the phrase. */
   matchQuality?: 'EXACT' | 'PARTIAL';
+  /**
+   * The posting HEDGED this one — "an advantage", "a plus", "preferred".
+   *
+   * Shown, but excluded from the matched/missing counts. Measured 2026-08-25 on a live
+   * DHL advert: "Experience in logistics or transport is an advantage" was counted among
+   * the things the candidate was missing, which overstates what the employer asked for
+   * and inflates the number the reader is meant to act on.
+   */
+  optional?: boolean;
 }
 
 /**
@@ -144,8 +181,31 @@ export interface ReportResume {
   summaryPresent: boolean;
 }
 
+/**
+ * A requirement a candidate either has or hasn't: a qualification or a language.
+ *
+ * WARN, NEVER PENALISE. These do not move the match score (product decision,
+ * 2026-08-25): employers hire under their stated bar routinely, so capping the number
+ * would be wrong more often than the bar is — and a score that silently absorbs a
+ * penalty stops being interpretable. The page shows the flag and the posting's own
+ * sentence, and lets the reader decide.
+ */
+export interface HardRequirement {
+  kind: 'DEGREE' | 'LANGUAGE';
+  label: string;
+  /** Null = we could not check (no parsed CV). NEVER render null as "you lack this". */
+  met: boolean | null;
+  /** The posting's own words, so our reading of them can be overruled. */
+  quote: string;
+}
+
 export interface MatchReportPayload {
   job: ReportJob;
+  /**
+   * Degree and language requirements read out of the posting. Empty when it states
+   * none — which is most postings, and renders as nothing at all.
+   */
+  hardRequirements: HardRequirement[];
   /** Null when the user has no profile to match against. */
   matchRate: ReportMatchRate | null;
   /** Null when there is no parsed résumé to score. */

@@ -6,6 +6,7 @@
 // PUBLISHED, employer-less job. Returns a run summary.
 
 import { Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import { TheMuseSource } from './sources/themuse.source';
 import { BongThomSource } from './sources/bongthom.source';
@@ -17,6 +18,8 @@ import {
   JobSource,
   NormalizedJob,
 } from './ingestion.types';
+import { JobPublishedEvent } from '@modules/job/domain/events/job-published.event';
+import { JobUpdatedEvent } from '@modules/job/domain/events/job-updated.event';
 
 /** Default ceiling for a run when the caller does not say. */
 const DEFAULT_LIMIT = 50;
@@ -33,6 +36,7 @@ export class IngestionService {
     theMuse: TheMuseSource,
     bongThom: BongThomSource,
     jobNet: JobNetSource,
+    private readonly events?: EventEmitter2,
   ) {
     this.sources = {
       THEMUSE: theMuse,
@@ -180,9 +184,20 @@ export class IngestionService {
           ...stated,
         },
       });
+      await this.events?.emitAsync(
+        'JobUpdatedEvent',
+        new JobUpdatedEvent(existing.id, [
+          'title',
+          'description',
+          'location',
+          'remoteType',
+          'externalUrl',
+          'companyId',
+        ]),
+      );
       result.updated += 1;
     } else {
-      await this.prisma.job.create({
+      const created = await this.prisma.job.create({
         data: {
           title: job.title,
           description: job.description,
@@ -200,6 +215,10 @@ export class IngestionService {
           ...stated,
         },
       });
+      await this.events?.emitAsync(
+        'JobPublishedEvent',
+        new JobPublishedEvent(created.id),
+      );
       result.created += 1;
     }
   }

@@ -2030,5 +2030,112 @@ expects to be wrong are right, deliberately, with evidence:
 - **The eval harness caught an untrustworthy model before it shipped.** That is the strongest
   thing in the portfolio and should be the first thing you talk about.
 
+---
+
+## Addendum — follow-up mentor review 2026-08-25
+
+These are cross-lifecycle assumptions found by tracing CV selection, ingestion and derived
+matching state through the current backend.
+
+## A1. 🔴 Ingested and edited jobs can keep a stale (or missing) embedding
+
+**Problem.** `JobPublishedListener` is the only job-side matching listener. `IngestionService`
+writes directly with Prisma, so new imported jobs emit no event and get no embedding; it also
+updates title/description without re-embedding. Employer edits emit `JobUpdatedEvent`, and
+closing emits `JobClosedEvent`, but neither has a listener.
+
+**Why it matters.** Retrieval requires `j.embedding IS NOT NULL`, so newly ingested jobs are
+absent from dense matching and scout until a manual backfill. Edits can rank by an old vector,
+and a closed job can remain in cached recommendations.
+
+**Possible solution.** Route every job-content write through an outbox that queues idempotent
+`embed-job(jobId, contentHash)` work after commit. On success invalidate/fan out affected
+recommendations; on close/delete remove or tombstone rows and exclude non-PUBLISHED jobs from
+recommendation reads. Add reconciliation and a missing-embedding metric.
+
+**Question a mentor could ask.** “A board import creates 100 jobs. What makes each one
+searchable and recommended, and what happens if its description changes or it is closed?”
+
+## A2. 🟠 Deleting the active/default CV does not invalidate matching
+
+**Problem.** `ActiveResumeService` falls back correctly after a default CV is soft-deleted,
+but `ResumeService.deleteResume` only deletes storage and soft-deletes the row. It publishes
+no selection-change event, so no profile re-embed or recommendation invalidation occurs.
+
+**Why it matters.** Active-CV reads can use the fallback CV while the profile vector and
+recommendations still represent the deleted one. Which CV is used then depends on endpoint.
+
+**Possible solution.** Detect whether deletion changes the active selection and publish the
+same selection-change event as `setDefaultResume`; re-embed the successor and invalidate only
+after success. Test default A + readable B → delete A → matching uses B.
+
+**Question a mentor could ask.** “After deleting the default engineering CV, which CV does
+each AI feature use, and how do you prove the vector cache changed too?”
+
+## A3. 🟠 “Delete my CV” conflicts with the employer’s application record
+
+**Problem.** An application stores `resumeId`, but deleting that CV removes its storage object.
+Employer list/download intentionally turns it into no résumé / 404, while screening counts stay.
+
+**Why it matters.** Candidate deletion rights and an employer’s need to review submitted
+evidence are competing product/retention requirements. A decision can become unreviewable;
+indefinite retention can violate what “delete” implies.
+
+**Possible solution.** Set and disclose a policy: block deletion while active, retain an
+immutable submitted snapshot for a stated period, or allow deletion but withdraw/hide the
+application. Record consent, retention deadline and purge behaviour.
+
+**Question a mentor could ask.** “If a candidate deletes yesterday’s submitted CV, can the
+employer still review it? Why is that fair, and when is the file really purged?”
+
+## A4. 🟠 Screening is a partial snapshot, not a reproducible assessment
+
+**Problem.** Screening stores counts, missing strings and source, but not the full requirement
+set, matched evidence, CV parse/prompt version, model version or scoring-rule version. A later
+job/CV edit means “6 of 7” cannot be reconstructed. `screenMatchScore` is also profile/active-CV
+based, not submitted-CV based.
+
+**Why it matters.** The design says the assessment records application-time truth, but cannot
+fully prove it if an employer or candidate disputes it or the algorithm changes.
+
+**Possible solution.** Persist a versioned assessment payload: ordered requirements and
+provenance, matched evidence, submitted-CV hash/parse version, model and algorithm versions.
+Remove the profile-level score from ranking until it is per-CV, or label it explicitly.
+
+**Question a mentor could ask.** “Six months later, after requirements and the parser changed,
+can you reproduce why this candidate was 6/7 on application day?”
+
+## A5. 🟡 Upload, storage and the parse queue are not one reliable transaction
+
+**Problem.** Upload writes Storage, then Postgres, then BullMQ. A DB failure leaves an orphaned
+file; a queue failure leaves a PENDING row/file and a retry can make a second upload. Parse and
+embedding failures are recorded or swallowed without automatic retry/reconciliation.
+
+**Why it matters.** Storage, Postgres, Redis and AI cannot commit atomically. Without recovery
+state/metrics, CVs can stay unusable for matching and storage debt is invisible.
+
+**Possible solution.** Commit metadata plus an outbox work record atomically, dispatch/retry
+from a worker using a stable upload idempotency key, and add dead-letter visibility plus repair
+jobs for stale PENDING/FAILED rows and orphaned files.
+
+**Question a mentor could ask.** “What happens between uploading a file and placing its parse
+job on Redis if one dependency fails? How do you prevent duplicates and repair stuck CVs?”
+
+## A6. 🟡 Lazy recompute can stampede and put AI latency on an ordinary read
+
+**Problem.** Every stale `GET /recommendations` recomputes inline. The default enables the LLM
+reranker, but there is no per-user lock/in-flight marker/background job, so concurrent tabs can
+perform the same retrieval and rerank before one clears the stale flag.
+
+**Why it matters.** A cache read becomes expensive and latency-sensitive. Rate limits do not
+deduplicate concurrent requests or protect recovery after an AI outage.
+
+**Possible solution.** Atomically claim recomputation with a timeout or Redis lock, return
+last-known rows while one worker refreshes, and queue this in production. Measure stale age,
+contention, latency and reranker cost.
+
+**Question a mentor could ask.** “A user opens three tabs after changing a CV. How many
+reranker calls happen, what do they wait for, and how do you prevent a thundering herd?”
+
 The findings above are what is left after all of that — and most of them are freshness,
 authorization, and documents that fell behind the code, not reasoning errors.

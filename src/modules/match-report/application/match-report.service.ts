@@ -28,6 +28,7 @@ import {
 import {
   matchRequirements,
   resumeEvidence,
+  themeWordsOf,
 } from '@modules/matching/application/services/skill-gap.service';
 import { ResumeRepository } from '@modules/resume/infrastructure/repositories/resume.repository';
 import { ParsedResumeDataRepository } from '@modules/resume/infrastructure/repositories/parsed-resume-data.repository';
@@ -37,7 +38,9 @@ import {
 } from '@modules/resume/application/services/resume-scorer.service';
 import { Resume } from '@modules/resume/domain/entities/resume.entity';
 import {
+  HardRequirement,
   MatchReportPayload,
+  PostedSalary,
   ReportMatchRate,
   ReportSearchability,
   ReportSkill,
@@ -46,6 +49,11 @@ import {
 } from '../domain/match-report-payload';
 import { mentionCount, requirementCount, scanSoftSkills } from '../domain/keyword-scan';
 import { isKhmerScript } from '../domain/script-detection';
+import {
+  checkHardRequirements,
+  findHardRequirements,
+  HEDGED,
+} from '../domain/hard-requirements';
 import {
   DatedExperience,
   parseYearsRequired,
@@ -62,10 +70,47 @@ export interface GenerateMatchReportInput {
   location: string | null;
   /** The visible posting text, used once for extraction and never stored as a listing. */
   jobDescription: string;
+  /**
+   * Months of experience the POSTING itself publishes as a number, or null when it
+   * publishes none. Preferred over reading the description — see withExperienceRequirement.
+   */
+  requiredMonths?: number | null;
+  /** Pay as advertised, with its period. Stored for display; never scored. */
+  postedSalary?: PostedSalary | null;
 }
 
 /** Share of a job title's words that must appear in the résumé to count as present. */
 const TITLE_PRESENT_SHARE = 0.6;
+
+/**
+ * Which version of THIS BUILDER produces `payload`. Bump it whenever the payload's shape
+ * or meaning changes.
+ *
+ * WHY IT EXISTS. The reuse check keys on the posting text and the résumé, which is right:
+ * an unchanged job judged against an unchanged CV should return the stored answer rather
+ * than pay for the AI calls again. But it made every IMPROVEMENT invisible. Measured
+ * 2026-08-25: two defects were fixed (a degree requirement counted twice, and a
+ * "nice to have" counted among the candidate's gaps), the user re-scanned the same
+ * posting, and got byte-identical output — neither input had changed, so the cache served
+ * the pre-fix payload. The code that built it had changed, and nothing represented that.
+ *
+ * 1 — everything before this column existed.
+ * 2 — stated-requirements section; degree bars no longer duplicated into the skills
+ *     table; hedged requirements marked optional and excluded from the counts;
+ *     advertised salary carried on `job.salary`.
+ */
+const PAYLOAD_VERSION = 2;
+
+/** Parse a JSON-array column into a plain array; anything unreadable is empty. */
+function parsedArray(json: string | null | undefined): unknown[] {
+  if (!json) return [];
+  try {
+    const value: unknown = JSON.parse(json);
+    return Array.isArray(value) ? value : [];
+  } catch {
+    return [];
+  }
+}
 
 /**
  * The dedupe key for a posting's text.
@@ -116,6 +161,7 @@ export class MatchReportService {
       source: input.source,
       externalId: input.externalId,
       descriptionHash,
+      payloadVersion: PAYLOAD_VERSION,
       notBefore: await this.inputsChangedAt(userId, resume, parsed),
     });
     if (cachedId) {
@@ -138,6 +184,14 @@ export class MatchReportService {
       this.extractRequirements(input),
     ]);
 
+    // Read once: the skills table needs it too, to avoid listing a degree bar twice.
+    const hardRequirements = this.hardRequirements(
+      input,
+      requirements,
+      resumeSkills,
+      parsed,
+    );
+
     const payload: MatchReportPayload = {
       job: {
         externalId: input.externalId,
@@ -145,10 +199,18 @@ export class MatchReportService {
         title: input.title,
         company: input.company,
         location: input.location,
+        salary: input.postedSalary ?? null,
       },
       matchRate: this.withExperienceRequirement(match, input, requirements, parsed),
+      hardRequirements,
       searchability: scores ? this.searchability(scores, parsed, input.title) : null,
-      skills: this.skillsTable(input.jobDescription, requirements, resumeSkills, parsed),
+      skills: this.skillsTable(
+        input.jobDescription,
+        requirements,
+        resumeSkills,
+        parsed,
+        hardRequirements,
+      ),
       recruiterTips: scores
         ? { qualityScore: scores.qualityScore, suggestions: scores.suggestions }
         : null,
@@ -171,6 +233,7 @@ export class MatchReportService {
       company: input.company,
       payload,
       descriptionHash,
+      payloadVersion: PAYLOAD_VERSION,
     });
   }
 
@@ -277,10 +340,27 @@ export class MatchReportService {
     // experience" on one scan and dropped it on the next — the bar flickered between
     // REQUIREMENT and CV_DEPTH for an unchanged job. The description always holds it, and
     // the requirement-context check is what keeps a benefits-section number out.
-    const requiredYears = parseYearsRequired([
-      ...(requirements ?? []),
-      input.jobDescription,
-    ]);
+    // The site's OWN published number wins when it has one. This is the only route that
+    // is language-proof: reading "3 years" out of Khmer prose is genuinely hazardous —
+    // measured on a live Khmer24 advert, "អាយុ18 ដល់ 30ឆ្នាំ" (AGE 18 to 30 years) sits ~30
+    // characters from the Khmer word for experience, so text rules need age and negation
+    // guards to avoid reporting a 30-year bar on a job requiring none. A published 36
+    // needs no reading at all. Khmer24 publishes it; verified 36 / 48 / 24 / 12 on live ads.
+    const publishedYears =
+      typeof input.requiredMonths === 'number' && input.requiredMonths > 0
+        ? Math.round((input.requiredMonths / 12) * 10) / 10
+        : null;
+
+    // BOTH the extracted requirements and the raw description. Requirements-only was
+    // tried and is unreliable: extraction is an LLM capped at 12 items, so the same
+    // Chemical Engineer posting yielded "4+ years of professional chemical engineering
+    // experience" on one scan and dropped it on the next — the bar flickered between
+    // REQUIREMENT and CV_DEPTH for an unchanged job. The description always holds it, and
+    // the requirement-context check is what keeps a benefits-section number out.
+    const requiredYears =
+      publishedYears ??
+      parseYearsRequired([...(requirements ?? []), input.jobDescription]);
+    const statedIn = publishedYears !== null ? 'posting-data' : 'posting-text';
     const candidateYears = totalExperienceYears(datedExperiences(parsed));
 
     if (requiredYears === null || candidateYears === null) {
@@ -288,7 +368,15 @@ export class MatchReportService {
         overall: match.score,
         subScores: match.breakdown,
         semantic: match.semantic,
-        experience: { basis: 'CV_DEPTH', requiredYears, candidateYears, met: null },
+        experience: {
+          basis: 'CV_DEPTH',
+          requiredYears,
+          candidateYears,
+          met: null,
+          // Only meaningful when a bar was actually found; null keeps "we read it
+          // from the page's data" from being claimed about a bar that isn't there.
+          statedIn: requiredYears === null ? null : statedIn,
+        },
       };
     }
 
@@ -310,8 +398,42 @@ export class MatchReportService {
         requiredYears,
         candidateYears,
         met: candidateYears >= requiredYears,
+        statedIn,
       },
     };
+  }
+
+  /**
+   * Degree and language bars the posting states, checked against the CV.
+   *
+   * Read from the extracted requirements AND the raw description, for the same reason
+   * the years bar is: extraction is an LLM capped at 12 items and drops things between
+   * runs, while the description always holds what it holds.
+   *
+   * These never touch the score — see HardRequirement.
+   */
+  private hardRequirements(
+    input: GenerateMatchReportInput,
+    requirements: string[] | null,
+    resumeSkills: string[],
+    parsed: ParsedResumeData | null,
+  ): HardRequirement[] {
+    try {
+      const stated = findHardRequirements([
+        ...(requirements ?? []),
+        input.jobDescription,
+      ]);
+      if (stated.length === 0) return [];
+      return checkHardRequirements(stated, {
+        rawText: parsed?.rawText ?? null,
+        educations: parsedArray(parsed?.educations),
+        skills: resumeSkills,
+      });
+    } catch (error) {
+      // A flag section is a nice-to-have; it must never take the report down with it.
+      this.logger.warn(`Hard-requirement reading failed: ${String(error)}`);
+      return [];
+    }
   }
 
   /**
@@ -349,6 +471,7 @@ export class MatchReportService {
     requirements: string[] | null,
     resumeSkills: string[],
     parsed: ParsedResumeData | null,
+    hardRequirements: HardRequirement[] = [],
   ): ReportSkills {
     // Khmer first: this is a fact about the POSTING, so it holds whether or not the
     // extractor answered. Checking it second would let an AI outage mask a permanent
@@ -384,20 +507,40 @@ export class MatchReportService {
       };
     }
 
-    const hard: ReportSkill[] = matchRequirements(requirements, resumeSkills).map(
-      (m) => ({
+    // Words recurring across the posting's OWN requirements describe the job's subject,
+    // not any one requirement — see requirementCount for the "×11 on every row" failure
+    // this prevents. Computed once for the whole table.
+    const themeWords = themeWordsOf(requirements);
+
+    // A degree bar has its own section now, so listing it here too would show the same
+    // requirement twice AND count it among the "skills" the CV is missing — which a
+    // qualification is not. Measured on a live DHL advert, 2026-08-25.
+    const alreadyFlagged = (text: string): boolean =>
+      hardRequirements.some((flag) => {
+        const a = flag.quote.toLowerCase();
+        const b = text.toLowerCase();
+        return a.includes(b) || b.includes(a);
+      });
+
+    const hard: ReportSkill[] = matchRequirements(requirements, resumeSkills)
+      .filter((m) => !alreadyFlagged(m.text))
+      .map((m) => ({
         skill: m.text,
         inResume: m.matchedSkills.length > 0,
-        count: requirementCount(m.text, description),
+        count: requirementCount(m.text, description, themeWords),
+        // The posting called this one "an advantage" / "a plus". Shown, but kept out of
+        // the counts: it is not something the employer said the candidate must have.
+        ...(HEDGED.test(m.text) ? { optional: true } : {}),
         ...(m.matchedSkills.length > 0
           ? { matchedSkills: m.matchedSkills, matchQuality: m.matchQuality }
           : {}),
-      }),
-    );
+      }));
 
     const soft: ReportSkill[] = scanSoftSkills(description, this.resumeText(parsed, resumeSkills));
 
-    const rows = [...hard, ...soft];
+    // Counts describe what the reader must ACT on, so anything the posting hedged is
+    // excluded from both sides of the tally.
+    const rows = [...hard, ...soft].filter((row) => !row.optional);
     return {
       available: true,
       hard,

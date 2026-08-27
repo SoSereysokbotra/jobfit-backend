@@ -340,7 +340,7 @@ const THEME_WORD_SHARE = 0.4;
  * Rare words are untouched, which is why "Automotive" (1 of 10 requirements on an
  * automotive posting) still matches while "welding" no longer does.
  */
-function themeWordsOf(requirements: string[]): Set<string> {
+export function themeWordsOf(requirements: string[]): Set<string> {
   const documentFrequency = new Map<string, number>();
   for (const requirement of requirements) {
     for (const word of new Set(wordsOf(requirement))) {

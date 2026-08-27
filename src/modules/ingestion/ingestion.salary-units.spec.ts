@@ -127,4 +127,54 @@ describe('ingestion — salary units travel with the amount', () => {
     expect(data.salaryCurrency).toBe('KHR');
     expect(data.minSalary).toBe(1200000);
   });
+
+  it('emits matching lifecycle events for both created and refreshed postings', async () => {
+    const prisma = {
+      company: { upsert: jest.fn().mockResolvedValue({ id: 'co-1' }) },
+      job: {
+        findFirst: jest
+          .fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce({ id: 'job-existing' }),
+        create: jest.fn().mockResolvedValue({ id: 'job-created' }),
+        update: jest.fn(),
+      },
+    };
+    const source = {
+      fetchJobs: jest.fn().mockResolvedValue([
+        {
+          source: 'BONGTHOM' as JobSource,
+          externalId: 'bt-1',
+          title: 'Sales Officer',
+          companyName: 'Acme Cambodia',
+          description: 'Sell things.',
+          location: 'Phnom Penh',
+          remoteType: 'ON_SITE',
+          externalUrl: 'https://bongthom.com/jobs/bt-1',
+        },
+      ]),
+    };
+    const events = { emitAsync: jest.fn().mockResolvedValue(undefined) };
+    const service = new IngestionService(
+      prisma as never,
+      source as never,
+      source as never,
+      source as never,
+      events as never,
+    );
+
+    await service.ingest('BONGTHOM', 1);
+    await service.ingest('BONGTHOM', 1);
+
+    expect(events.emitAsync).toHaveBeenNthCalledWith(
+      1,
+      'JobPublishedEvent',
+      expect.objectContaining({ jobId: 'job-created' }),
+    );
+    expect(events.emitAsync).toHaveBeenNthCalledWith(
+      2,
+      'JobUpdatedEvent',
+      expect.objectContaining({ jobId: 'job-existing' }),
+    );
+  });
 });

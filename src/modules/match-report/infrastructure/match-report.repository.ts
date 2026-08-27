@@ -27,6 +27,7 @@ export class MatchReportRepository {
     company: string | null;
     payload: MatchReportPayload;
     descriptionHash: string;
+    payloadVersion: number;
   }): Promise<string> {
     const row = await this.prisma.matchReport.create({
       data: {
@@ -36,6 +37,7 @@ export class MatchReportRepository {
         title: input.title,
         company: input.company,
         descriptionHash: input.descriptionHash,
+        payloadVersion: input.payloadVersion,
         // Prisma types Json columns as its own value union; the payload is a plain
         // JSON-safe object, so the cast is at the boundary and nowhere else.
         payload: input.payload as unknown as Prisma.InputJsonValue,
@@ -65,6 +67,8 @@ export class MatchReportRepository {
     externalId: string;
     descriptionHash: string;
     notBefore: Date;
+    /** Only reuse a payload built by THIS version of the report builder. */
+    payloadVersion: number;
   }): Promise<string | null> {
     const row = await this.prisma.matchReport.findFirst({
       where: {
@@ -72,6 +76,9 @@ export class MatchReportRepository {
         source: input.source,
         externalId: input.externalId,
         descriptionHash: input.descriptionHash,
+        // An older payload is stale even when the posting and the résumé are unchanged:
+        // the code that built it has changed. See MatchReport.payloadVersion.
+        payloadVersion: input.payloadVersion,
         createdAt: { gte: input.notBefore },
       },
       orderBy: { createdAt: 'desc' },

@@ -92,13 +92,15 @@ describe('RecommendationsQueryService.getForUser — when it recomputes', () => 
     expect(result).toHaveLength(1);
   });
 
-  it('excludes dismissed rows from the read', async () => {
+  it('excludes dismissed and non-published jobs from the read', async () => {
     prisma.recommendation.findMany.mockResolvedValue([row()]);
 
     await service.getForUser('u1');
 
     expect(prisma.recommendation.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { userId: 'u1', dismissedAt: null } }),
+      expect.objectContaining({
+        where: { userId: 'u1', dismissedAt: null, job: { status: 'PUBLISHED' } },
+      }),
     );
   });
 

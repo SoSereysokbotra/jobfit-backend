@@ -44,6 +44,42 @@ describe('parseYearsRequired', () => {
     expect(parseYearsRequired(['Annual bonus subject to performance'])).toBeNull();
   });
 
+  // ── Khmer (added 2026-08-25, from live Khmer24 adverts) ──────────────────
+  it('reads a bar written with Khmer digits', () => {
+    // ៣ is U+17E3; Number('៣') is NaN, so this needs the digit normaliser.
+    expect(
+      parseYearsRequired(['បទពិសោធន៍ការងារយ៉ាងតិច ៣ឆ្នាំ ក្នុងការសរសេរកម្មវិធី']),
+    ).toBe(3);
+  });
+
+  it('reads a bar written with Latin digits and the Khmer word for "years"', () => {
+    // Live ads mix scripts: "30ឆ្នាំ" appears with ASCII digits.
+    expect(parseYearsRequired(['តម្រូវឲ្យមានបទពិសោធន៍ 5ឆ្នាំ ក្នុងផ្នែកគណនេយ្យ'])).toBe(5);
+  });
+
+  it('does NOT read an age range as an experience bar', () => {
+    // VERBATIM from a live Khmer24 dental-assistant advert. "age 18 to 30 years",
+    // followed by "does not require experience" — the word for experience sits ~30
+    // characters away, so without the age and negation guards this returned 30.
+    expect(
+      parseYearsRequired([
+        'លក្ខណ្ឌរួមមាន: - ភេទស្រី អាយុ18 ដល់ 30ឆ្នាំ - មិនទាមទារបទពិសោធន៍ - យកចិត្តនឹងការងារ',
+      ]),
+    ).toBeNull();
+  });
+
+  it('does not read an English age range as an experience bar either', () => {
+    expect(
+      parseYearsRequired(['Applicants aged 21 to 35 years with relevant experience']),
+    ).toBeNull();
+  });
+
+  it('ignores a bar that is explicitly withdrawn', () => {
+    expect(
+      parseYearsRequired(['No prior experience required, though 3 years is a plus… ']),
+    ).toBeNull();
+  });
+
   it('returns null when the posting states no bar', () => {
     expect(
       parseYearsRequired([

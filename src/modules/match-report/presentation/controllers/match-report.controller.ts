@@ -66,6 +66,15 @@ export class MatchReportController {
       company: dto.company ?? null,
       location: dto.location ?? null,
       jobDescription: dto.jobDescription,
+      requiredMonths: dto.requiredMonths ?? null,
+      postedSalary: dto.postedSalary
+        ? {
+            min: dto.postedSalary.min ?? null,
+            max: dto.postedSalary.max ?? null,
+            currency: dto.postedSalary.currency ?? null,
+            period: dto.postedSalary.period ?? null,
+          }
+        : null,
     });
     return { id };
   }

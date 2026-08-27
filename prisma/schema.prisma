@@ -1011,6 +1011,19 @@ model MatchReport {
   /// never reused.
   descriptionHash String?
 
+  /// Which VERSION of the report builder produced `payload`.
+  ///
+  /// The reuse check keys on the posting text and the résumé, so an unchanged job and an
+  /// unchanged CV correctly return the stored report. But that made every IMPROVEMENT to
+  /// the report invisible: after fixing a defect on 2026-08-25 (a degree counted twice, a
+  /// "nice to have" counted as missing), re-scanning the same posting kept serving the
+  /// old payload, because neither input had changed. The code that built it had.
+  ///
+  /// Bump `PAYLOAD_VERSION` in match-report.service.ts whenever the payload's SHAPE or
+  /// MEANING changes; older rows then miss the cache and are rebuilt on next scan.
+  /// Rows written before this column existed default to 1.
+  payloadVersion Int @default(1)
+
   createdAt DateTime @default(now())
 
   @@index([userId])

@@ -2,14 +2,17 @@ import { RecommendationStalenessService } from './recommendation-staleness.servi
 
 describe('RecommendationStalenessService', () => {
   let prisma: {
-    recommendation: { updateMany: jest.Mock };
+    recommendation: { updateMany: jest.Mock; deleteMany: jest.Mock };
     resume: { findUnique: jest.Mock };
   };
   let service: RecommendationStalenessService;
 
   beforeEach(() => {
     prisma = {
-      recommendation: { updateMany: jest.fn().mockResolvedValue({ count: 4 }) },
+      recommendation: {
+        updateMany: jest.fn().mockResolvedValue({ count: 4 }),
+        deleteMany: jest.fn().mockResolvedValue({ count: 2 }),
+      },
       resume: { findUnique: jest.fn().mockResolvedValue({ userId: 'u1' }) },
     };
     service = new RecommendationStalenessService(prisma as never);
@@ -61,5 +64,21 @@ describe('RecommendationStalenessService', () => {
 
     await expect(service.markStaleByResume('r-gone')).resolves.toBe(0);
     expect(prisma.recommendation.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('marks only live cached rows for an updated job stale', async () => {
+    await service.markStaleForJob('j1');
+
+    expect(prisma.recommendation.updateMany).toHaveBeenCalledWith({
+      where: { jobId: 'j1', dismissedAt: null, staleAt: null },
+      data: { staleAt: expect.any(Date) },
+    });
+  });
+
+  it('removes all cached rows when a job closes', async () => {
+    await expect(service.removeForClosedJob('j1')).resolves.toBe(2);
+    expect(prisma.recommendation.deleteMany).toHaveBeenCalledWith({
+      where: { jobId: 'j1' },
+    });
   });
 });

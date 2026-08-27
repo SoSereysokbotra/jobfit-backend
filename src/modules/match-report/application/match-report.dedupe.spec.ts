@@ -159,6 +159,20 @@ describe('MatchReportService.generate — dedupe', () => {
     );
   });
 
+  it('will not reuse a payload built by an older version of the builder', async () => {
+    // MEASURED 2026-08-25: two report defects were fixed, the user re-scanned the same
+    // posting, and got byte-identical output — the posting and the CV were unchanged, so
+    // the cache served the pre-fix payload. An improvement nobody can see is not shipped.
+    const { service, reports } = build();
+    await service.generate('u1', input());
+
+    const asked = reports.findReusable.mock.calls[0][0] as { payloadVersion: number };
+    expect(asked.payloadVersion).toEqual(expect.any(Number));
+    // Whatever it is, the row we WRITE must carry the same one, or nothing ever hits.
+    const written = reports.create.mock.calls[0][0] as { payloadVersion: number };
+    expect(written.payloadVersion).toBe(asked.payloadVersion);
+  });
+
   it('stores the hash it looked up, so the next visit can hit', async () => {
     const { service, reports } = build();
     await service.generate('u1', input());

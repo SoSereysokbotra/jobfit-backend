@@ -33,12 +33,61 @@ export interface DatedExperience {
  * company growth").
  */
 const REQUIREMENT_CONTEXT =
-  /experien|background|professional|hands[- ]on|working|minimum|at least|track record|proven|history|recent/i;
+  /experien|background|professional|hands[- ]on|working|minimum|at least|track record|proven|history|recent|បទពិសោធន៍|យ៉ាងតិច/i;
+
+/**
+ * An AGE range, which is the single most dangerous false positive in this file.
+ *
+ * MEASURED 2026-08-25 on a live Khmer24 dental-assistant advert:
+ *
+ *   អាយុ18 ដល់ 30ឆ្នាំ  -  មិនទាមទារបទពិសោធន៍
+ *   "AGE 18 to 30 years"     "does NOT require experience"
+ *
+ * The Khmer word for experience sits ~30 characters from "30 years" — well inside the
+ * context window — so a rule that only asked for "experience near a number" would report
+ * **"this role asks for 30+ years"** on an advert that explicitly asks for none.
+ * `អាយុ` is Khmer for "age"; the English forms are here for the same reason
+ * ("aged 21 to 35 years").
+ */
+const AGE_CONTEXT = /អាយុ|\bage[ds]?\b/i;
+
+/**
+ * A bar stated only in order to REMOVE it — "no experience required". `មិន` is "not"
+ * and `ទាមទារ` is "require"; live ads write them joined.
+ */
+const NEGATED_CONTEXT =
+  /មិន\s*ទាមទារ|\bno (prior |previous )?experience\b|\bnot required\b/i;
+
+/**
+ * How far BACKWARDS to look for an age marker. Tighter than the context window on
+ * purpose: the marker sits ~12 characters before the number in the advert above, while a
+ * genuine bar 80 characters earlier in an unrelated clause must not be vetoed by it.
+ */
+const AGE_LOOKBEHIND = 30;
+
+/**
+ * Khmer digits ០–៩ are U+17E0–U+17E9, contiguous — verified by codepoint, not assumed.
+ * Mapping them to ASCII one character for one keeps every string index stable, so the
+ * context windows below still line up with the original text.
+ */
+function normaliseDigits(text: string): string {
+  return text.replace(/[០-៩]/g, (d) =>
+    String((d.codePointAt(0) as number) - 0x17e0),
+  );
+}
 
 /** How far either side of the number to look for that context. */
 const CONTEXT_WINDOW = 80;
 
-const YEARS_RE = /(\d{1,2})\s*\+?\s*(?:years?|yrs?)\b/gi;
+/**
+ * `ឆ្នាំ` is Khmer for "year(s)". No trailing `\b` on that branch: `\b` is defined against
+ * `[A-Za-z0-9_]`, so it can never match after Khmer script and the alternative would
+ * simply never fire. The Latin branches keep theirs.
+ *
+ * Verified on live ads that Khmer postings write the NUMBER in either script — "30ឆ្នាំ"
+ * (Latin digits) and "៣ឆ្នាំ" (Khmer digits) both occur.
+ */
+const YEARS_RE = /(\d{1,2})\s*\+?\s*(?:years?\b|yrs?\b|ឆ្នាំ)/gi;
 
 /**
  * The highest years-of-experience bar the posting states, or null if it states none.
@@ -55,8 +104,9 @@ const YEARS_RE = /(\d{1,2})\s*\+?\s*(?:years?|yrs?)\b/gi;
 export function parseYearsRequired(texts: string[]): number | null {
   let highest: number | null = null;
 
-  for (const text of texts) {
-    if (!text) continue;
+  for (const original of texts) {
+    if (!original) continue;
+    const text = normaliseDigits(original);
     for (const match of text.matchAll(YEARS_RE)) {
       const years = Number(match[1]);
       // 40+ "years" is a date range or a typo, not a hiring bar.
@@ -68,6 +118,10 @@ export function parseYearsRequired(texts: string[]): number | null {
         at + match[0].length + CONTEXT_WINDOW,
       );
       if (!REQUIREMENT_CONTEXT.test(window)) continue;
+      // An age range reads exactly like an experience bar to the rule above.
+      if (AGE_CONTEXT.test(text.slice(Math.max(0, at - AGE_LOOKBEHIND), at))) continue;
+      // "No experience required" mentions a requirement in order to withdraw it.
+      if (NEGATED_CONTEXT.test(window)) continue;
 
       if (highest === null || years > highest) highest = years;
     }

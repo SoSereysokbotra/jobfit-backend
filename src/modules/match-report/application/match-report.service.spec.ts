@@ -129,7 +129,13 @@ function build(over: Record<string, unknown> = {}) {
 /** The payload as it was persisted — what GET /match-report/:id will hand back. */
 async function generate(over: Record<string, unknown> = {}) {
   const { service, created } = build(over);
-  const job = 'title' in over ? { ...JOB, title: over.title as string } : JOB;
+  const job = {
+    ...JOB,
+    ...('title' in over ? { title: over.title as string } : {}),
+    ...('requiredMonths' in over
+      ? { requiredMonths: over.requiredMonths as number | null }
+      : {}),
+  };
   const id = await service.generate('u1', job);
   expect(id).toBe('report-1');
   return created[0].payload as any;
@@ -242,6 +248,130 @@ describe('MatchReportService', () => {
     expect(payload.matchRate.overall).toBe(
       Math.round(s.skills * 0.75 + s.location * 0.15 + s.experience * 0.1),
     );
+  });
+
+  // ── The posting's OWN published bar (schema.org monthsOfExperience) ────────
+  // ── The skills table must not double-count what other sections already say ──
+  it('does not repeat a degree bar as a missing "skill"', async () => {
+    // Measured on a live DHL advert: the degree appeared in BOTH the stated-requirements
+    // box and the hard-skills table, where it was also counted as something the CV lacks.
+    // A qualification is not a skill, and saying it twice inflates the missing count.
+    const payload = await generate({
+      requirements: [
+        "Bachelor's degree in Accounting, Finance, Business, or a related field",
+        'Proficient in MS Excel',
+      ],
+    });
+
+    const labels = payload.skills.hard.map((h: any) => h.skill);
+    expect(labels).toContain('Proficient in MS Excel');
+    expect(labels.some((l: string) => l.includes("Bachelor's degree"))).toBe(false);
+    expect(payload.hardRequirements.some((f: any) => f.label === "Bachelor's degree")).toBe(true);
+  });
+
+  it('shows a hedged requirement but keeps it out of the counts', async () => {
+    // Verbatim from the same advert. The employer called it an advantage; counting it
+    // among the things the candidate is MISSING overstates what was asked for.
+    const payload = await generate({
+      requirements: [
+        'Experience in logistics or transport is an advantage',
+        'Proficient in MS Excel',
+      ],
+    });
+
+    const hedged = payload.skills.hard.find((h: any) =>
+      h.skill.includes('logistics'),
+    );
+    expect(hedged?.optional).toBe(true);
+    // Two rows shown, but only the real requirement is counted.
+    expect(payload.skills.hard).toHaveLength(2);
+    expect(payload.skills.matchedCount + payload.skills.missingCount).toBe(
+      payload.skills.hard.filter((h: any) => !h.optional).length +
+        payload.skills.soft.length,
+    );
+  });
+
+  // ── Hard requirements: warn, never penalise ────────────────────────────────
+  it('flags a stated degree and language the CV does not show', async () => {
+    const payload = await generate({
+      requirements: [
+        "Bachelor's degree in hospitality management required",
+        'Native Indonesian speaker required',
+      ],
+    });
+
+    const flags = payload.hardRequirements as Array<{ label: string; met: boolean | null }>;
+    expect(flags.find((f) => f.label === "Bachelor's degree")?.met).toBe(true);
+    expect(flags.find((f) => f.label === 'Indonesian')?.met).toBe(false);
+  });
+
+  it('does not let an unmet requirement move the score', async () => {
+    // The A-not-B decision, pinned: the flag appears, the number does not budge.
+    const withFlags = await generate({
+      requirements: ['Native Indonesian speaker required'],
+    });
+    const without = await generate({ requirements: ['Experience with React'] });
+
+    expect(withFlags.hardRequirements.length).toBeGreaterThan(0);
+    expect(withFlags.matchRate.overall).toBe(without.matchRate.overall);
+  });
+
+  it('reports no flags when the posting states none', async () => {
+    const payload = await generate({ requirements: ['Experience with React'] });
+    expect(payload.hardRequirements).toEqual([]);
+  });
+
+  it('prefers the number the posting publishes over reading its prose', async () => {
+    // 36 months = the value on the live Khmer24 Senior Compliance Officer advert,
+    // whose page displays "3Year+".
+    const payload = await generate({
+      requiredMonths: 36,
+      requirements: ['Experience with React'],
+      parsed: {
+        ...PARSED,
+        experiences: JSON.stringify([{ startDate: '2023-01', endDate: '2024-01' }]),
+      },
+    });
+
+    expect(payload.matchRate.experience).toMatchObject({
+      basis: 'REQUIREMENT',
+      requiredYears: 3,
+      statedIn: 'posting-data',
+      met: false,
+    });
+  });
+
+  it('uses the published bar even when the prose states a different one', async () => {
+    // The published number is the site's own structured claim; the prose is our reading
+    // of it. When they disagree, the one that needed no interpretation wins.
+    const payload = await generate({
+      requiredMonths: 24,
+      requirements: ['10+ years of professional experience required'],
+    });
+
+    expect(payload.matchRate.experience.requiredYears).toBe(2);
+    expect(payload.matchRate.experience.statedIn).toBe('posting-data');
+  });
+
+  it('ignores a published ZERO and falls back to the text', async () => {
+    // MEASURED 2026-08-25: two of six live Khmer24 ads publish monthsOfExperience: 0,
+    // including one whose body never mentions experience at all. A 0 cannot be told
+    // apart from "the field was left blank", so it must not become a satisfied bar.
+    const payload = await generate({
+      requiredMonths: 0,
+      requirements: ['4+ years of professional experience'],
+    });
+
+    expect(payload.matchRate.experience.requiredYears).toBe(4);
+    expect(payload.matchRate.experience.statedIn).toBe('posting-text');
+  });
+
+  it('records that a bar came from the prose when there is no published one', async () => {
+    const payload = await generate({
+      requirements: ['4+ years of professional chemical engineering experience'],
+    });
+
+    expect(payload.matchRate.experience.statedIn).toBe('posting-text');
   });
 
   it('labels the fallback as CV depth when the posting states no bar', async () => {

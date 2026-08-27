@@ -66,8 +66,28 @@ function contentWords(text: string): string[] {
  * counts the requirement's most-repeated content word instead. Never below 1: the
  * requirement was extracted FROM this description, so it is present by construction.
  */
-export function requirementCount(requirement: string, description: string): number {
-  const counts = contentWords(requirement).map((w) => mentionCount(w, description));
+export function requirementCount(
+  requirement: string,
+  description: string,
+  themeWords: ReadonlySet<string> = new Set(),
+): number {
+  // MEASURED FAILURE, 2026-08-25. Without the theme-word exclusion this returned the
+  // frequency of the job's SUBJECT, which every requirement shares — so a C++ Engineer
+  // posting printed "×11" against four different requirements ("modern C++", "C++ build
+  // systems", "C++ code reviews", "production software in C++"), because "c++" occurs 11
+  // times in the description. A column where every row says the same number distinguishes
+  // nothing and is worse than no column.
+  //
+  // `themeWordsOf` (shared with the skill-gap matcher, where the same insight was
+  // measured) drops words recurring across the posting's own requirements, leaving the
+  // terms that tell one row from another: "templates", "linkers", "concurrency".
+  const distinctive = contentWords(requirement).filter((w) => !themeWords.has(w));
+  if (distinctive.length === 0) {
+    // Every word in this requirement is the job's subject; it carries no emphasis
+    // signal of its own, and inventing one would be the bug above in miniature.
+    return 1;
+  }
+  const counts = distinctive.map((w) => mentionCount(w, description));
   return Math.max(1, ...counts, 0);
 }
 

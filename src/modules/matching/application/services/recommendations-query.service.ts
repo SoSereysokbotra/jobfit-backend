@@ -173,7 +173,7 @@ export class RecommendationsQueryService {
     return this.prisma.recommendation.findMany({
       // Dismissed rows are tombstones kept so a recompute cannot resurrect them; they are
       // never results.
-      where: { userId, dismissedAt: null },
+      where: { userId, dismissedAt: null, job: { status: 'PUBLISHED' } },
       // jobId breaks score ties — without it, equally-scored rows come back in arbitrary
       // order between calls, which defeats any client-side change detection.
       orderBy: [{ score: 'desc' }, { jobId: 'asc' }],
