@@ -15,6 +15,7 @@ import * as request from 'supertest';
 import type { Response as SupertestResponse } from 'supertest';
 import { PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
+import { REFRESH_ROTATION_GRACE_SECONDS } from '../src/modules/auth/application/auth.constants';
 
 jest.setTimeout(60000);
 
@@ -77,7 +78,7 @@ describe('Auth flows (e2e)', () => {
 
         await agent
             .post('/auth/register')
-            .send({ email, password, name: 'Flow One' })
+            .send({ email, password, name: 'Flow One', agreeToTerms: true })
             .expect(201);
 
         const code = await verificationCode(email);
@@ -115,7 +116,7 @@ describe('Auth flows (e2e)', () => {
 
         await agent
             .post('/auth/register')
-            .send({ email, password, name: 'Flow Two' })
+            .send({ email, password, name: 'Flow Two', agreeToTerms: true })
             .expect(201);
         await agent
             .post('/auth/verify-email')
@@ -152,7 +153,7 @@ describe('Auth flows (e2e)', () => {
 
         await agent
             .post('/auth/register')
-            .send({ email, password, name: 'Flow Three' })
+            .send({ email, password, name: 'Flow Three', agreeToTerms: true })
             .expect(201);
         await agent
             .post('/auth/verify-email')
@@ -173,6 +174,19 @@ describe('Auth flows (e2e)', () => {
             .expect(200);
         const rotatedCookie = refreshCookie(rotated);
         expect(rotatedCookie).toBeTruthy();
+
+        // Age the spent row past the rotation grace window. Inside that window a replay
+        // is read as a concurrent refresh (see the race test below) rather than theft;
+        // this test is about the theft case, which is a replay that comes later.
+        const user = await prisma.user.findUnique({ where: { email } });
+        await prisma.refreshToken.updateMany({
+            where: { userId: user!.id, revokedAt: { not: null } },
+            data: {
+                revokedAt: new Date(
+                    Date.now() - (REFRESH_ROTATION_GRACE_SECONDS + 5) * 1000,
+                ),
+            },
+        });
 
         // Replaying the ORIGINAL (now-spent) token => reuse.
         const securitySpy = jest.spyOn(Logger.prototype, 'error');
@@ -203,5 +217,66 @@ describe('Auth flows (e2e)', () => {
             .send({ email, password })
             .expect(200);
         expect(typeof relogin.body.accessToken).toBe('string');
+    });
+    it('Flow: two refreshes racing on one cookie => 409 for the loser, session intact', async () => {
+        const email = uniqueEmail('flow4');
+        const password = 'Str0ngPass1';
+        const agent = request.agent(server);
+
+        await agent
+            .post('/auth/register')
+            .send({ email, password, name: 'Flow Four', agreeToTerms: true })
+            .expect(201);
+        await agent
+            .post('/auth/verify-email')
+            .send({ code: await verificationCode(email) })
+            .expect(200);
+        const login = await agent
+            .post('/auth/login')
+            .send({ email, password })
+            .expect(200);
+
+        const cookie = refreshCookie(login);
+        expect(cookie).toBeTruthy();
+
+        // Two tabs refreshing at the same instant, both holding the same cookie.
+        const [a, b] = await Promise.all([
+            request(server).post('/auth/refresh-token').set('Cookie', cookie!),
+            request(server).post('/auth/refresh-token').set('Cookie', cookie!),
+        ]);
+
+        const statuses = [a.status, b.status].sort();
+        expect(statuses).toEqual([200, 409]);
+
+        const winner = a.status === 200 ? a : b;
+        const loser = a.status === 200 ? b : a;
+
+        expect(typeof winner.body.accessToken).toBe('string');
+        expect(loser.body.code).toBe('REFRESH_TOKEN_RACE');
+
+        // The loser must NOT touch the cookie. Clearing it here would delete the good
+        // token the winner just set, killing a session that is perfectly healthy.
+        const loserSetCookie = loser.headers['set-cookie'] as unknown as
+            | string[]
+            | undefined;
+        expect(
+            loserSetCookie?.some((c) => c.startsWith('refresh_token=')),
+        ).toBeFalsy();
+
+        // And nothing was revoked: the winner's cookie still refreshes, which is what
+        // lets the losing tab simply retry and carry on.
+        const rotatedCookie = refreshCookie(winner);
+        expect(rotatedCookie).toBeTruthy();
+        const retry = await request(server)
+            .post('/auth/refresh-token')
+            .set('Cookie', rotatedCookie!)
+            .expect(200);
+        expect(typeof retry.body.accessToken).toBe('string');
+
+        // The access token the winner issued is a working session.
+        await request(server)
+            .get('/auth/me')
+            .set('Authorization', `Bearer ${winner.body.accessToken}`)
+            .expect(200);
     });
 });
