@@ -99,6 +99,21 @@ export class RefreshTokenReuseDetectedError extends AuthError {
   }
 }
 
+/**
+ * Two honest refreshes raced on the same cookie and this one lost — the other already
+ * rotated the token. NOT theft, so nothing is revoked and no session is granted: the
+ * caller simply retries with the cookie the winner set. Distinct from
+ * InvalidRefreshTokenError so the client can tell "retry" from "you are logged out".
+ */
+export class RefreshTokenRaceError extends AuthError {
+  readonly code = 'REFRESH_TOKEN_RACE';
+  constructor(
+    message = 'A concurrent refresh already rotated this token. Please retry.',
+  ) {
+    super(message);
+  }
+}
+
 /** Expected user not found (e.g. reset-password session references a missing account). */
 export class UserNotFoundError extends AuthError {
   readonly code = 'USER_NOT_FOUND';

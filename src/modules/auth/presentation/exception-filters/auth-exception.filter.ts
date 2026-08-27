@@ -25,6 +25,7 @@ import {
   InvalidCredentialsError,
   InvalidRefreshTokenError,
   LoginBlockedError,
+  RefreshTokenRaceError,
   RefreshTokenReuseDetectedError,
   UserNotFoundError,
   WeakPasswordError,
@@ -54,6 +55,12 @@ export class AuthExceptionFilter implements ExceptionFilter {
       this.logger.error(
         `SECURITY ALERT — refresh token reuse detected (possible token theft) ` +
           `[${request.method} ${request.originalUrl}] ip=${request.ip}. All sessions revoked.`,
+      );
+    } else if (exception instanceof RefreshTokenRaceError) {
+      // Expected under concurrency (two tabs refreshing at once). Not a failure and
+      // certainly not a security event — debug level so it never pollutes the alert log.
+      this.logger.debug(
+        `refresh rotation race — client will retry [${request.method} ${request.originalUrl}]`,
       );
     } else {
       // Routine auth failure — low-noise log.
@@ -86,6 +93,11 @@ export class AuthExceptionFilter implements ExceptionFilter {
       exception instanceof UserNotFoundError
     ) {
       return HttpStatus.UNAUTHORIZED; // 401
+    }
+    // 409 — not an auth failure at all: the session is fine, this one call lost a
+    // rotation race. Deliberately NOT 401, so no client mistakes it for a dead session.
+    if (exception instanceof RefreshTokenRaceError) {
+      return HttpStatus.CONFLICT; // 409
     }
     if (exception instanceof LoginBlockedError) {
       return HttpStatus.TOO_MANY_REQUESTS; // 429

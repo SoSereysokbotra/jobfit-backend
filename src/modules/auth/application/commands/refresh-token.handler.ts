@@ -17,6 +17,7 @@ import { RefreshTokenEntity } from '../../domain/entities/refresh-token.entity';
 import { AuthTokenService } from '../../infrastructure/services/auth-token.service';
 import {
   InvalidRefreshTokenError,
+  RefreshTokenRaceError,
   RefreshTokenReuseDetectedError,
 } from '../errors/auth.errors';
 
@@ -72,6 +73,12 @@ export class RefreshTokenHandler
       newEntity,
     );
 
+    if (outcome === 'raced') {
+      // The caller's own concurrent refresh won moments ago. Nothing is revoked and no
+      // session is issued — the winner's token is already in the cookie jar, so the
+      // client just retries. (The freshly-signed tokens above are simply discarded.)
+      throw new RefreshTokenRaceError();
+    }
     if (outcome === 'reuse') {
       // A spent (already-rotated) token was replayed — treat as theft: revoke ALL of
       // the user's sessions, then surface a distinct security error.

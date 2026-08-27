@@ -7,6 +7,12 @@
 //   2. replaying the same original token is detected as reuse (RefreshTokenReuseDetectedError),
 //   3. and the reuse response actually WIPES every refresh token for that user in the DB,
 //   4. a validly-signed but unknown token is a routine InvalidRefreshTokenError (not reuse).
+//
+// NOTE on the aged `revokedAt` below: a replay is only theft OUTSIDE the rotation grace
+// window (REFRESH_ROTATION_GRACE_SECONDS). Inside it, a replay is the losing half of an
+// honest concurrent refresh and is deliberately NOT treated as theft — see
+// refresh-token.race.spec.ts. So this file ages the spent row to put the replay squarely
+// in theft territory, which is the case it was always written to cover.
 
 import 'dotenv/config';
 import { randomUUID } from 'crypto';
@@ -18,6 +24,7 @@ import { UserRepository } from '../../infrastructure/persistence/user.repository
 import { RefreshTokenRepository } from '../../infrastructure/persistence/refresh-token.repository';
 import { AuthTokenService } from '../../infrastructure/services/auth-token.service';
 import { RefreshTokenEntity } from '../../domain/entities/refresh-token.entity';
+import { REFRESH_ROTATION_GRACE_SECONDS } from '../auth.constants';
 import {
   InvalidRefreshTokenError,
   RefreshTokenReuseDetectedError,
@@ -91,6 +98,17 @@ describe('RefreshTokenHandler — rotation theft detection (integration)', () =>
 
     // After rotation: old token soft-revoked + new token live => 2 rows.
     expect(await prisma.refreshToken.count({ where: { userId } })).toBe(2);
+
+    // Age the spent row past the grace window so this replay reads as theft rather
+    // than as a concurrent refresh (which is a different, benign case).
+    await prisma.refreshToken.updateMany({
+      where: { userId, revokedAt: { not: null } },
+      data: {
+        revokedAt: new Date(
+          Date.now() - (REFRESH_ROTATION_GRACE_SECONDS + 5) * 1000,
+        ),
+      },
+    });
 
     // 2) Replaying the ORIGINAL token is reuse -> RefreshTokenReuseDetectedError.
     await expect(

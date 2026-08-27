@@ -23,6 +23,7 @@ import {
   IRefreshTokenRepository,
   RotateOutcome,
 } from '../../domain/repositories/refresh-token.repository.interface';
+import { REFRESH_ROTATION_GRACE_SECONDS } from '../../application/auth.constants';
 import { authCacheKeys } from './auth-cache.keys';
 
 @Injectable()
@@ -87,25 +88,56 @@ export class RefreshTokenRepository implements IRefreshTokenRepository {
 
     // Atomic soft-revoke-old + create-new, with theft detection on a lookup miss.
     const outcome = await this.prisma.$transaction<RotateOutcome>(async (tx) => {
-      const live = await tx.refreshToken.findFirst({
+      // CLAIM the token in one conditional statement:
+      //   UPDATE refresh_tokens SET revokedAt = now()
+      //    WHERE tokenHash = ? AND userId = ? AND revokedAt IS NULL
+      //
+      // The `revokedAt IS NULL` predicate lives INSIDE the update, which is what makes
+      // single-use actually hold under concurrency. Reading the live row first and then
+      // updating it by id cannot: both transactions' SELECTs see the same live row, the
+      // second UPDATE blocks on the row lock, and when it wakes it matches on id anyway
+      // — so both would "rotate", mint a token each, and the token would have been used
+      // twice. Here the loser re-evaluates the predicate after the winner commits,
+      // finds it no longer true, and claims nothing.
+      const claimed = await tx.refreshToken.updateMany({
         where: { tokenHash: oldTokenHash, userId, revokedAt: null },
-        select: { id: true },
+        data: { revokedAt: new Date() },
       });
 
-      if (!live) {
-        // No LIVE token. Was this hash already spent (revoked)? -> reuse/theft.
+      if (claimed.count === 0) {
+        // No LIVE token. Was this hash already spent (revoked)?
         const spent = await tx.refreshToken.findFirst({
           where: { tokenHash: oldTokenHash, userId, revokedAt: { not: null } },
+          select: { revokedAt: true },
+        });
+        if (!spent) return 'not_found';
+
+        // Spent — but a spent token is only THEFT if it was not spent moments ago by
+        // the caller's own concurrent refresh. Inside the grace window, with the chain
+        // still alive, this is the losing half of an honest race (see
+        // REFRESH_ROTATION_GRACE_SECONDS). Revoking everything there would log an
+        // innocent user out of every device.
+        const spentAgeMs = Date.now() - (spent.revokedAt?.getTime() ?? 0);
+        if (spentAgeMs > REFRESH_ROTATION_GRACE_SECONDS * 1000) return 'reuse';
+
+        // A live successor is what proves the winning rotation really happened. With no
+        // live token left there is nothing to race against, so treat it as theft.
+        const successor = await tx.refreshToken.findFirst({
+          where: { userId, revokedAt: null, expiresAt: { gt: new Date() } },
           select: { id: true },
         });
-        return spent ? 'reuse' : 'not_found';
+        return successor ? 'raced' : 'reuse';
       }
 
-      oldTokenId = live.id;
-      await tx.refreshToken.update({
-        where: { id: live.id },
-        data: { revokedAt: new Date() }, // soft-delete (kept for reuse detection)
+      // Claimed it — the row is now soft-revoked (kept, so a later replay is still
+      // detectable as reuse). Read its id back only for cache invalidation; tokenHash
+      // is unique, so this is the row just claimed.
+      const claimedRow = await tx.refreshToken.findFirst({
+        where: { tokenHash: oldTokenHash, userId },
+        select: { id: true },
       });
+      oldTokenId = claimedRow?.id;
+
       await tx.refreshToken.create({
         data: { id: newToken.id, createdAt: newToken.createdAt, ...data },
       });

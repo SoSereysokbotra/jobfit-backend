@@ -54,7 +54,10 @@ import {
   REFRESH_TOKEN_TTL_SECONDS,
   VERIFICATION_CODE_TTL_MINUTES,
 } from '../../application/auth.constants';
-import { InvalidRefreshTokenError } from '../../application/errors/auth.errors';
+import {
+  InvalidRefreshTokenError,
+  RefreshTokenRaceError,
+} from '../../application/errors/auth.errors';
 
 import { RegisterCommand } from '../../application/commands/register.command';
 import { VerifyEmailCommand } from '../../application/commands/verify-email.command';
@@ -370,12 +373,20 @@ export class AuthController {
     description:
       'Reads the `refresh_token` cookie, rotates it (the old one is single-use), returns ' +
       'a new access token and replaces the cookie. Replaying a spent token returns 401 ' +
-      'and revokes all of the user\'s sessions (theft detection).',
+      'and revokes all of the user\'s sessions (theft detection) — except when ' +
+      'it was spent moments ago by the caller\'s own concurrent refresh, which ' +
+      'is a race, not theft, and answers 409 with the session left intact.',
   })
   @ApiOkResponse({ description: 'Rotated.', type: AuthResponseDto })
   @ApiResponse({
     status: 401,
     description: 'Missing, invalid, expired, or reused refresh token.',
+  })
+  @ApiResponse({
+    status: 409,
+    description:
+      'A concurrent refresh already rotated this token. The session is still valid — ' +
+      'retry the call; the cookie now holds the winning token.',
   })
   async refreshToken(
     @Req() req: Request,
@@ -395,8 +406,13 @@ export class AuthController {
       );
       return { accessToken: result.accessToken };
     } catch (err) {
-      // On any refresh failure (invalid / reused / dead session) clear the stale cookie
-      // so the client is forced to re-login.
+      // A lost rotation race is NOT a dead session, and the cookie is not stale — the
+      // winning request has just replaced it with a good token. Clearing it here would
+      // destroy a valid session on behalf of a request that did nothing wrong, which is
+      // the exact opposite of what the client needs in order to retry.
+      if (err instanceof RefreshTokenRaceError) throw err;
+      // Any genuine refresh failure (invalid / reused / dead session) clears the stale
+      // cookie so the client is forced to re-login.
       this.clearCookie(res, COOKIE.refreshToken);
       throw err;
     }
