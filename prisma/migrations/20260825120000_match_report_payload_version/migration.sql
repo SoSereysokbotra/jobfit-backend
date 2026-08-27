@@ -1,0 +1,35 @@
+-- RECONSTRUCTED 2026-08-27. The original file was lost; this one was rebuilt from the
+-- live database. Read the note below before trusting it.
+--
+-- WHAT HAPPENED. `_prisma_migrations` records this migration as applied on 2026-08-25
+-- with `applied_steps_count = 0` -- every other migration in this project has 1. A zero
+-- step count means PRISMA RAN NO SQL FOR IT: the row was written by
+-- `prisma migrate resolve --applied`, so the column was created some other way (a manual
+-- ALTER in the Supabase SQL editor, or `prisma db push`) and Prisma was then told to
+-- consider it done. The migration file was never committed to any branch, local or
+-- remote, and does not exist in any stash, clone or working tree.
+--
+-- WHAT IS VERIFIED. The statement below reproduces the column exactly as it exists in the
+-- live database today, read from information_schema:
+--
+--     payloadVersion   integer   NOT NULL   DEFAULT 1
+--
+-- No index and no constraint accompanies it -- pg_indexes and pg_constraint on
+-- `match_reports` list only the primary key, the userId foreign key, and the two indexes
+-- created by earlier migrations.
+--
+-- WHAT IS NOT VERIFIED. Why the column exists. Nothing in this repository reads or writes
+-- `payloadVersion`; the code that does is not on any branch here. The data says it is in
+-- real use: 25 rows at version 1 and 1 row at version 2, all written 2026-08-12..08-25.
+-- Both versions carry the same top-level payload keys, so whatever v2 changed is nested
+-- or semantic, not a change of shape. The name suggests a schema version stamp for
+-- `MatchReport.payload` -- a way to tell a reader which shape a stored report was written
+-- in, so an old row can be rendered or migrated correctly. That reading fits the evidence
+-- but is NOT confirmed by code.
+--
+-- ALREADY APPLIED. This file exists so the change is tracked in git and so a future
+-- `migrate dev` does not propose DROPPING the column. It must NOT be run against a
+-- database that already has it.
+
+-- AlterTable
+ALTER TABLE "match_reports" ADD COLUMN "payloadVersion" INTEGER NOT NULL DEFAULT 1;

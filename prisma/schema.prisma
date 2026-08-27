@@ -1005,6 +1005,19 @@ model MatchReport {
 
   payload Json // the full report — see MatchReportPayload
 
+  /// Which shape `payload` was written in.
+  ///
+  /// RECOVERED, NOT AUTHORED. This column existed in the live database with no migration
+  /// file and no declaration here — see migration 20260825120000, which was reconstructed
+  /// from the database on 2026-08-27. It is declared now so a future `migrate dev` does
+  /// not read it as an extra column and propose DROPPING it.
+  ///
+  /// The data says it is in real use (25 rows at 1, one at 2, all written 2026-08-12..25),
+  /// but nothing in this repository reads or writes it — the code that does is on no
+  /// branch here. Treat the meaning of a specific version number as unconfirmed until
+  /// that code surfaces.
+  payloadVersion Int @default(1)
+
   /// SHA-256 of the posting text this report was built from. The dedupe key, so
   /// re-opening an unchanged posting costs no AI call (§11) while an EDITED posting
   /// still regenerates. Null on rows written before the column existed; those are
