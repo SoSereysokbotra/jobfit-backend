@@ -35,6 +35,7 @@ import {
 import { SkillGapDto, SkillGapQueryDto } from '../dtos/skill-gap.dto';
 import { JobMatchDto, JobMatchQueryDto } from '../dtos/job-match.dto';
 import { ScoutMatchDto, ScoutQueryDto } from '../dtos/scout.dto';
+import { MatchReadinessDto } from '../dtos/match-readiness.dto';
 
 @ApiTags('Matching')
 @ApiBearerAuth()
@@ -57,6 +58,24 @@ export class MatchingController {
   })
   async list(@CurrentUser() user: AuthenticatedUser): Promise<RecommendedJobDto[]> {
     return this.recommendations.getForUser(user.id);
+  }
+
+  @Get('readiness')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Why the recommendations list is empty — or READY if it genuinely is not',
+    description:
+      'Call this when GET /recommendations returns an empty array. An empty list has ' +
+      'four causes — no profile, embedding pending, embedding failed, or genuinely no ' +
+      'matches — and only the last is about the user. Rendering the first three as ' +
+      '"no jobs match you" tells a new candidate the product has nothing for them. ' +
+      '`message` is written for display; `detail` is not.',
+  })
+  @ApiResponse({ status: 200, type: MatchReadinessDto })
+  async readiness(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<MatchReadinessDto> {
+    return this.recommendations.getReadiness(user.id);
   }
 
   @Get('scout')

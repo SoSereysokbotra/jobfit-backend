@@ -13,6 +13,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import { AiClient } from '@infra/ai/ai.client';
 import { AiServiceError } from '@infra/ai/ai.errors';
+import { logAiFallback } from '@infra/ai/ai-degradation.logger';
 import { ActiveResumeService } from '../../../resume/application/services/active-resume.service';
 import { toExperienceTitles, toStringArray } from '../../domain/parsed-resume-json';
 
@@ -56,7 +57,10 @@ export class MatchingEmbeddingService {
     if (!job) return false;
 
     const [vec] = await this.embedTexts([this.buildJobText(job)]);
-    if (!vec) return false;
+    if (!vec) {
+      await this.markEmbeddingFailed('jobs', jobId);
+      return false;
+    }
     await this.storeEmbedding('jobs', jobId, vec);
     return true;
   }
@@ -77,7 +81,10 @@ export class MatchingEmbeddingService {
 
     const resume = await this.activeParsedResume(userId);
     const [vec] = await this.embedTexts([this.buildCandidateText(profile, resume)]);
-    if (!vec) return false;
+    if (!vec) {
+      await this.markEmbeddingFailed('profiles', profile.id);
+      return false;
+    }
     await this.storeEmbedding('profiles', profile.id, vec);
     return true;
   }
@@ -97,6 +104,10 @@ export class MatchingEmbeddingService {
         if (vec) {
           await this.storeEmbedding('jobs', chunk[k].id, vec);
           embedded++;
+        } else {
+          // A batch backfill is where a silent skip does the most damage: it looks like
+          // it worked and leaves a subset permanently unmatchable.
+          await this.markEmbeddingFailed('jobs', chunk[k].id);
         }
       }
     }
@@ -142,9 +153,17 @@ export class MatchingEmbeddingService {
       });
     } catch (err) {
       if (err instanceof AiServiceError) {
-        this.logger.warn(
-          `Embedding unavailable (${err.code}); skipping ${inputs.length} item(s)`,
+        // The loudest of these in dev: a skipped embedding is not a worse answer, it
+        // is NO answer — the row stays unmatchable until something re-embeds it.
+        logAiFallback(
+          this.logger,
+          err,
+          'Embedding',
+          `skipping ${inputs.length} item(s) — they will not be matchable`,
         );
+        // Kept so the CALLER can record why on the row. Without it a row could only say
+        // "no vector", which is indistinguishable from "never attempted".
+        this.lastEmbedError = `${err.code}: ${err.message}`;
         return out;
       }
       throw err;
@@ -160,12 +179,54 @@ export class MatchingEmbeddingService {
     // pgvector accepts the text form "[1,2,3]"; cast the bound param to ::vector.
     // `table` is a controlled union literal, so interpolating it is safe.
     const literal = `[${vec.join(',')}]`;
+    // Vector and status in ONE statement. Two writes could leave a row with a vector and
+    // a FAILED status, or the reverse — and the whole point of the column is that it
+    // tells the truth about the vector sitting next to it.
     await this.prisma.$executeRawUnsafe(
-      `UPDATE "${table}" SET "embedding" = $1::vector WHERE "id" = $2`,
+      `UPDATE "${table}"
+          SET "embedding" = $1::vector,
+              "embeddingStatus" = 'SUCCESS',
+              "embeddedAt" = NOW(),
+              "embeddingError" = NULL
+        WHERE "id" = $2`,
       literal,
       id,
     );
   }
+
+  /**
+   * Record that embedding this row was attempted and did not work.
+   *
+   * THE VECTOR IS LEFT ALONE ON PURPOSE. A previously-good embedding is stale, not wrong,
+   * and matching on slightly old data beats matching on nothing — the same reasoning that
+   * makes recommendations serve stale rows rather than an empty page.
+   *
+   * Best-effort: if even this write fails the original failure is already logged, and
+   * throwing from a path whose entire contract is "an AI outage must not break the
+   * caller" would defeat the point.
+   */
+  private async markEmbeddingFailed(
+    table: EmbeddableTable,
+    id: string,
+  ): Promise<void> {
+    try {
+      await this.prisma.$executeRawUnsafe(
+        `UPDATE "${table}"
+            SET "embeddingStatus" = 'FAILED',
+                "embeddingError" = $1
+          WHERE "id" = $2`,
+        this.lastEmbedError ?? 'Embedding unavailable',
+        id,
+      );
+    } catch (err) {
+      this.logger.error(
+        `Could not record embedding failure for ${table}/${id}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  /** Why the last embedTexts call failed, so markEmbeddingFailed can record it. */
+  private lastEmbedError?: string;
 
   private buildJobText(job: JobTextInput): string {
     const skills = job.skills.map((s) => s.skill.name).join(', ');

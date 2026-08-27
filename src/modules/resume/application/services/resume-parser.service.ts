@@ -16,6 +16,8 @@ import { StorageService } from '@infra/storage/storage.service';
 import { DomainEventBus } from '@events/domain-event-bus.service';
 import { ResumeParsedEvent } from '../../domain/events/resume-parsed.event';
 import { AiClient } from '@infra/ai/ai.client';
+import { aiFailuresAreLoud } from '@infra/ai/ai-degradation.logger';
+import { AiServiceError } from '@infra/ai/ai.errors';
 import { FileType, ParseResumeResponse } from '@infra/ai/ai.types';
 import { PositionedTextItem, toReadingOrder } from './pdf-reading-order';
 import { splitSkillEntry } from '@modules/matching/domain/parsed-resume-json';
@@ -135,7 +137,18 @@ export class ResumeParserService {
       );
     } catch (err) {
       const message = (err as Error).message;
-      this.logger.error(`Resume parse failed for ${resumeId}: ${message}`);
+      // Already at error level — a FAILED parse is a dead end for that user until they
+      // re-upload, in every environment. What dev adds is naming the cause, but ONLY
+      // when the AI actually is the cause: this path also fails on storage and PDF
+      // extraction, and blaming the AI for those would send someone to restart the wrong
+      // process.
+      const blameTheAi = err instanceof AiServiceError && aiFailuresAreLoud();
+      this.logger.error(
+        `Resume parse failed for ${resumeId}: ${message}` +
+          (blameTheAi
+            ? ' — the AI service did not answer. If it is not running, THIS IS WHY, and no résumé will parse.'
+            : ''),
+      );
       await this.parsedResumeDataRepository.updateParsingStatus(
         resumeId,
         'FAILED',

@@ -14,6 +14,7 @@ import { PrismaService } from '@infra/prisma/prisma.service';
 import { ActiveResumeService } from '../resume/application/services/active-resume.service';
 import { AiClient } from '@infra/ai/ai.client';
 import { AiServiceError } from '@infra/ai/ai.errors';
+import { logAiFallback } from '@infra/ai/ai-degradation.logger';
 import {
   CoverLetterRequest,
   InterviewQuestion,
@@ -73,9 +74,7 @@ export class GenerationService {
       result = { coverLetter: ai.coverLetter, generatedBy: 'ai' };
     } catch (err) {
       if (!(err instanceof AiServiceError)) throw err;
-      this.logger.warn(
-        `AI cover letter unavailable (${err.code}); using template fallback`,
-      );
+      logAiFallback(this.logger, err, 'AI cover letter', 'using a template letter');
       result = { coverLetter: this.templateCoverLetter(input), generatedBy: 'template' };
     }
 
@@ -112,9 +111,7 @@ export class GenerationService {
       return { coverLetter: ai.coverLetter, generatedBy: 'ai' };
     } catch (err) {
       if (!(err instanceof AiServiceError)) throw err;
-      this.logger.warn(
-        `AI cover letter unavailable (${err.code}); using template fallback`,
-      );
+      logAiFallback(this.logger, err, 'AI cover letter', 'using a template letter');
       return { coverLetter: this.templateCoverLetter(input), generatedBy: 'template' };
     }
   }
@@ -136,9 +133,7 @@ export class GenerationService {
       return { questions: ai.questions ?? [], feedback: ai.feedback ?? null, generatedBy: 'ai' };
     } catch (err) {
       if (!(err instanceof AiServiceError)) throw err;
-      this.logger.warn(
-        `AI interview prep unavailable (${err.code}); using static fallback`,
-      );
+      logAiFallback(this.logger, err, 'AI interview prep', 'using static questions');
       return { questions: this.staticQuestions(title), feedback: null, generatedBy: 'static' };
     }
   }
@@ -172,9 +167,7 @@ export class GenerationService {
       };
     } catch (err) {
       if (!(err instanceof AiServiceError)) throw err;
-      this.logger.warn(
-        `AI interview prep unavailable (${err.code}); using static fallback`,
-      );
+      logAiFallback(this.logger, err, 'AI interview prep', 'using static questions');
       return kind === 'questions'
         ? { questions: this.staticQuestions(job.title), feedback: null, generatedBy: 'static' }
         : {

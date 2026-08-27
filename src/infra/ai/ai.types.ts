@@ -14,6 +14,23 @@ export interface AiHealth {
   modelsLoaded: string[];
 }
 
+/**
+ * GET /ready — whether the service can actually do work.
+ *
+ * Distinct from {@link AiHealth}: /health reports the FastAPI process and stays "ok" with
+ * Ollama offline, so it cannot answer "will AI features work?". /ready answers exactly
+ * that, and on 503 says why (`OLLAMA_UNREACHABLE` | `MODEL_NOT_INSTALLED`) and which
+ * models are missing.
+ */
+export interface AiReady {
+  status: 'ready' | 'not_ready';
+  reason?: string;
+  detail?: string;
+  missing?: string[];
+  models?: Record<string, string>;
+  modelsLoaded?: string[];
+}
+
 // ── POST /resume/parse ───────────────────────────────────────────────────────
 export interface ParseResumeRequest {
   text: string;

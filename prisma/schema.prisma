@@ -238,6 +238,22 @@ model RefreshToken {
 
 // ── User module (Phase 3) ──────────────────────────────────────────────────────
 
+/// Whether a row's semantic embedding is usable.
+///
+/// Embedding failures used to be INVISIBLE: MatchingEmbeddingService caught the error,
+/// logged a warning and returned nulls, so a job ingested during an AI outage never got a
+/// vector and was silently unmatchable FOREVER — no status, no retry, no backfill trigger
+/// (MENTOR_REVIEW_2026-08-18 §6 family; docs/AI_DEGRADATION_PLAN.md §5).
+///
+/// PENDING is the honest default for a row that has never been embedded, and is what
+/// distinguishes "not done yet" from "tried and failed" — the two the old code rendered
+/// identically as "no matches".
+enum EmbeddingStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
 model Profile {
   id     String @id @default(uuid())
   userId String @unique
@@ -277,6 +293,13 @@ model Profile {
   // BGE-M3 candidate embedding (1024-dim), built from profile + latest parsed
   // résumé. Managed via raw SQL — Prisma can't read/write the `vector` type.
   embedding Unsupported("vector(1024)")?
+
+  // Is that vector actually there, and if not, why? Written by
+  // MatchingEmbeddingService on every attempt — success and failure alike.
+  // Without this, a failed embed is indistinguishable from "this candidate has no matches yet".
+  embeddingStatus EmbeddingStatus @default(PENDING)
+  embeddedAt      DateTime?
+  embeddingError  String?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -546,6 +569,13 @@ model Job {
   // BGE-M3 job embedding (1024-dim), built from title + description + skills.
   // Managed via raw SQL — Prisma can't read/write the `vector` type.
   embedding Unsupported("vector(1024)")?
+
+  // Is that vector actually there, and if not, why? Written by
+  // MatchingEmbeddingService on every attempt — success and failure alike.
+  // Without this, a failed embed is indistinguishable from "nobody matches this job".
+  embeddingStatus EmbeddingStatus @default(PENDING)
+  embeddedAt      DateTime?
+  embeddingError  String?
 
   // Phase B: full-text search vector (BM25) — GENERATED STORED from title+description.
   // Read via raw SQL only.

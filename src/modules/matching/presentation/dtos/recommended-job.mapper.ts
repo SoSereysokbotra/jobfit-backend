@@ -14,6 +14,8 @@ export interface RecommendationWithJob {
   score: number;
   reasonExplanation: string | null;
   breakdown: unknown;
+  computedAt: Date;
+  staleAt: Date | null;
   job: {
     id: string;
     companyId: string;
@@ -80,5 +82,10 @@ export function toRecommendedJobDto(r: RecommendationWithJob): RecommendedJobDto
     band: matchBand(r.score),
     reason: r.reasonExplanation ?? undefined,
     breakdown: (r.breakdown as Record<string, number> | null) ?? undefined,
+    // Freshness travels WITH the score, for the same reason `band` does: a client that
+    // shows a number without saying how old it is asserts a currency the data may not
+    // have. Both columns existed already and simply never reached the response.
+    computedAt: r.computedAt.toISOString(),
+    stale: r.staleAt !== null,
   };
 }

@@ -17,6 +17,24 @@ export default registerAs('ai', () => ({
   timeoutMsEmbed: parseInt(process.env.AI_TIMEOUT_MS_EMBED ?? '10000', 10),
 
   /**
+   * Rerank gets its OWN budget, much shorter than generate.
+   *
+   * It used to share `timeoutMsGenerate`, and that is fine until the generate timeout has
+   * to be raised for résumé parsing — which it does: parsing measured 73.5s on an
+   * RTX 5050, so the local value is 250s. Rerank does NOT belong on that budget, because
+   * unlike parsing (a background queue job, where a slow answer is still an answer) it
+   * sits on the /recommendations REQUEST PATH. Sharing the number meant a failing rerank
+   * could cost a user up to 500s — two attempts at 250s — on a page load.
+   *
+   * 5s and no retry, deliberately. Rerank is a +20% MRR quality improvement, not a
+   * correctness requirement: a failure already degrades to the fused order
+   * (recompute-user-matches.use-case.ts), so the worst case of a tight timeout is a
+   * slightly worse ranking, never a missing one. A user waiting on a page should never
+   * pay more than that for it.
+   */
+  timeoutMsRerank: parseInt(process.env.AI_TIMEOUT_MS_RERANK ?? '5000', 10),
+
+  /**
    * LLM reranker on the recommendation pipeline (Phase B).
    *
    * ON by default: measured **MRR@10 0.63 → 0.75 (+20%)** on the hand-labelled eval set —

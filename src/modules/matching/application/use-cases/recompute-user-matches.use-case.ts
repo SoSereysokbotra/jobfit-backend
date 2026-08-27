@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import { AiClient } from '@infra/ai/ai.client';
 import { AiServiceError } from '@infra/ai/ai.errors';
+import { logAiFallback } from '@infra/ai/ai-degradation.logger';
 import { ActiveResumeService } from '../../../resume/application/services/active-resume.service';
 import { ComputeMatchScoreUseCase } from './compute-match-score.use-case';
 import { CandidateContext, JobContext, SubScores } from '../../domain/scoring/types';
@@ -34,6 +35,19 @@ export interface RetrievalOptions {
   rerank?: boolean;
   /** Apply the metadata pre-filter (default true). Set false to measure its effect. */
   filter?: boolean;
+  /**
+   * Called when a rerank was ASKED FOR but did not happen — the AI service was
+   * unavailable, so retrieval silently returned the fused order instead.
+   *
+   * Exists because that silence corrupts measurement. `rerankFused` degrades on purpose
+   * (a rerank failure must not cost a user their recommendations), but the eval harness
+   * labelled its report `hybrid+rerank` from the REQUESTED option, so a run with the AI
+   * service down would report the plain fused baseline as if it were the reranked
+   * result. That is how a +20% MRR claim becomes unreproducible without anyone noticing.
+   *
+   * Production passes nothing and is unaffected.
+   */
+  onRerankSkipped?: (reason: string) => void;
 }
 
 interface CandidateRetrieval {
@@ -271,7 +285,14 @@ export class RecomputeUserMatchesUseCase {
     // harness measures what it asked for, not what the deployment config says.
     const rerank = opts.rerank ?? this.rerankEnabledByConfig;
     if (rerank && cand.queryText) {
-      fusedIds = await this.rerankFused(cand.queryText, fusedIds);
+      fusedIds = await this.rerankFused(
+        cand.queryText,
+        fusedIds,
+        opts.onRerankSkipped,
+      );
+    } else if (rerank && !cand.queryText) {
+      // Asked for, but impossible: no query text to rerank against.
+      opts.onRerankSkipped?.('NO_QUERY_TEXT');
     }
 
     const topIds = fusedIds.slice(0, limit);
@@ -293,7 +314,11 @@ export class RecomputeUserMatchesUseCase {
    * beyond the pool keep their fused order. Degrades to the fused order (no
    * reorder) if the AI service is unavailable.
    */
-  private async rerankFused(queryText: string, fusedIds: string[]): Promise<string[]> {
+  private async rerankFused(
+    queryText: string,
+    fusedIds: string[],
+    onSkipped?: (reason: string) => void,
+  ): Promise<string[]> {
     const poolIds = fusedIds.slice(0, RERANK_POOL);
     const jobs = await this.prisma.job.findMany({
       where: { id: { in: poolIds } },
@@ -307,7 +332,10 @@ export class RecomputeUserMatchesUseCase {
         const desc = (j.description ?? '').replace(/\s+/g, ' ').slice(0, 500);
         return { id, text: `${j.title} at ${j.company?.name ?? 'company'}. ${desc}` };
       });
-    if (docs.length === 0) return fusedIds;
+    if (docs.length === 0) {
+      onSkipped?.('NO_DOCUMENTS');
+      return fusedIds;
+    }
 
     try {
       const { scores } = await this.aiClient.rerank(queryText, docs);
@@ -318,7 +346,8 @@ export class RecomputeUserMatchesUseCase {
       return [...reranked, ...fusedIds.slice(RERANK_POOL)];
     } catch (err) {
       if (err instanceof AiServiceError) {
-        this.logger.warn(`Rerank unavailable (${err.code}); using fused order`);
+        logAiFallback(this.logger, err, 'Rerank', 'using the un-reranked fused order');
+        onSkipped?.(err.code);
         return fusedIds;
       }
       throw err;

@@ -10,6 +10,7 @@ import { HealthController } from './health.controller';
 import { DatabaseHealthIndicator } from './indicators/database.health-indicator';
 import { RedisHealthIndicator } from './indicators/redis.health-indicator';
 import { MailHealthIndicator } from './indicators/mail.health-indicator';
+import { AiHealthIndicator } from './indicators/ai.health-indicator';
 import { HeartbeatService } from './heartbeat.service';
 
 @Module({
@@ -19,6 +20,7 @@ import { HeartbeatService } from './heartbeat.service';
     DatabaseHealthIndicator,
     RedisHealthIndicator,
     MailHealthIndicator,
+    AiHealthIndicator,
     HeartbeatService,
   ],
 })

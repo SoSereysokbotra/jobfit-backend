@@ -40,6 +40,7 @@ describe('AiClient', () => {
       serviceKey: 'test-secret',
       timeoutMsGenerate: 1000,
       timeoutMsEmbed: 1000,
+      timeoutMsRerank: 1000,
       // Not used by AiClient (the reranker flag is read by the matching pipeline),
       // but the config type requires it.
       rerankEnabled: true,

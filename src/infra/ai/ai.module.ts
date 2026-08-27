@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 
 import { MetricsModule } from '@modules/metrics/metrics.module';
 import { AiClient } from './ai.client';
+import { AiAvailabilityService } from './ai-availability.service';
 
 /**
  * AiModule — the backend's single door to jobfits-ai-service.
@@ -18,7 +19,7 @@ import { AiClient } from './ai.client';
 @Global()
 @Module({
   imports: [MetricsModule],
-  providers: [AiClient],
-  exports: [AiClient],
+  providers: [AiClient, AiAvailabilityService],
+  exports: [AiClient, AiAvailabilityService],
 })
 export class AiModule {}

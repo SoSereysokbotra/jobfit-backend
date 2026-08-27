@@ -74,3 +74,101 @@ describe('RetrievalEvalService', () => {
     expect(md).toContain('too sparse to trust');
   });
 });
+
+// ── Measurement integrity: a degraded run must not pass as a reranked one ─────
+//
+// `rerankFused` falls back to the fused order when the AI service is unavailable — right
+// for users, dangerous for measurement. This harness labelled its report from the option
+// it PASSED, so a run against a dead AI service reported the plain hybrid baseline under
+// the name "hybrid+rerank". The project's headline result (MRR@10 0.63 -> 0.75, +20%) is
+// exactly the kind of number that gets quoted from such a file.
+describe('RetrievalEvalService — degraded reranks', () => {
+  /** Retrieval that reports the rerank never actually ran, as production does on outage. */
+  const recomputeWithSkippedRerank = (
+    ranking: Record<string, string[]>,
+    reason = 'NETWORK',
+  ) =>
+    ({
+      retrieveRankedJobs: jest.fn(
+        async (
+          userId: string,
+          _k: number,
+          opts?: { onRerankSkipped?: (r: string) => void },
+        ) => {
+          opts?.onRerankSkipped?.(reason);
+          return (ranking[userId] ?? []).map((id) => ({ id, cosine_sim: 0.5 }));
+        },
+      ),
+    }) as never;
+
+  const labels: EvalLabel[] = [
+    L('u1', 'jA', 'GREAT'),
+    L('u2', 'jB', 'GREAT'),
+  ];
+
+  it('passes an onRerankSkipped reporter into retrieval', async () => {
+    const recompute = fakeRecompute({ u1: ['jA'], u2: ['jB'] });
+    await new RetrievalEvalService(recompute).evaluate(labels, 10, { rerank: true });
+
+    const opts = (recompute as unknown as { retrieveRankedJobs: jest.Mock })
+      .retrieveRankedJobs.mock.calls[0][2];
+    expect(typeof opts.onRerankSkipped).toBe('function');
+  });
+
+  it('marks the report degraded, and counts the affected candidates', async () => {
+    const service = new RetrievalEvalService(
+      recomputeWithSkippedRerank({ u1: ['jA'], u2: ['jB'] }),
+    );
+
+    const report = await service.evaluate(labels, 10, { rerank: true });
+
+    expect(report.degraded).toEqual({
+      rerankRequested: true,
+      rerankSkippedFor: 2,
+      reasons: ['NETWORK'],
+    });
+  });
+
+  it('puts the caveat in the retriever NAME, so it cannot be quoted by accident', async () => {
+    const service = new RetrievalEvalService(
+      recomputeWithSkippedRerank({ u1: ['jA'], u2: ['jB'] }),
+    );
+
+    const report = await service.evaluate(labels, 10, { rerank: true });
+
+    // The failure mode was a file called "hybrid+rerank" that was really the baseline.
+    expect(report.retriever).toBe('hybrid+rerank(DEGRADED)');
+  });
+
+  it('warns loudly in the markdown report', async () => {
+    const service = new RetrievalEvalService(
+      recomputeWithSkippedRerank({ u1: ['jA'], u2: ['jB'] }),
+    );
+
+    const md = formatReportMarkdown(
+      await service.evaluate(labels, 10, { rerank: true }),
+    );
+
+    expect(md).toContain('NOT A RERANKED MEASUREMENT');
+    expect(md).toContain('Do not quote them');
+  });
+
+  it('says nothing when the rerank actually ran', async () => {
+    const service = new RetrievalEvalService(fakeRecompute({ u1: ['jA'], u2: ['jB'] }));
+
+    const report = await service.evaluate(labels, 10, { rerank: true });
+
+    expect(report.degraded).toBeUndefined();
+    expect(report.retriever).toBe('hybrid+rerank');
+    expect(formatReportMarkdown(report)).not.toContain('DEGRADED');
+  });
+
+  it('a baseline run is unaffected — no rerank asked for, nothing to degrade', async () => {
+    const service = new RetrievalEvalService(fakeRecompute({ u1: ['jA'], u2: ['jB'] }));
+
+    const report = await service.evaluate(labels, 10, { rerank: false });
+
+    expect(report.retriever).toBe('hybrid');
+    expect(report.degraded).toBeUndefined();
+  });
+});

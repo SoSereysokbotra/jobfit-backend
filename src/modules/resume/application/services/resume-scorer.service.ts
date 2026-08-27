@@ -16,6 +16,7 @@ import { ParsedResumeDataRepository } from '../../infrastructure/repositories/pa
 import { Resume } from '../../domain/entities/resume.entity';
 import { AiClient } from '@infra/ai/ai.client';
 import { AiServiceError } from '@infra/ai/ai.errors';
+import { logAiFallback } from '@infra/ai/ai-degradation.logger';
 
 /** Which path produced the scores — surfaced so callers/analytics can tell them apart. */
 export type ScoredBy = 'ai' | 'heuristic';
@@ -98,9 +99,7 @@ export class ResumeScorerService {
       };
     } catch (err) {
       if (!(err instanceof AiServiceError)) throw err;
-      this.logger.warn(
-        `AI resume scoring unavailable (${err.code}); falling back to heuristic`,
-      );
+      logAiFallback(this.logger, err, 'AI résumé scoring', 'falling back to the heuristic scorer');
       result = this.heuristicScore(parsed, text);
     }
 
