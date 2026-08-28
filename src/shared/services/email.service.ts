@@ -161,6 +161,57 @@ export class EmailService implements OnModuleInit {
   }
 
   /**
+   * The employer's account has been approved - here is the code that activates it.
+   *
+   * NO PASSWORD IS SENT. The code proves the recipient controls this inbox; the
+   * employer chooses their own password during activation. That is why the account is
+   * created with `emailVerified: false` and an empty hash - this mail, and only this
+   * mail, is what turns an approved row into a usable account
+   * (employer_logic.md v2.1 section 4.3).
+   */
+  async sendEmployerActivationCode(
+    to: string,
+    code: string,
+    companyName: string,
+    ttlText: string,
+  ): Promise<void> {
+    await this.send(
+      to,
+      'Your JobFit employer account is approved',
+      this.codeTemplate(
+        'Activate your employer account',
+        `Your request for ${companyName} has been approved. Use the code below to set ` +
+          'your password and sign in. By activating this account you agree to the ' +
+          'JobFit Employer Terms of Service.',
+        code,
+        ttlText,
+      ),
+    );
+  }
+
+  /**
+   * A rejected request. `reason` is the admin's own words and is shown verbatim,
+   * because a rejection with no reason is one the employer cannot act on.
+   */
+  async sendEmployerRequestRejected(
+    to: string,
+    companyName: string,
+    reason: string,
+  ): Promise<void> {
+    await this.send(to, 'About your JobFit employer request', {
+      text:
+        `We reviewed the employer request for ${companyName} and cannot approve it ` +
+        `at this time.\n\nReason: ${reason}\n\n` +
+        'If you believe this is a mistake, reply to this email with more detail.',
+      html:
+        `<p>We reviewed the employer request for <strong>${companyName}</strong> and ` +
+        'cannot approve it at this time.</p>' +
+        `<p><strong>Reason:</strong> ${reason}</p>` +
+        '<p>If you believe this is a mistake, reply to this email with more detail.</p>',
+    });
+  }
+
+  /**
    * Deliver one mail. Throws on failure (rule 2) — callers decide whether a bounce is
    * fatal to their flow. In dev/test with no SMTP configured the send is skipped rather
    * than thrown, so the suite runs without a mail server.
@@ -199,8 +250,16 @@ export class EmailService implements OnModuleInit {
     }
   }
 
-  private codeTemplate(title: string, intro: string, code: string): MailBody {
-    const text = `${intro}\n\nYour code: ${code}\n\nThis code expires in 15 minutes.`;
+  private codeTemplate(
+    title: string,
+    intro: string,
+    code: string,
+    // Employer activation codes live far longer than a verification code, so the
+    // sentence has to be told rather than assumed. The default keeps every
+    // existing caller byte-identical.
+    ttlText = '15 minutes',
+  ): MailBody {
+    const text = `${intro}\n\nYour code: ${code}\n\nThis code expires in ${ttlText}.`;
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto;">
         <h2 style="margin-bottom: 8px;">${title}</h2>
@@ -208,7 +267,7 @@ export class EmailService implements OnModuleInit {
         <div style="font-size: 32px; font-weight: 700; letter-spacing: 6px;
                     background: #f4f4f5; padding: 16px 0; text-align: center;
                     border-radius: 8px; margin: 16px 0;">${code}</div>
-        <p style="color: #888; font-size: 13px;">This code expires in 15 minutes.</p>
+        <p style="color: #888; font-size: 13px;">This code expires in ${ttlText}.</p>
       </div>`;
     return { text, html };
   }

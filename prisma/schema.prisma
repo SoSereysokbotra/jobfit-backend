@@ -16,6 +16,22 @@ enum UserRole {
   ADMIN
 }
 
+/// Account lifecycle (employer_logic.md v2.1 section 8).
+///
+/// SUSPENDED is reversible (policy violation, suspicious activity); DEACTIVATED is a
+/// permanent close. `isActive: Boolean` could not tell those apart, which is why an admin
+/// had no way to record WHY an account was off.
+///
+/// TODO(Phase 7): `isActive` is still the flag the login path enforces
+/// (user.repository.ts). Until that switches to `status`, both are written together and
+/// this column is recorded but not yet authoritative. Collapsing them is Phase 7's job,
+/// because it touches the auth entity and the login refusal.
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
+
 enum JobStatus {
   DRAFT
   PUBLISHED
@@ -116,12 +132,18 @@ enum AuditActionType {
   USER_ACCOUNT_DELETED
   USER_UNLOCKED
   EMAIL_SUPPRESSED
+  // Employer onboarding (employer_logic.md v2.1 section 9). Approval CREATES an account,
+  // which is the most consequential thing an admin can do here — it must be attributable.
+  EMPLOYER_REQUEST_APPROVED
+  EMPLOYER_REQUEST_REJECTED
+  EMPLOYER_ACTIVATION_RESENT
 }
 
 enum AuditResourceType {
   USER
   EMAIL
   SYSTEM
+  EMPLOYER_REQUEST
 }
 
 // ── Employer module enums (Employer Phase 2) ─────────────────────────────────
@@ -130,6 +152,19 @@ enum AuditResourceType {
 enum CompanyVerificationMethod {
   EMAIL_DOMAIN
   ADMIN_REVIEW
+}
+
+/// The employer onboarding ticket's lifecycle (employer_logic.md v2.1 section 2).
+///
+/// DELIBERATELY SEPARATE from UserStatus. This ticket exists BEFORE any account does and
+/// must survive rejection — an account row must never be created for a rejected request,
+/// so the two cannot share a state machine.
+enum EmployerRequestStatus {
+  SUBMITTED
+  REVIEWING
+  PENDING_INFO
+  APPROVED
+  REJECTED
 }
 
 model User {
@@ -141,6 +176,8 @@ model User {
   subscriptionTier SubscriptionTier @default(FREE)
   avatarUrl        String?
   isActive         Boolean          @default(true)
+  /// See UserStatus. Written on every lifecycle change; not yet enforced at login.
+  status           UserStatus       @default(ACTIVE)
 
   // Email verification (isVerified in the domain maps to this column)
   emailVerified          Boolean   @default(false)
@@ -171,9 +208,12 @@ model User {
   deletedEmail String?
 
   // Employer profile
-  employerProfile EmployerProfile?
+  employerProfile          EmployerProfile?
+  /// Onboarding tickets this admin reviewed, and the one that created this account.
+  reviewedEmployerRequests EmployerRequest[] @relation("EmployerRequestReviewer")
+  employerRequest          EmployerRequest?  @relation("EmployerRequestAccount")
   // Auth sessions
-  refreshTokens   RefreshToken[]
+  refreshTokens            RefreshToken[]
 
   // ── User module (Phase 3) ──────────────────────────────────────────────────
   profile           Profile?
@@ -439,6 +479,64 @@ model EmployerProfile {
   @@map("employer_profiles")
 }
 
+/// An employer's application to join the platform — the onboarding ticket.
+///
+/// Employers cannot self-register (the public signup DTO has no role field, so it can only
+/// produce a JOB_SEEKER). This table is the only path to an EMPLOYER account, and until
+/// it existed there was NO runtime path at all: every employer came from prisma/seed.ts.
+///
+/// Not a User relation, by design. The row is created by an unauthenticated stranger and
+/// survives rejection; a rejected request must leave no account behind.
+model EmployerRequest {
+  id String @id @default(uuid())
+
+  // ── What the employer submitted ──
+  companyName       String
+  contactName       String
+  contactRole       String
+  /// Becomes the login address. Not unique: a rejected request must not permanently
+  /// block the address, and the real conflict check is the unique index on users.email,
+  /// applied inside the approval transaction.
+  companyEmail      String
+  companyWebsite    String?
+  description       String
+  /// Business registration or similar. A link, not a blob — the API never serves it.
+  supportingDocsUrl String?
+
+  // ── Review ──
+  status            EmployerRequestStatus @default(SUBMITTED)
+  /// Internal. Shown to the employer ONLY as the rejection reason.
+  adminNotes        String?
+  reviewedByAdminId String?
+  reviewedByAdmin   User?                 @relation("EmployerRequestReviewer", fields: [reviewedByAdminId], references: [id], onDelete: SetNull)
+  reviewedAt        DateTime?
+
+  /// The account created on approval. Null until then, and forever on a rejection.
+  approvedUserId String? @unique
+  approvedUser   User?   @relation("EmployerRequestAccount", fields: [approvedUserId], references: [id], onDelete: SetNull)
+
+  /// WHICH company the admin approved this request for.
+  ///
+  /// Without it, first-login claim is a free-text search and an employer approved for one
+  /// company could claim another. The claim step checks against this
+  /// (employer_logic.md v2.1 section 6).
+  approvedCompanyId String?
+  approvedCompany   Company? @relation(fields: [approvedCompanyId], references: [id], onDelete: SetNull)
+
+  // ── Activation ──
+  /// 6-digit code emailed on approval. Mirrors the existing verification-code columns on
+  /// User rather than inventing a second mechanism. Cleared once used.
+  activationCode       String?
+  activationCodeExpiry DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([companyEmail])
+  @@map("employer_requests")
+}
+
 model Company {
   id          String  @id @default(uuid())
   name        String  @unique
@@ -468,8 +566,10 @@ model Company {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  employers EmployerProfile[]
-  jobs      Job[]
+  employers       EmployerProfile[]
+  jobs            Job[]
+  /// Onboarding tickets the admin approved for this company.
+  employerRequests EmployerRequest[]
 
   // NOTE: Prisma's @@fulltext is MySQL-only and invalid on PostgreSQL. Company search is
   // implemented with case-insensitive `contains` in the repository; for production-grade

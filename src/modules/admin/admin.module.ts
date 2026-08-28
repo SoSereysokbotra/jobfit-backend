@@ -59,5 +59,8 @@ import { AuditLogRepository } from './infrastructure/repositories/audit-log.repo
     EmailEventRepository,
     AuditLogRepository,
   ],
+  // Employer onboarding records admin actions too (approve / reject / resend). Exporting
+  // the service keeps ONE audit writer rather than a second instance in another module.
+  exports: [AuditLogService],
 })
 export class AdminModule {}

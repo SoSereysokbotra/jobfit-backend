@@ -56,6 +56,7 @@ import { NotificationModule } from './modules/notification/notification.module';
 import { PaymentModule } from './modules/payment/payment.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { EmployerModule } from './modules/employer/employer.module';
+import { EmployerRequestModule } from './modules/employer-request/employer-request.module';
 import { LearningModule } from './modules/learning/learning.module';
 import { JobTrackerModule } from './modules/job-tracker/job-tracker.module';
 import { MatchReportModule } from './modules/match-report/match-report.module';
@@ -125,6 +126,7 @@ import { AlertingModule } from './modules/alerting/alerting.module';
     PaymentModule,
     AdminModule,
     EmployerModule,
+    EmployerRequestModule,
     LearningModule,
     JobTrackerModule,
     MatchReportModule,
