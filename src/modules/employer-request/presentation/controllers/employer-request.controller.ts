@@ -1,14 +1,18 @@
 // src/modules/employer-request/presentation/controllers/employer-request.controller.ts
 //
-// Employer onboarding intake and activation.
+// Employer onboarding intake and activation. Both @Public().
 //
-// Intake is ADMIN-ONLY. employer_logic.md v2.1 §3.1 is explicit — "Employers cannot register
-// via the public website. The process is entirely admin-controlled" — and §4.1 has the
-// employer email or Telegram the admin, who enters the request. A public endpoint here would
-// be self-registration by another name.
+// SUBMITTING A REQUEST IS NOT REGISTERING. employer_logic.md §3.1 forbids an employer
+// obtaining an ACCOUNT through the website, and that still holds: this endpoint writes a row
+// to a review queue and grants nothing. No account, no password, no login exists until an
+// admin approves the request and picks the company. The gate did not move — only who types
+// the six fields, the employer or the admin.
 //
-// Activation stays @Public(): the employer has an account by then but cannot sign in with
-// it, so there is no token to authenticate with.
+// The admin path stays: the "New request" button in the queue posts here too, because §4.1's
+// email and Telegram channel does not disappear just because a form exists.
+//
+// Activation is public for a different reason: the employer HAS an account by then but
+// cannot sign in with it, so there is no token to authenticate with.
 
 import {
   Body,
@@ -16,13 +20,14 @@ import {
   HttpCode,
   HttpStatus,
   Post,
+  UseGuards,
 } from '@nestjs/common';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 
 import { Public } from '@common/decorators/public.decorator';
-import { Roles } from '@common/decorators/roles.decorator';
-import { CurrentUser } from '@common/decorators/current-user.decorator';
-import { AuthenticatedUser } from '@common/guards/jwt-auth.guard';
+import { RateLimit } from '@common/decorators/rate-limit.decorator';
+import { THROTTLERS } from '@config/throttler.config';
 import { EmployerRequestService } from '../../application/services/employer-request.service';
 import { EmployerApprovalService } from '../../application/services/employer-approval.service';
 import {
@@ -33,6 +38,7 @@ import {
 } from '../../application/dtos/employer-request.dtos';
 
 @ApiTags('Employer Onboarding')
+@UseGuards(ThrottlerGuard)
 @Controller('employer-requests')
 export class EmployerRequestController {
   constructor(
@@ -41,23 +47,27 @@ export class EmployerRequestController {
   ) {}
 
   @Post()
-  @Roles('ADMIN')
+  @Public()
+  @RateLimit(THROTTLERS.employerRequest.name)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
-    summary: 'Record an employer request the admin received by email or Telegram',
+    summary: 'Ask to join JobFit as an employer',
     description:
-      'ADMIN ONLY, per employer_logic.md v2.1 §3.1. Employers reach the admin through ' +
-      'email or Telegram; the admin transcribes what they sent into the queue. There is ' +
-      'no public intake path by design.',
+      'Creates a REQUEST, not an account — no account exists until an admin approves it ' +
+      'and selects the company. Also used by the admin "New request" form for employers ' +
+      'who arrive by email or Telegram. The response deliberately reveals nothing about ' +
+      'whether the address already has an account: answering that to an anonymous caller ' +
+      'would make this an account-enumeration oracle.',
   })
   @ApiResponse({ status: 201, type: EmployerRequestReceiptDto })
   @ApiResponse({
     status: 409,
-    description: 'A request for this address is already under review.',
+    description:
+      'A request for this address is already under review. Safe to reveal — it concerns a ' +
+      'request the caller themselves submitted, not whether an account exists.',
   })
   submit(
     @Body() dto: CreateEmployerRequestDto,
-    @CurrentUser() _admin: AuthenticatedUser,
   ): Promise<EmployerRequestReceiptDto> {
     return this.requests.submit(dto);
   }

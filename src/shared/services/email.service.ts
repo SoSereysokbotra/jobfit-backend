@@ -42,6 +42,18 @@ export class EmailService implements OnModuleInit {
   private readonly logger = new Logger(EmailService.name);
   private transporter?: Transporter;
   private from = '';
+  /**
+   * Where the app lives, for links in email.
+   *
+   * Only the employer flows need this. Every seeker code is requested while the user is
+   * ALREADY on the site, so the page they came from is where they type it. An approved
+   * employer receives their code cold, with nothing open — a code and no destination is
+   * not an instruction.
+   *
+   * Falls back to CORS_ORIGIN, which is already the front end's address, then to localhost
+   * so development works with no extra configuration. Production should set FRONTEND_URL.
+   */
+  private appUrl = '';
   private host?: string;
   private verified?: boolean;
   private lastError?: string;
@@ -57,6 +69,13 @@ export class EmailService implements OnModuleInit {
     const nodeEnv = this.config.get<string>('NODE_ENV') ?? 'development';
     this.from =
       this.config.get<string>('SMTP_FROM') ?? user ?? 'no-reply@localhost';
+    this.appUrl = (
+      this.config.get<string>('FRONTEND_URL') ??
+      this.config.get<string>('CORS_ORIGIN') ??
+      'http://localhost:3000'
+    )
+      // A trailing slash would produce '//employer/activate'.
+      .replace(/\/+$/, '');
 
     if (!host || !user || !pass) {
       if (nodeEnv === 'production') {
@@ -175,6 +194,9 @@ export class EmailService implements OnModuleInit {
     companyName: string,
     ttlText: string,
   ): Promise<void> {
+    // The address is carried in the link so they do not retype it, and so the page can
+    // tell them which account they are activating.
+    const url = `${this.appUrl}/employer/activate?email=${encodeURIComponent(to)}`;
     await this.send(
       to,
       'Your JobFit employer account is approved',
@@ -185,6 +207,7 @@ export class EmailService implements OnModuleInit {
           'JobFit Employer Terms of Service.',
         code,
         ttlText,
+        { url, label: 'Activate my account' },
       ),
     );
   }
@@ -258,8 +281,15 @@ export class EmailService implements OnModuleInit {
     // sentence has to be told rather than assumed. The default keeps every
     // existing caller byte-identical.
     ttlText = '15 minutes',
+    /**
+     * Where to use the code. Optional because the seeker flows do not need it — the user
+     * is already on the page that asked for the code.
+     */
+    action?: { url: string; label: string },
   ): MailBody {
-    const text = `${intro}\n\nYour code: ${code}\n\nThis code expires in ${ttlText}.`;
+    const text =
+      `${intro}\n\nYour code: ${code}\n\nThis code expires in ${ttlText}.` +
+      (action ? `\n\n${action.label}: ${action.url}` : '');
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto;">
         <h2 style="margin-bottom: 8px;">${title}</h2>
@@ -267,6 +297,19 @@ export class EmailService implements OnModuleInit {
         <div style="font-size: 32px; font-weight: 700; letter-spacing: 6px;
                     background: #f4f4f5; padding: 16px 0; text-align: center;
                     border-radius: 8px; margin: 16px 0;">${code}</div>
+        ${
+          action
+            ? `<p style="text-align: center; margin: 20px 0;">
+                 <a href="${action.url}"
+                    style="display: inline-block; background: #5A189A; color: #ffffff;
+                           text-decoration: none; padding: 12px 24px; border-radius: 8px;
+                           font-weight: 700;">${action.label}</a>
+               </p>
+               <p style="color: #888; font-size: 12px; word-break: break-all;">
+                 Or paste this into your browser: ${action.url}
+               </p>`
+            : ''
+        }
         <p style="color: #888; font-size: 13px;">This code expires in ${ttlText}.</p>
       </div>`;
     return { text, html };

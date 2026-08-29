@@ -43,6 +43,18 @@ export const THROTTLERS = {
     refreshToken: { name: 'refreshTokenRateLimiter', ttl: 15 * MIN, limit: 30 * SCALE },
     logout: { name: 'logoutRateLimiter', ttl: 15 * MIN, limit: 20 * SCALE },
 
+    /**
+     * Public employer intake (POST /employer-requests).
+     *
+     * The only unauthenticated WRITE in the employer module, so the only one a script can
+     * hammer. A company fills this in once, so three an hour per IP is generous.
+     *
+     * ⚠️ NOT A SECURITY BOUNDARY. It slows one IP; it does nothing against a proxy pool.
+     * The real containment is that a request GRANTS NOTHING — no account exists until an
+     * admin approves it — so the worst outcome is queue noise an admin rejects.
+     */
+    employerRequest: { name: 'employerRequestRateLimiter', ttl: 60 * MIN, limit: 3 * SCALE },
+
     // ── AI / GPU (per USER) ───────────────────────────────────────────────────
     // Every route these guard reaches an LLM, an embedding model, or a paid API.
     // Before this existed, all of them were authenticated and unlimited.
