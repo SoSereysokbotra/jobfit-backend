@@ -12,12 +12,17 @@
 // (3) lives in the repository and is asserted there, in admin-user.repository.status.spec.
 
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { AuditActionType, UserStatus } from '@prisma/client';
+import {
+  AuditActionType,
+  SecurityEventType,
+  UserStatus,
+} from '@prisma/client';
 import { AdminUserService } from './admin-user.service';
 
 describe('AdminUserService.setStatus', () => {
   let userRepo: { setStatus: jest.Mock; findEmailById: jest.Mock };
   let auditLog: { record: jest.Mock };
+  let security: { record: jest.Mock };
   let service: AdminUserService;
 
   beforeEach(() => {
@@ -26,13 +31,15 @@ describe('AdminUserService.setStatus', () => {
       findEmailById: jest.fn().mockResolvedValue({ email: 'jane@techcorp.com' }),
     };
     auditLog = { record: jest.fn().mockResolvedValue(undefined) };
+    security = { record: jest.fn().mockResolvedValue(undefined) };
 
-    // Constructor order: userRepo, commandBus, auditLog, lockout.
+    // Constructor order: userRepo, commandBus, auditLog, lockout, security.
     service = new AdminUserService(
       userRepo as never,
       { execute: jest.fn() } as never,
       auditLog as never,
       { clearAttempts: jest.fn() } as never,
+      security as never,
     );
   });
 
@@ -67,6 +74,20 @@ describe('AdminUserService.setStatus', () => {
         adminId: 'admin-1',
         actionType: action,
         resourceId: 'user-1',
+      }),
+    );
+  });
+
+  // Two records, not one: the audit log says which admin is accountable, the security
+  // event belongs to the account's own history where an investigation will look.
+  it('also writes the change to the account security history', async () => {
+    await service.setStatus('admin-1', 'user-1', UserStatus.SUSPENDED);
+
+    expect(security.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: SecurityEventType.ACCOUNT_STATUS_CHANGED,
+        email: 'jane@techcorp.com',
+        userId: 'user-1',
       }),
     );
   });

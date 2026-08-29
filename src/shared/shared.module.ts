@@ -14,6 +14,7 @@ import { JwtService } from './services/jwt.service';
 import { EmailService } from './services/email.service';
 import { LoggerService } from './services/logger.service';
 import { RedisService } from './services/redis.service';
+import { SecurityEventService } from './services/security-event.service';
 
 // Global so the app-wide JwtAuthGuard (and any feature controller that references it via
 // @UseGuards(JwtAuthGuard)) can inject JwtService without each module re-importing this.
@@ -28,13 +29,21 @@ import { RedisService } from './services/redis.service';
       inject: [ConfigService],
     }),
   ],
-  providers: [PrismaService, JwtService, EmailService, LoggerService, RedisService],
+  providers: [
+    PrismaService,
+    JwtService,
+    EmailService,
+    LoggerService,
+    RedisService,
+    SecurityEventService,
+  ],
   exports: [
     PrismaService,
     JwtService,
     EmailService,
     LoggerService,
     RedisService,
+    SecurityEventService,
     JwtModule,
   ],
 })

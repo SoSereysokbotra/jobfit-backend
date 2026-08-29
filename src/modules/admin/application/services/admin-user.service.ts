@@ -8,7 +8,7 @@
 
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { CommandBus } from '@nestjs/cqrs';
-import { AuditActionType, AuditResourceType, UserStatus } from '@prisma/client';
+import { AuditActionType, AuditResourceType, SecurityEventType, UserStatus } from '@prisma/client';
 import { RequestPasswordResetCommand } from '@modules/auth/application/commands/request-password-reset.command';
 import {
   ACCOUNT_LOCKOUT_SERVICE,
@@ -17,6 +17,7 @@ import {
 import { ERROR_MESSAGES } from '@common/constants/error-messages';
 import { AdminUserRepository } from '../../infrastructure/repositories/admin-user.repository';
 import { AuditLogService } from './audit-log.service';
+import { SecurityEventService } from '@shared/services/security-event.service';
 import {
   AdminUserDetailDto,
   AdminUserListItemDto,
@@ -50,6 +51,7 @@ export class AdminUserService {
     private readonly auditLog: AuditLogService,
     @Inject(ACCOUNT_LOCKOUT_SERVICE)
     private readonly lockout: IAccountLockoutService,
+    private readonly security: SecurityEventService,
   ) {}
 
   async search(params: {
@@ -156,6 +158,16 @@ export class AdminUserService {
 
     const changed = await this.userRepo.setStatus(userId, status);
     if (!changed) throw new NotFoundException(ERROR_MESSAGES.USER_NOT_FOUND);
+
+    // TWO records, not one, because they answer different questions. The audit log says
+    // which admin is accountable; the security event belongs to the account's own history,
+    // where the user (or whoever investigates a lockout) will look for it.
+    await this.security.record({
+      eventType: SecurityEventType.ACCOUNT_STATUS_CHANGED,
+      email: changed.email,
+      userId,
+      detail: `Set to ${status} by admin ${adminId}`,
+    });
 
     await this.auditLog.record({
       adminId,
