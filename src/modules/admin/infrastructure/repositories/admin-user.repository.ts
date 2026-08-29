@@ -6,7 +6,7 @@
 // aggregates expose, and only ever touches non-secret columns.
 
 import { Injectable, Logger } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, UserStatus } from '@prisma/client';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import { RedisService } from '@shared/services/redis.service';
 import { authCacheKeys } from '@modules/auth/infrastructure/persistence/auth-cache.keys';
@@ -30,6 +30,7 @@ const ADMIN_USER_SELECT = {
   name: true,
   role: true,
   isActive: true,
+  status: true,
   emailVerified: true,
   lastLogin: true,
   createdAt: true,
@@ -133,6 +134,9 @@ export class AdminUserRepository {
       data: {
         deletedAt: new Date(),
         isActive: false,
+        // Both columns, always. A deleted account whose status still said ACTIVE
+        // would read as live everywhere the new column is consulted.
+        status: UserStatus.DEACTIVATED,
         email: tombstoneEmail(id),
         deletedEmail: existing.email,
       },
@@ -144,6 +148,38 @@ export class AdminUserRepository {
     // just-deleted user could still log in until those keys expired.
     await this.invalidateAuthCache(id, existing.email);
     return true;
+  }
+
+  /**
+   * Move an account between ACTIVE, SUSPENDED and DEACTIVATED.
+   *
+   * Writes `isActive` alongside `status` so the two never disagree while the old boolean
+   * still has readers. Returns the email, which the caller needs for the audit record and
+   * which is also what the cache is keyed on.
+   *
+   * A soft-deleted account is not eligible: `deletedAt` is the terminal state and
+   * reviving one through a status change would resurrect a tombstoned email.
+   */
+  async setStatus(
+    id: string,
+    status: UserStatus,
+  ): Promise<{ email: string } | null> {
+    const existing = await this.prisma.user.findFirst({
+      where: { id, deletedAt: null },
+      select: { email: true },
+    });
+    if (!existing) return null;
+
+    await this.prisma.user.update({
+      where: { id },
+      data: { status, isActive: status === UserStatus.ACTIVE },
+    });
+
+    // Same reason as softDelete: the auth repository caches the entity and an email->id
+    // lookup for 300s and knows nothing about this write. Without this, a just-suspended
+    // user keeps authenticating until the key expires.
+    await this.invalidateAuthCache(id, existing.email);
+    return existing;
   }
 
   /** Best-effort: a cache failure must not make the deletion itself fail. */

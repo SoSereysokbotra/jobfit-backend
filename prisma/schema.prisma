@@ -137,6 +137,11 @@ enum AuditActionType {
   EMPLOYER_REQUEST_APPROVED
   EMPLOYER_REQUEST_REJECTED
   EMPLOYER_ACTIVATION_RESENT
+  // Account lifecycle (employer_logic.md v2.1 section 8). Suspension is reversible and
+  // deactivation is not, so they are separate actions rather than one STATUS_CHANGED.
+  USER_SUSPENDED
+  USER_REACTIVATED
+  USER_DEACTIVATED
 }
 
 enum AuditResourceType {

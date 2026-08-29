@@ -3,6 +3,7 @@
 // User Management (Feature 2). All routes require an ADMIN JWT (@Roles('ADMIN')).
 
 import {
+  Body,
   Controller,
   Delete,
   Get,
@@ -30,6 +31,8 @@ import {
 import { SearchUsersDto } from '../../application/dtos/search-users.dto';
 import { AdminUserDetailDto } from '../../application/dtos/admin-user-response.dto';
 import { AdminMessageResponseDto } from '../../application/dtos/admin-message-response.dto';
+import { SetUserStatusDto } from '../../application/dtos/set-user-status.dto';
+import { AuthenticatedUser } from '@common/guards/jwt-auth.guard';
 
 @ApiTags('Admin - Users')
 @ApiBearerAuth()
@@ -70,6 +73,28 @@ export class AdminUserController {
   ): Promise<AdminMessageResponseDto> {
     await this.adminUsers.resetPassword(adminId, id);
     return new AdminMessageResponseDto('Password reset email sent.');
+  }
+
+  @Post(':id/status')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Suspend, reactivate or deactivate an account',
+    description:
+      'SUSPENDED is reversible, DEACTIVATED is a permanent close, and both stop the ' +
+      'account authenticating immediately — the auth cache is invalidated with the write, ' +
+      'so there is no window where a suspended user keeps working. An admin cannot change ' +
+      'their own status.',
+  })
+  @ApiOkResponse({ type: AdminMessageResponseDto })
+  @ApiResponse({ status: 400, description: 'Changing your own status.' })
+  @ApiResponse({ status: 404, description: 'No such user, or already deleted.' })
+  async setStatus(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetUserStatusDto,
+    @CurrentUser() admin: AuthenticatedUser,
+  ): Promise<AdminMessageResponseDto> {
+    await this.adminUsers.setStatus(admin.id, id, dto.status);
+    return new AdminMessageResponseDto(`Account is now ${dto.status.toLowerCase()}.`);
   }
 
   @Post(':id/unlock')

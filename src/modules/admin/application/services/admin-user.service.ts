@@ -6,9 +6,9 @@
 //   - unlock          -> auth's AccountLockoutService.clearAttempts()
 //   - every mutation  -> AuditLogService.record()
 
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { CommandBus } from '@nestjs/cqrs';
-import { AuditActionType, AuditResourceType } from '@prisma/client';
+import { AuditActionType, AuditResourceType, UserStatus } from '@prisma/client';
 import { RequestPasswordResetCommand } from '@modules/auth/application/commands/request-password-reset.command';
 import {
   ACCOUNT_LOCKOUT_SERVICE,
@@ -28,6 +28,19 @@ export interface PaginatedUsers {
   skip: number;
   take: number;
 }
+
+/**
+ * Which audit action each transition records.
+ *
+ * Three actions rather than one STATUS_CHANGED: suspension is reversible, deactivation is
+ * not, and reactivation is the one that puts an account back in reach. An audit answering
+ * "who turned this off" should not have to read a payload to learn which happened.
+ */
+const STATUS_AUDIT_ACTION: Record<UserStatus, AuditActionType> = {
+  ACTIVE: AuditActionType.USER_REACTIVATED,
+  SUSPENDED: AuditActionType.USER_SUSPENDED,
+  DEACTIVATED: AuditActionType.USER_DEACTIVATED,
+};
 
 @Injectable()
 export class AdminUserService {
@@ -114,6 +127,39 @@ export class AdminUserService {
     await this.auditLog.record({
       adminId,
       actionType: AuditActionType.USER_ACCOUNT_DELETED,
+      resourceType: AuditResourceType.USER,
+      resourceId: userId,
+    });
+  }
+
+  /**
+   * Move an account between ACTIVE, SUSPENDED and DEACTIVATED.
+   *
+   * An admin cannot change their OWN status. Suspending yourself locks you out of the very
+   * panel that could undo it, and there is no second door — no self-service reactivation
+   * exists by design.
+   *
+   * DEACTIVATED is reversible here even though the spec calls it permanent: `deletedAt` is
+   * the genuinely terminal state, and an admin who clicks the wrong row should not need a
+   * database session to fix it.
+   */
+  async setStatus(
+    adminId: string,
+    userId: string,
+    status: UserStatus,
+  ): Promise<void> {
+    if (adminId === userId) {
+      throw new BadRequestException(
+        'You cannot change your own account status.',
+      );
+    }
+
+    const changed = await this.userRepo.setStatus(userId, status);
+    if (!changed) throw new NotFoundException(ERROR_MESSAGES.USER_NOT_FOUND);
+
+    await this.auditLog.record({
+      adminId,
+      actionType: STATUS_AUDIT_ACTION[status],
       resourceType: AuditResourceType.USER,
       resourceId: userId,
     });

@@ -15,6 +15,15 @@ import { SafeUser } from './safe-user.entity';
 
 export type UserRole = 'JOB_SEEKER' | 'EMPLOYER' | 'ADMIN';
 
+/**
+ * Account lifecycle. Mirrors the Prisma UserStatus enum.
+ *
+ * SUPERSEDES `isActive`, which could not tell a reversible suspension from a permanent
+ * close. `isActive` is still written alongside it so nothing reading the old column goes
+ * stale, but `status` is what the login gate consults.
+ */
+export type UserStatus = 'ACTIVE' | 'SUSPENDED' | 'DEACTIVATED';
+
 export interface UserProps {
   id: string;
   email: string;
@@ -27,6 +36,8 @@ export interface UserProps {
   passwordResetCode?: string | null;
   passwordResetCodeExpiry?: Date | null;
   isActive: boolean;
+  /** See UserStatus. Optional so older callers constructing props still compile. */
+  status?: UserStatus;
   createdAt: Date;
   updatedAt: Date;
   lastLogin?: Date | null;
@@ -53,6 +64,7 @@ export class UserEntity {
   passwordResetCode?: string | null;
   passwordResetCodeExpiry?: Date | null;
   isActive: boolean;
+  status: UserStatus;
   createdAt: Date;
   updatedAt: Date;
   lastLogin?: Date | null;
@@ -70,6 +82,9 @@ export class UserEntity {
     this.passwordResetCode = props.passwordResetCode ?? null;
     this.passwordResetCodeExpiry = props.passwordResetCodeExpiry ?? null;
     this.isActive = props.isActive;
+    // Falls back to isActive for any caller that predates the column, so an entity built
+    // from a partial shape is never silently ACTIVE when the flag says otherwise.
+    this.status = props.status ?? (props.isActive ? 'ACTIVE' : 'SUSPENDED');
     this.createdAt = props.createdAt;
     this.updatedAt = props.updatedAt;
     this.lastLogin = props.lastLogin ?? null;
@@ -115,6 +130,7 @@ export class UserEntity {
       passwordResetCode: this.passwordResetCode ?? null,
       passwordResetCodeExpiry: this.passwordResetCodeExpiry ?? null,
       isActive: this.isActive,
+      status: this.status,
       createdAt: this.createdAt,
       updatedAt: this.updatedAt,
       lastLogin: this.lastLogin ?? null,

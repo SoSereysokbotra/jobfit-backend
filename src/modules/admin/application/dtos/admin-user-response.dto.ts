@@ -11,6 +11,7 @@ export class AdminUserListItemDto {
   @ApiProperty() name: string;
   @ApiProperty({ enum: ['JOB_SEEKER', 'EMPLOYER', 'ADMIN'] }) role: string;
   @ApiProperty() isActive: boolean;
+  @ApiProperty({ enum: ['ACTIVE', 'SUSPENDED', 'DEACTIVATED'] }) status: string;
   @ApiProperty() emailVerified: boolean;
   @ApiPropertyOptional({ type: String, nullable: true }) lastLogin: Date | null;
   @ApiProperty() createdAt: Date;
@@ -22,6 +23,7 @@ export class AdminUserListItemDto {
     name: string;
     role: string;
     isActive: boolean;
+    status: string;
     emailVerified: boolean;
     lastLogin: Date | null;
     createdAt: Date;
@@ -32,6 +34,7 @@ export class AdminUserListItemDto {
     this.name = row.name;
     this.role = row.role;
     this.isActive = row.isActive;
+    this.status = row.status;
     this.emailVerified = row.emailVerified;
     this.lastLogin = row.lastLogin;
     this.createdAt = row.createdAt;

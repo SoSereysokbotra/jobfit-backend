@@ -145,10 +145,14 @@ export class UserRepository implements IUserRepository {
    */
   private liveOnly(user: UserEntity): UserEntity | null {
     if (user.deletedAt) return null;
-    // A deactivated account is also not one that may authenticate. `softDelete` sets
-    // both, but an admin can deactivate WITHOUT deleting, and login never checked that
-    // either.
-    if (!user.isActive) return null;
+    // A suspended or deactivated account is also not one that may authenticate.
+    // `softDelete` sets deletedAt, but an admin can suspend WITHOUT deleting, and login
+    // never checked that either.
+    //
+    // Reads `status`, not `isActive`: the boolean could not distinguish a reversible
+    // suspension from a permanent close, which is why UserStatus exists. Both columns are
+    // still written together, so this changes the SOURCE of the answer, not the answer.
+    if (user.status !== 'ACTIVE') return null;
     return user;
   }
 
@@ -218,6 +222,7 @@ export class UserRepository implements IUserRepository {
       passwordResetCode: row.passwordResetCode,
       passwordResetCodeExpiry: row.passwordResetCodeExpiry,
       isActive: row.isActive,
+      status: row.status,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       lastLogin: row.lastLogin,
