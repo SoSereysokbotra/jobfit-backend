@@ -18,6 +18,7 @@ import {
   JobSource,
   NormalizedJob,
 } from './ingestion.types';
+import { buildIdentityKey } from '@shared/utils/company-identity';
 import { JobPublishedEvent } from '@modules/job/domain/events/job-published.event';
 import { JobUpdatedEvent } from '@modules/job/domain/events/job-updated.event';
 
@@ -132,10 +133,26 @@ export class IngestionService {
       return;
     }
 
-    // Upsert the company by its unique name so ingested jobs share one record.
+    /**
+     * One company row per scraped employer.
+     *
+     * `companies.name` is no longer unique — two real businesses can share a name — so the
+     * dedup key is `identityKey`. For scraped rows that is the WEAK key, built from the
+     * normalized name, because NO ingestion source publishes a company website
+     * (see `NormalizedJob` in ingestion.types.ts: companyName and nothing else).
+     *
+     * That is the same grouping as before, plus tolerance for casing and punctuation
+     * drift — "ACME Robotics" and "Acme Robotics." now land on one row rather than two.
+     * It is still a heuristic, and deliberately so: the alternative is a company per job.
+     *
+     * A company an employer later claims and gives a website to moves to a `domain:` key,
+     * at which point a scraped row with the same name no longer merges into it. That is
+     * correct — a name match is a candidate, not proof.
+     */
+    const identityKey = buildIdentityKey({ name: job.companyName });
     const company = await this.prisma.company.upsert({
-      where: { name: job.companyName },
-      create: { name: job.companyName },
+      where: { identityKey },
+      create: { name: job.companyName, identityKey },
       update: {},
       select: { id: true },
     });

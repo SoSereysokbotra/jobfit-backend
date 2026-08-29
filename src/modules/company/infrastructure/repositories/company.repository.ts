@@ -8,6 +8,10 @@
 // PostgreSQL full-text search in the schema). For production FTS, add a tsvector GIN index
 // via a raw migration and switch this method to a parameterised $queryRaw.
 
+import {
+  buildIdentityKey,
+  normalizeDomain,
+} from '@shared/utils/company-identity';
 import { Injectable } from '@nestjs/common';
 import { Company as PrismaCompany, Prisma } from '@prisma/client';
 import { PrismaService } from '@infra/prisma/prisma.service';
@@ -114,6 +118,14 @@ export class CompanyRepository implements IRepository<Company> {
   ): Omit<Prisma.CompanyUncheckedCreateInput, 'id' | 'createdAt' | 'updatedAt'> {
     return {
       name: company.name,
+      // Identity is recomputed on every write, so a company that gains or changes a website
+      // moves from the weak name key to the strong domain one rather than keeping a stale
+      // claim. `name` alone no longer identifies anything.
+      identityKey: buildIdentityKey({
+        name: company.name,
+        website: company.website,
+      }),
+      domain: normalizeDomain(company.website),
       description: company.description ?? null,
       website: company.website ?? null,
       logoUrl: company.logoUrl ?? null,

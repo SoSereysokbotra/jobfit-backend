@@ -31,6 +31,7 @@ import { AdminUserService } from './application/services/admin-user.service';
 import { SystemHealthService } from './application/services/system-health.service';
 import { EmailTrackingService } from './application/services/email-tracking.service';
 import { AuditLogService } from './application/services/audit-log.service';
+import { AdminCompanyService } from './application/services/admin-company.service';
 
 // Infrastructure repositories
 import { AdminUserRepository } from './infrastructure/repositories/admin-user.repository';
@@ -55,6 +56,7 @@ import { AuditLogRepository } from './infrastructure/repositories/audit-log.repo
     SystemHealthService,
     EmailTrackingService,
     AuditLogService,
+    AdminCompanyService,
     // repositories
     AdminUserRepository,
     SystemEventRepository,

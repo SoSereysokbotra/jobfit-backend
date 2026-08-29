@@ -1,0 +1,952 @@
+[
+  {
+    "id": "5ef2d8a6-ff8c-4e8b-a33e-3485ae24a7fd",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "95120f04-ace1-4fac-b374-7338bca04564",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:06.290Z",
+    "updatedAt": "2026-07-27T06:28:06.290Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Industrial Mechanic (Assembly Line Maintainer) MUST BE OPEN TO ALL SHIFTS"
+    }
+  },
+  {
+    "id": "e4fa093d-c0af-47ee-a577-2da7cafd1ef4",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "a9e8d388-93d6-4eaf-a7c0-490f55ccb358",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:06.501Z",
+    "updatedAt": "2026-07-27T06:28:06.501Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Security Host/Hostess - Full-Time, $29.00/Hour"
+    }
+  },
+  {
+    "id": "7ac152da-6cc0-4998-be89-e1c0795104eb",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "14fff95f-4416-44ce-97d3-dd9af0cd062a",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:06.604Z",
+    "updatedAt": "2026-07-27T06:28:06.604Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Psychiatrist - MD or DO"
+    }
+  },
+  {
+    "id": "67127596-2230-4ed4-a103-b6c3e98644ff",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "b1f0b36c-0560-4ceb-b332-4bb9de727a6d",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "software-eng",
+    "seniority": "senior",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:06.707Z",
+    "updatedAt": "2026-07-27T06:28:06.707Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Senior Specialist, Electrical Engineer"
+    }
+  },
+  {
+    "id": "d68596d8-ba81-4cfb-b8b7-457b7f30d19f",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "34982682-5101-4ca4-ba5c-f3e15c2d974a",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "software-eng",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:06.810Z",
+    "updatedAt": "2026-07-27T06:28:06.810Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Process Development Engineer"
+    }
+  },
+  {
+    "id": "6ee4bb21-28a9-43bd-94da-8a91b97bdf79",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "2e30f08e-e150-4d8b-9dfd-4c05ac368296",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:06.914Z",
+    "updatedAt": "2026-07-27T06:28:06.914Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "M&T DSCS Specialist"
+    }
+  },
+  {
+    "id": "03cc5171-dfb0-4f04-a38e-8604fc99e01b",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "2989aabd-eeeb-4ff5-a8cd-90640813f972",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:07.017Z",
+    "updatedAt": "2026-07-27T06:28:07.017Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Speech Therapist - PRN"
+    }
+  },
+  {
+    "id": "acf37335-1b0e-482f-a956-fcef7b26056e",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "86657ff4-ce7e-4047-a4a7-74fa3a32dbe7",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "lead",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:07.120Z",
+    "updatedAt": "2026-07-27T06:28:07.120Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Nurse Care Manager (RN)"
+    }
+  },
+  {
+    "id": "415b292a-4d43-474f-b00c-fb68d82440e5",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "19c4daac-3f56-4d6f-b987-36938483079b",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:07.222Z",
+    "updatedAt": "2026-07-27T06:28:07.222Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Pediatric Private Duty RN LVN"
+    }
+  },
+  {
+    "id": "e4fbc722-3721-4f23-8081-cfb1ef8aa81b",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "cb0a317d-8c51-41cd-b8cf-dd16c5f7d550",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:07.325Z",
+    "updatedAt": "2026-07-27T06:28:07.325Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Electrical Superintendent"
+    }
+  },
+  {
+    "id": "801e59cd-c105-44df-b0d2-b97f276aae66",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "5b4b5533-cf83-4d5f-968a-ef436e59fbfa",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "sales",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:07.429Z",
+    "updatedAt": "2026-07-27T06:28:07.429Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Outside Sales Representative - Security Services"
+    }
+  },
+  {
+    "id": "ce923a50-caed-4fc7-934b-3c4f3b6aa9a8",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "6af41e15-a1fe-409c-ab06-a96a32f98203",
+    "label": "GREAT",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "software-eng",
+    "seniority": "lead",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:07.531Z",
+    "updatedAt": "2026-07-27T06:28:07.531Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Sr. Staff Engineer (GenAI)"
+    }
+  },
+  {
+    "id": "4338bea1-5394-4f02-8751-45b870909129",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "60115453-427b-4bf7-8b6f-ff9d4d3c0821",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "sales",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:07.634Z",
+    "updatedAt": "2026-07-27T06:28:07.634Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Oil Sales and Service Rep I"
+    }
+  },
+  {
+    "id": "7b89cff7-aa79-48be-b4e0-a1c7ae5a8ae0",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "232dc617-1b63-40d2-9d98-d1e18df9a37c",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:07.738Z",
+    "updatedAt": "2026-07-27T06:28:07.738Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "SE"
+    }
+  },
+  {
+    "id": "8d90cf09-1ebb-42e1-a487-a3d86ddbdab5",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "314fc808-a146-4b3c-a01d-caef400beb5a",
+    "label": "OK",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "lead",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:07.844Z",
+    "updatedAt": "2026-07-27T06:28:07.844Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Director, Game Production"
+    }
+  },
+  {
+    "id": "f232cc0d-62b1-46d9-93cd-e1032e80d563",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "6c5b3250-31c4-4b15-bfc8-64a16bc29562",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "lead",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:07.950Z",
+    "updatedAt": "2026-07-27T06:28:07.950Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "SKE Account Manager"
+    }
+  },
+  {
+    "id": "fdca6267-dca3-4c3e-9e90-6f26b0ce8cc0",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "ff33768a-a64d-43b8-a95f-25072e0f7673",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "lead",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:08.056Z",
+    "updatedAt": "2026-07-27T06:28:08.056Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Service Delivery Manager"
+    }
+  },
+  {
+    "id": "55280c7d-d1b2-4c9a-9915-cb79abd31ee2",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "67aedc1b-5c66-4687-9eb4-5f32fb2d8411",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:08.161Z",
+    "updatedAt": "2026-07-27T06:28:08.161Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Merrill Advisor Development Program - Financial Advisor: Delaware South Jersey Market"
+    }
+  },
+  {
+    "id": "6f778430-9a27-40e6-9df9-8a3936b17216",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "ed4d015e-cb2a-4b54-a3b1-af44062cbdbe",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:08.264Z",
+    "updatedAt": "2026-07-27T06:28:08.264Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Acute Dialysis Charge Nurse - Good Samaritan Hospital"
+    }
+  },
+  {
+    "id": "3fdbaade-da93-4f29-97e8-32e6457bc875",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "eddb7001-0df7-4e40-af33-64a2c884bb53",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:08.366Z",
+    "updatedAt": "2026-07-27T06:28:08.366Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Physician - Cardiology"
+    }
+  },
+  {
+    "id": "ad6fc464-4fdd-4b15-87d5-f026bcf836cc",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "acd21420-e632-4b76-bf13-8a7115357100",
+    "label": "OK",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "design",
+    "seniority": "lead",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:08.474Z",
+    "updatedAt": "2026-07-27T06:28:08.474Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Staff Product Designer"
+    }
+  },
+  {
+    "id": "a9185837-8fbf-433d-904e-ab40f41ace55",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "c6435bb1-49f4-400a-ad57-68fc4161e4f8",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "software-eng",
+    "seniority": "senior",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:08.577Z",
+    "updatedAt": "2026-07-27T06:28:08.577Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Sr. Civil Engineer, Land Development (Starlink)"
+    }
+  },
+  {
+    "id": "a75ad5e6-9fb1-469d-92d7-4764d6cedc1e",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "66666666-6666-4666-8666-666666666666",
+    "label": "GREAT",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "software-eng",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:08.680Z",
+    "updatedAt": "2026-07-27T06:28:08.680Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Full-Stack Engineer"
+    }
+  },
+  {
+    "id": "f03027f4-f3f5-4fc2-8205-8ba8a11dd09c",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "432f9ff4-8c0b-438f-b5f7-b54cd76a0a7c",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:08.783Z",
+    "updatedAt": "2026-07-27T06:28:08.783Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Materials Planner - Micron"
+    }
+  },
+  {
+    "id": "a0b1f123-302b-4860-b232-517dc2e2f26d",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "20bd2987-869e-4b80-b8a2-2e8101839c85",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "software-eng",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:08.886Z",
+    "updatedAt": "2026-07-27T06:28:08.886Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Welding Engineer"
+    }
+  },
+  {
+    "id": "b7d9fce5-1157-4e14-a1fd-6d43782f82c5",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "b6ac9b52-fc8e-4bd1-ae1f-8eee7f01c6ed",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:09.031Z",
+    "updatedAt": "2026-07-27T06:28:09.031Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Relationship Banker - East Fowler Financial Center - Bilingual Spanish Required"
+    }
+  },
+  {
+    "id": "6d114290-26bd-4ba3-b986-c030a619213b",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "b68be2e8-7abe-4955-b7de-1d930484cc7c",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "entry",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:09.136Z",
+    "updatedAt": "2026-07-27T06:28:09.136Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Wealth Management Client Associate"
+    }
+  },
+  {
+    "id": "59e70128-0289-42a0-9c09-4cba8623ed5e",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "e1805474-cc67-47dd-9c7c-2f1ebbfd9d07",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:09.239Z",
+    "updatedAt": "2026-07-27T06:28:09.239Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Maintenance Level I"
+    }
+  },
+  {
+    "id": "3837852d-e2be-44bf-bc9f-743aedf716dd",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "843895b8-1284-4efa-8283-8b8420fa727d",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:09.342Z",
+    "updatedAt": "2026-07-27T06:28:09.342Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Production Coordinator"
+    }
+  },
+  {
+    "id": "f1ecf4f1-fc70-4cb1-9b28-ebd20859dcf2",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "30af1e6e-50c5-4d8d-85cc-0564d2a123e9",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:09.444Z",
+    "updatedAt": "2026-07-27T06:28:09.444Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Relationship Banker - Newton Upper Falls Financial Center"
+    }
+  },
+  {
+    "id": "8fd6fd74-0739-4857-ab90-4a7156252cd6",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "908fae6d-3799-401f-be22-855ebe338936",
+    "label": "GREAT",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "product",
+    "seniority": "senior",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:09.548Z",
+    "updatedAt": "2026-07-27T06:28:09.548Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Senior Technical Product Manager - AvaCloud"
+    }
+  },
+  {
+    "id": "e0c50c78-42de-4e5b-b2f8-f7c68aa54bce",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "529b1f58-2751-4f0c-8054-88c8338425c0",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:09.650Z",
+    "updatedAt": "2026-07-27T06:28:09.650Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Cardiac Cath Lab Interventional Radiology Technologist"
+    }
+  },
+  {
+    "id": "ee2183c2-d4e8-4bde-b3ed-03eae908af0d",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "11111111-1111-4111-8111-111111111111",
+    "label": "GREAT",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "software-eng",
+    "seniority": "senior",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:09.755Z",
+    "updatedAt": "2026-07-27T06:28:09.755Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Senior Frontend Engineer"
+    }
+  },
+  {
+    "id": "b648749d-8e21-4449-b031-3c6655364c5b",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "49c512bb-6c41-4749-8382-1ec280c1b405",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "lead",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:09.888Z",
+    "updatedAt": "2026-07-27T06:28:09.888Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Resort Naturalist- Full Time, Disney's Hilton Head Island Resort"
+    }
+  },
+  {
+    "id": "2fe3daf8-40c6-45d4-91ad-e8b905588a8b",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "2104fa3f-32bd-45b5-86f9-0b1a490aa201",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "lead",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:09.996Z",
+    "updatedAt": "2026-07-27T06:28:09.996Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Warehouse Manager"
+    }
+  },
+  {
+    "id": "629942f9-089b-4c24-9df2-a9e6ddd905af",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "44444444-4444-4444-8444-444444444444",
+    "label": "GREAT",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "data",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:10.099Z",
+    "updatedAt": "2026-07-27T06:28:10.099Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Machine Learning Engineer"
+    }
+  },
+  {
+    "id": "64e44d8e-5205-4070-a8c9-69ac10e09566",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "7a090b70-0a72-4117-b4d9-9c7c2be275b4",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "lead",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:10.202Z",
+    "updatedAt": "2026-07-27T06:28:10.202Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Service Delivery Manager"
+    }
+  },
+  {
+    "id": "143c52bf-3afe-4e42-aa19-01ad8be2855c",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "c975091f-0a36-4f06-a5d7-2cd397034d41",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "lead",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:10.310Z",
+    "updatedAt": "2026-07-27T06:28:10.310Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Director of Operations, Manufacturing (WCM Leader)"
+    }
+  },
+  {
+    "id": "03bc4328-ea6c-4fc5-9db4-6775e1594e6f",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "5d539ef2-54b1-4d34-9145-8b0900601111",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:10.416Z",
+    "updatedAt": "2026-07-27T06:28:10.416Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Housekeeper"
+    }
+  },
+  {
+    "id": "f22bda2d-7db8-4fb1-85c8-5d14e7d8824f",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "283f8d15-7b57-46de-934d-66cfe0ddf063",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:10.524Z",
+    "updatedAt": "2026-07-27T06:28:10.524Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Pedi Home Health LVN/RN"
+    }
+  },
+  {
+    "id": "65d22e08-14c1-44c6-be93-761b12c86a0a",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "a35f5b0b-9654-4b27-b22a-c276c815150c",
+    "label": "GREAT",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "senior",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:10.627Z",
+    "updatedAt": "2026-07-27T06:28:10.627Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Senior Scientist - Driver Incentives"
+    }
+  },
+  {
+    "id": "dfedc7b0-5892-45ba-9e41-89d34f6c2584",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "55555555-5555-4555-8555-555555555555",
+    "label": "OK",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "design",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:10.730Z",
+    "updatedAt": "2026-07-27T06:28:10.730Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Product Designer"
+    }
+  },
+  {
+    "id": "3416c184-f1e1-4c5c-88f1-385596075fde",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "50e97f8b-d2a1-4743-a3b7-f459e5cc6593",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "sales",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:10.835Z",
+    "updatedAt": "2026-07-27T06:28:10.835Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Travel Retail Sales Merchandiser"
+    }
+  },
+  {
+    "id": "5be2f728-888c-4161-9450-4829437660db",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "c3cce30c-18ea-409b-bb73-9aa0f01ad25b",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:10.937Z",
+    "updatedAt": "2026-07-27T06:28:10.937Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Civil Superintendent"
+    }
+  },
+  {
+    "id": "5770c3aa-cc25-4db5-8c8d-e4fcf0d9ccc9",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "463c11a8-5702-4920-8f15-cd5f49675643",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:11.041Z",
+    "updatedAt": "2026-07-27T06:28:11.041Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Solar Appointment Setter"
+    }
+  },
+  {
+    "id": "e74b0bc3-c93b-4f23-b572-fc393b2c00fe",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "22222222-2222-4222-8222-222222222222",
+    "label": "GREAT",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "software-eng",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:11.146Z",
+    "updatedAt": "2026-07-27T06:28:11.146Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "React Specialist Developer"
+    }
+  },
+  {
+    "id": "5a2ae7b1-918c-4764-9324-b4fb0d34d4e9",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "33333333-3333-4333-8333-333333333333",
+    "label": "GREAT",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "software-eng",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:11.256Z",
+    "updatedAt": "2026-07-27T06:28:11.256Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Software Engineer – Platforms"
+    }
+  },
+  {
+    "id": "ef434335-19ad-4ab1-851f-20bc9591e6f4",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "05f66605-93ca-46d3-a53c-1e7ad807616b",
+    "label": "GREAT",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "software-eng",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:11.362Z",
+    "updatedAt": "2026-07-27T06:28:11.362Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Backend Engineer (Phase7)"
+    }
+  },
+  {
+    "id": "345b6a64-13f8-4755-b61f-4aaaccc74fdd",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "1830e279-468a-4f45-ad88-84613605d4bb",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:11.464Z",
+    "updatedAt": "2026-07-27T06:28:11.464Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "Pediatric Private Duty RN LVN"
+    }
+  },
+  {
+    "id": "df022dae-d41f-4188-ae25-32798bc93dba",
+    "userId": "9d4f3ae5-f154-4862-a711-d6ac155d139e",
+    "jobId": "79aff4ac-5b59-4c6d-b315-718ec91bd266",
+    "label": "BAD",
+    "reason": null,
+    "source": "HUMAN",
+    "category": "other",
+    "seniority": "mid",
+    "language": "en",
+    "createdAt": "2026-07-27T06:28:11.567Z",
+    "updatedAt": "2026-07-27T06:28:11.567Z",
+    "user": {
+      "email": "lalirima123@gmail.com"
+    },
+    "job": {
+      "title": "SAS in Walmart – Retail Representative - Seasonal"
+    }
+  }
+]

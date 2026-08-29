@@ -12,6 +12,9 @@ import {
 import { EmployerRequest, EmployerRequestStatus } from '@prisma/client';
 
 import { EmployerRequestRepository } from '../../infrastructure/repositories/employer-request.repository';
+// Shared with company identity: the same list decides whether an email domain is a
+// company's own or a consumer provider that identifies nobody.
+import { isPublicDomain } from '@shared/utils/company-identity';
 import {
   CreateEmployerRequestDto,
   EmployerRequestDto,
@@ -21,32 +24,6 @@ import {
   ReviewEmployerRequestDto,
 } from '../dtos/employer-request.dtos';
 
-/**
- * Free consumer mail providers. A request from one of these is ALLOWED — plenty of small
- * Cambodian employers have no corporate domain — but it is flagged so the admin knows to
- * lean on the business documents instead of the address (employer_logic.md v2.1 §4.2).
- */
-const PUBLIC_EMAIL_DOMAINS = new Set([
-  'gmail.com',
-  'googlemail.com',
-  'yahoo.com',
-  'yahoo.co.uk',
-  'hotmail.com',
-  'outlook.com',
-  'live.com',
-  'msn.com',
-  'aol.com',
-  'icloud.com',
-  'me.com',
-  'proton.me',
-  'protonmail.com',
-  'gmx.com',
-  'mail.com',
-  'yandex.com',
-  'zoho.com',
-  'qq.com',
-  '163.com',
-]);
 
 /** Requests older than this without a decision are surfaced to the admin as overdue. */
 export const SLA_HOURS = 48;
@@ -156,6 +133,8 @@ export class EmployerRequestService {
 
 /* ─────────────────────────── helpers ─────────────────────────── */
 
+export { isPublicDomain };
+
 export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
@@ -174,12 +153,6 @@ export function assertNotDecided(request: EmployerRequest): void {
       `This request was already ${request.status.toLowerCase()}.`,
     );
   }
-}
-
-export function isPublicDomain(email: string): boolean {
-  const at = email.lastIndexOf('@');
-  if (at < 0) return false;
-  return PUBLIC_EMAIL_DOMAINS.has(email.slice(at + 1).toLowerCase());
 }
 
 export function toDto(row: EmployerRequest): EmployerRequestDto {

@@ -1,27 +1,15 @@
 // src/modules/admin/presentation/controllers/admin-company.controller.ts
 //
-// Company lookup for the admin panel. All routes require an ADMIN JWT.
+// Company lookup, match-checking and creation for the admin panel. ADMIN JWT throughout.
 //
-// NOT IN THE ORIGINAL PLAN, and added because Phase 5 cannot work without it: approving an
-// employer request requires a `companyId`, and there was no way for an admin to find one.
-// `GET /companies/by-name` is an exact-name lookup built for the browser extension, and
-// the admin companies screen is entirely mock-backed. So the approve dialog had nothing
-// real to search.
+// Exists because approving an employer request requires a `companyId` and there was no way
+// for an admin to find one: `GET /companies/by-name` is an exact-name lookup built for the
+// browser extension, and the admin companies screen is mock-backed.
 //
-// Deliberately read-only and minimal. Creating a company from the admin panel is a
-// separate decision — an employer whose company is not already in the database (from the
-// seed or from job ingestion) still cannot be approved.
+// The rules live in AdminCompanyService. In short: a shared NAME is a candidate to show, a
+// shared DOMAIN is the same business and stops the write.
 
-import {
-  Body,
-  ConflictException,
-  Controller,
-  Get,
-  HttpCode,
-  HttpStatus,
-  Post,
-  Query,
-} from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOkResponse,
@@ -41,10 +29,16 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { Company, Prisma } from '@prisma/client';
 
 import { Roles } from '@common/decorators/roles.decorator';
-import { PrismaService } from '@infra/prisma/prisma.service';
+import {
+  AdminCompanyService,
+  type CompanyCandidate,
+  type CompanyConflictKind,
+  type CompanyMatchResult,
+} from '../../application/services/admin-company.service';
+
+/* ─────────────────────────── DTOs ─────────────────────────── */
 
 export class SearchCompaniesDto {
   @ApiPropertyOptional({ description: 'Matches the company name, case-insensitive.' })
@@ -62,6 +56,32 @@ export class SearchCompaniesDto {
   take?: number;
 }
 
+export class MatchCompanyDto {
+  @ApiProperty({ example: 'Acme Robotics' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  name: string;
+
+  @ApiPropertyOptional({ example: 'https://acme-kh.com' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  website?: string;
+
+  @ApiPropertyOptional({
+    example: 'hr@acme-kh.com',
+    description:
+      "The employer's contact address. Used as the domain when no website was given — " +
+      'the website is optional and routinely skipped, the email is not. Ignored for ' +
+      'consumer providers, which identify a person rather than a business.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  contactEmail?: string;
+}
+
 export class CreateCompanyDto {
   @ApiProperty({ example: 'Acme Robotics', maxLength: 200 })
   @IsString()
@@ -69,7 +89,7 @@ export class CreateCompanyDto {
   @MaxLength(200)
   name: string;
 
-  @ApiPropertyOptional({ example: 'https://acmerobotics.com' })
+  @ApiPropertyOptional({ example: 'https://acme-kh.com' })
   @IsOptional()
   @IsString()
   @MaxLength(500)
@@ -80,40 +100,81 @@ export class CreateCompanyDto {
   @IsString()
   @MaxLength(100)
   industry?: string;
+
+  @ApiPropertyOptional({
+    example: 'hr@acme-kh.com',
+    description:
+      "The employer's contact address, used as the domain when no website was given.",
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  contactEmail?: string;
 }
 
-export class AdminCompanyOptionDto {
+export class AdminCompanyOptionDto implements CompanyCandidate {
   @ApiProperty() id: string;
   @ApiProperty() name: string;
   @ApiPropertyOptional({ type: String, nullable: true }) website: string | null;
-  @ApiPropertyOptional({ type: String, nullable: true }) logoUrl: string | null;
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description: 'Normalized host. This, not the name, is what identifies the company.',
+  })
+  domain: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true }) city: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true }) country: string | null;
   @ApiProperty() isVerified: boolean;
   @ApiProperty({
     description:
-      'True when an employer already manages this company. Approving a second employer ' +
-      'onto it would fail at claim, so the picker greys it out.',
+      'An employer already manages this company. Approving a second onto it would fail at ' +
+      'claim, so the picker greys it out.',
   })
   isClaimed: boolean;
 
-  constructor(
-    c: Pick<Company, 'id' | 'name' | 'website' | 'logoUrl' | 'isVerified'>,
-    isClaimed: boolean,
-  ) {
-    this.id = c.id;
-    this.name = c.name;
-    this.website = c.website;
-    this.logoUrl = c.logoUrl;
-    this.isVerified = c.isVerified;
-    this.isClaimed = isClaimed;
+  constructor(c: CompanyCandidate) {
+    Object.assign(this, c);
   }
 }
+
+export class CompanyMatchResponseDto implements CompanyMatchResult {
+  @ApiProperty({
+    type: [AdminCompanyOptionDto],
+    description:
+      'Rows sharing the normalized name. ADVISORY — two real businesses can share a name, ' +
+      'so these are candidates to show, never something to act on automatically.',
+  })
+  nameMatches: CompanyCandidate[];
+
+  @ApiPropertyOptional({
+    type: AdminCompanyOptionDto,
+    nullable: true,
+    description:
+      'The company already holding this website. BLOCKING — a domain belongs to one business.',
+  })
+  domainMatch: CompanyCandidate | null;
+
+  @ApiProperty({
+    enum: ['NONE', 'SAME_DOMAIN_SAME_NAME', 'SAME_DOMAIN_DIFFERENT_NAME'],
+  })
+  conflict: CompanyConflictKind;
+
+  @ApiPropertyOptional({ type: String, nullable: true })
+  normalizedDomain: string | null;
+
+  constructor(r: CompanyMatchResult) {
+    Object.assign(this, r);
+  }
+}
+
+/* ─────────────────────────── Controller ─────────────────────────── */
 
 @ApiTags('Admin - Companies')
 @ApiBearerAuth()
 @Roles('ADMIN')
 @Controller('admin/companies')
 export class AdminCompanyController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly companies: AdminCompanyService) {}
 
   @Get()
   @ApiOperation({
@@ -123,28 +184,22 @@ export class AdminCompanyController {
   async search(
     @Query() query: SearchCompaniesDto,
   ): Promise<AdminCompanyOptionDto[]> {
-    const rows = await this.prisma.company.findMany({
-      where: {
-        deletedAt: null,
-        ...(query.search
-          ? { name: { contains: query.search, mode: 'insensitive' as const } }
-          : {}),
-      },
-      select: {
-        id: true,
-        name: true,
-        website: true,
-        logoUrl: true,
-        isVerified: true,
-        // One employer per company is the MVP rule, so the picker needs to know.
-        _count: { select: { employers: true } },
-      },
-      orderBy: { name: 'asc' },
-      take: query.take ?? 20,
-    });
+    const rows = await this.companies.search(query.search, query.take ?? 20);
+    return rows.map((r) => new AdminCompanyOptionDto(r));
+  }
 
-    return rows.map(
-      (r) => new AdminCompanyOptionDto(r, r._count.employers > 0),
+  @Get('match')
+  @ApiOperation({
+    summary: 'What would a company with this name and website collide with?',
+    description:
+      'Asked BEFORE creating, so the admin sees candidates and conflicts instead of an ' +
+      'error. `nameMatches` are advisory — two businesses can share a name. `domainMatch` ' +
+      'is not: a website belongs to one business, and creating over it is refused.',
+  })
+  @ApiOkResponse({ type: CompanyMatchResponseDto })
+  async match(@Query() query: MatchCompanyDto): Promise<CompanyMatchResponseDto> {
+    return new CompanyMatchResponseDto(
+      await this.companies.match(query.name, query.website, query.contactEmail),
     );
   }
 
@@ -153,42 +208,19 @@ export class AdminCompanyController {
   @ApiOperation({
     summary: 'Create a company, so a new employer can be approved onto one',
     description:
-      'A genuinely new employer usually has no company row yet — nothing has ingested a ' +
-      'job for them. Without this the approve dialog is a dead end for exactly the ' +
-      'employers it exists to onboard.',
+      'A genuinely new employer usually has no company row — nothing has ingested a job ' +
+      'for them. A duplicate NAME is allowed: two businesses can share one. A duplicate ' +
+      'DOMAIN is refused, and the 409 carries the existing company so the caller can offer ' +
+      'the real choices.',
   })
   @ApiOkResponse({ type: AdminCompanyOptionDto })
-  @ApiResponse({ status: 409, description: 'A company with that name already exists.' })
+  @ApiResponse({
+    status: 409,
+    description:
+      'The website already belongs to a company, or an identical name exists with no ' +
+      'website to tell them apart.',
+  })
   async create(@Body() dto: CreateCompanyDto): Promise<AdminCompanyOptionDto> {
-    try {
-      const created = await this.prisma.company.create({
-        data: {
-          name: dto.name.trim(),
-          website: dto.website?.trim() || null,
-          industry: dto.industry?.trim() || null,
-        },
-        select: {
-          id: true,
-          name: true,
-          website: true,
-          logoUrl: true,
-          isVerified: true,
-        },
-      });
-      // Brand new, so nobody can have claimed it yet.
-      return new AdminCompanyOptionDto(created, false);
-    } catch (err) {
-      // `name` is unique. Surfaced as a conflict so the dialog can tell the admin to
-      // search for the existing row instead of creating a duplicate.
-      if (
-        err instanceof Prisma.PrismaClientKnownRequestError &&
-        err.code === 'P2002'
-      ) {
-        throw new ConflictException(
-          `A company named "${dto.name.trim()}" already exists — search for it instead.`,
-        );
-      }
-      throw err;
-    }
+    return new AdminCompanyOptionDto(await this.companies.create(dto));
   }
 }

@@ -584,8 +584,26 @@ model EmployerRequest {
 }
 
 model Company {
-  id          String  @id @default(uuid())
-  name        String  @unique
+  id String @id @default(uuid())
+
+  /// DISPLAY ONLY. Not unique — two real businesses can share a name ("Acme Robotics" in
+  /// Phnom Penh and in Siem Reap are different companies). Searching by name finds
+  /// CANDIDATES; `identityKey` is what decides whether two rows are the same company.
+  name String
+
+  /// Normalized host of `website` — `acme-kh.com`. Null when unknown, which is every
+  /// scraped company: no ingestion source publishes a company website.
+  domain String?
+
+  /// What makes this row a distinct company. One of:
+  ///   `domain:acme-kh.com`  strong — derived from the website
+  ///   `name:acme robotics`  weak   — the only signal a scraped company has
+  ///
+  /// The prefix keeps the two from colliding, so an employer's acme-kh.com never lands on
+  /// the same key as a scraped "Acme Robotics". Unique so ingestion can keep using
+  /// `upsert`; a findFirst-then-create would race.
+  identityKey String @unique
+
   description String?
   website     String?
   logoUrl     String?
@@ -623,6 +641,8 @@ model Company {
   @@index([name])
   @@index([industry])
   @@index([isVerified])
+  /// Conflict detection on onboarding: "is this website already someone's company?"
+  @@index([domain])
   @@map("companies")
 }
 
