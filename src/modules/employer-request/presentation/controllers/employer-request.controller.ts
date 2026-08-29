@@ -1,8 +1,14 @@
 // src/modules/employer-request/presentation/controllers/employer-request.controller.ts
 //
-// The public half of employer onboarding: submit a request, and later activate the account
-// an admin approved. Both are @Public() — the caller has no account yet, which is the whole
-// point of the flow.
+// Employer onboarding intake and activation.
+//
+// Intake is ADMIN-ONLY. employer_logic.md v2.1 §3.1 is explicit — "Employers cannot register
+// via the public website. The process is entirely admin-controlled" — and §4.1 has the
+// employer email or Telegram the admin, who enters the request. A public endpoint here would
+// be self-registration by another name.
+//
+// Activation stays @Public(): the employer has an account by then but cannot sign in with
+// it, so there is no token to authenticate with.
 
 import {
   Body,
@@ -14,6 +20,9 @@ import {
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 
 import { Public } from '@common/decorators/public.decorator';
+import { Roles } from '@common/decorators/roles.decorator';
+import { CurrentUser } from '@common/decorators/current-user.decorator';
+import { AuthenticatedUser } from '@common/guards/jwt-auth.guard';
 import { EmployerRequestService } from '../../application/services/employer-request.service';
 import { EmployerApprovalService } from '../../application/services/employer-approval.service';
 import {
@@ -32,15 +41,14 @@ export class EmployerRequestController {
   ) {}
 
   @Post()
-  @Public()
+  @Roles('ADMIN')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
-    summary: 'Ask to join JobFit as an employer',
+    summary: 'Record an employer request the admin received by email or Telegram',
     description:
-      'Employers cannot self-register — the public signup form can only create a job ' +
-      'seeker. This submits a request for an admin to review. The response deliberately ' +
-      'reveals nothing about whether the address already has an account: answering that ' +
-      'to an anonymous caller would make this an account-enumeration oracle.',
+      'ADMIN ONLY, per employer_logic.md v2.1 §3.1. Employers reach the admin through ' +
+      'email or Telegram; the admin transcribes what they sent into the queue. There is ' +
+      'no public intake path by design.',
   })
   @ApiResponse({ status: 201, type: EmployerRequestReceiptDto })
   @ApiResponse({
@@ -49,6 +57,7 @@ export class EmployerRequestController {
   })
   submit(
     @Body() dto: CreateEmployerRequestDto,
+    @CurrentUser() _admin: AuthenticatedUser,
   ): Promise<EmployerRequestReceiptDto> {
     return this.requests.submit(dto);
   }

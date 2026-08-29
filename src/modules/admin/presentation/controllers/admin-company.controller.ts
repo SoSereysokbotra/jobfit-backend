@@ -12,18 +12,36 @@
 // separate decision — an employer whose company is not already in the database (from the
 // seed or from job ingestion) still cannot be approved.
 
-import { Controller, Get, Query } from '@nestjs/common';
+import {
+  Body,
+  ConflictException,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Post,
+  Query,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOkResponse,
   ApiOperation,
   ApiProperty,
   ApiPropertyOptional,
+  ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
-import { Company } from '@prisma/client';
+import {
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
+import { Company, Prisma } from '@prisma/client';
 
 import { Roles } from '@common/decorators/roles.decorator';
 import { PrismaService } from '@infra/prisma/prisma.service';
@@ -42,6 +60,26 @@ export class SearchCompaniesDto {
   @Min(1)
   @Max(50)
   take?: number;
+}
+
+export class CreateCompanyDto {
+  @ApiProperty({ example: 'Acme Robotics', maxLength: 200 })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  name: string;
+
+  @ApiPropertyOptional({ example: 'https://acmerobotics.com' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  website?: string;
+
+  @ApiPropertyOptional({ example: 'technology' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  industry?: string;
 }
 
 export class AdminCompanyOptionDto {
@@ -108,5 +146,49 @@ export class AdminCompanyController {
     return rows.map(
       (r) => new AdminCompanyOptionDto(r, r._count.employers > 0),
     );
+  }
+
+  @Post()
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Create a company, so a new employer can be approved onto one',
+    description:
+      'A genuinely new employer usually has no company row yet — nothing has ingested a ' +
+      'job for them. Without this the approve dialog is a dead end for exactly the ' +
+      'employers it exists to onboard.',
+  })
+  @ApiOkResponse({ type: AdminCompanyOptionDto })
+  @ApiResponse({ status: 409, description: 'A company with that name already exists.' })
+  async create(@Body() dto: CreateCompanyDto): Promise<AdminCompanyOptionDto> {
+    try {
+      const created = await this.prisma.company.create({
+        data: {
+          name: dto.name.trim(),
+          website: dto.website?.trim() || null,
+          industry: dto.industry?.trim() || null,
+        },
+        select: {
+          id: true,
+          name: true,
+          website: true,
+          logoUrl: true,
+          isVerified: true,
+        },
+      });
+      // Brand new, so nobody can have claimed it yet.
+      return new AdminCompanyOptionDto(created, false);
+    } catch (err) {
+      // `name` is unique. Surfaced as a conflict so the dialog can tell the admin to
+      // search for the existing row instead of creating a duplicate.
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        throw new ConflictException(
+          `A company named "${dto.name.trim()}" already exists — search for it instead.`,
+        );
+      }
+      throw err;
+    }
   }
 }
