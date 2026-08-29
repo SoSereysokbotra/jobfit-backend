@@ -12,17 +12,22 @@
 // PrismaService is available globally (PrismaModule is @Global).
 
 import { Module } from '@nestjs/common';
+// The employer portal login reuses the auth module's CQRS LoginCommand, same as admin.
+import { CqrsModule } from '@nestjs/cqrs';
+import { AuthModule } from '@modules/auth/auth.module';
 import { JobModule } from '@modules/job/job.module';
 // Phase 4: first-login claim is checked against the request's approvedCompanyId, and
 // the domain-check outcome is recorded on it.
 import { EmployerRequestModule } from '@modules/employer-request/employer-request.module';
 
 // Controllers
+import { EmployerAuthController } from './presentation/controllers/employer-auth.controller';
 import { EmployerCompanyController } from './presentation/controllers/employer-company.controller';
 import { EmployerJobController } from './presentation/controllers/employer-job.controller';
 import { EmployerApplicationController } from './presentation/controllers/employer-application.controller';
 
 // Application services
+import { EmployerAuthService } from './application/services/employer-auth.service';
 import { EmployerContextService } from './application/services/employer-context.service';
 import { EmployerCompanyService } from './application/services/employer-company.service';
 import { EmployerJobService } from './application/services/employer-job.service';
@@ -40,8 +45,15 @@ import { ApplicationTransitionModule } from '../application/application-transiti
 // Signs the short-lived résumé download URLs the pipeline hands an employer.
 
 @Module({
-  imports: [JobModule, ApplicationTransitionModule, EmployerRequestModule],
+  imports: [
+    CqrsModule,
+    AuthModule,
+    JobModule,
+    ApplicationTransitionModule,
+    EmployerRequestModule,
+  ],
   controllers: [
+    EmployerAuthController,
     EmployerCompanyController,
     EmployerJobController,
     EmployerApplicationController,
@@ -50,6 +62,7 @@ import { ApplicationTransitionModule } from '../application/application-transiti
     // StorageService comes from the @Global StorageModule. It was listed HERE, without
     // the SupabaseClientService it depends on, which stopped AppModule booting entirely.
     // services
+    EmployerAuthService,
     EmployerContextService,
     EmployerCompanyService,
     EmployerJobService,
