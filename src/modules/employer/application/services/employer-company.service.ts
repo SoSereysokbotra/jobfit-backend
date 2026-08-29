@@ -8,10 +8,17 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { CompanyVerificationMethod } from '@prisma/client';
+import {
+  Company,
+  CompanyVerificationMethod,
+  DomainCheckResult,
+} from '@prisma/client';
+import { EmployerRequestRepository } from '@modules/employer-request/infrastructure/repositories/employer-request.repository';
 import { EmployerProfileRepository } from '../../infrastructure/repositories/employer-profile.repository';
 import { EmployerCompanyRepository } from '../../infrastructure/repositories/employer-company.repository';
 import { EmployerContextService } from './employer-context.service';
@@ -21,15 +28,26 @@ import { EmployerCompanyResponseDto } from '../dtos/company-response.dto';
 
 @Injectable()
 export class EmployerCompanyService {
+  private readonly logger = new Logger(EmployerCompanyService.name);
+
   constructor(
     private readonly profileRepo: EmployerProfileRepository,
     private readonly companyRepo: EmployerCompanyRepository,
     private readonly context: EmployerContextService,
+    private readonly requests: EmployerRequestRepository,
   ) {}
 
-  /** Claim an existing company: link the acting user to it via a new EmployerProfile. */
+  /**
+   * Claim an existing company: link the acting user to it via a new EmployerProfile.
+   *
+   * For an admin-approved employer this is also where verification lands. The admin already
+   * checked a business registration, so the approval IS the verification — the automated
+   * domain check runs alongside it and is recorded, but it does not get a veto
+   * (employer_logic.md v2.1 §6).
+   */
   async claim(
     userId: string,
+    userEmail: string,
     dto: ClaimCompanyDto,
   ): Promise<EmployerCompanyResponseDto> {
     const company = await this.companyRepo.findById(dto.companyId);
@@ -43,18 +61,45 @@ export class EmployerCompanyService {
       throw new ConflictException('This company has already been claimed.');
     }
 
+    // An approved employer may claim ONLY the company they were approved for. Without this
+    // the admin's decision is advisory: approval hands out an EMPLOYER account, and the
+    // claim step would then let it attach to any unclaimed company on the platform.
+    const approved = await this.requests.findApprovedByUserId(userId);
+    if (
+      approved?.approvedCompanyId &&
+      approved.approvedCompanyId !== dto.companyId
+    ) {
+      throw new ForbiddenException(
+        'Your account was approved for a different company. Contact JobFit support if that is wrong.',
+      );
+    }
+
     await this.profileRepo.create({
       userId,
       companyId: dto.companyId,
       firstName: dto.firstName,
       lastName: dto.lastName,
     });
+
+    if (approved?.approvedCompanyId === dto.companyId) {
+      return new EmployerCompanyResponseDto(
+        await this.verifyOnApproval(approved.id, userEmail, company),
+      );
+    }
     return new EmployerCompanyResponseDto(company);
   }
 
   /**
-   * Verify company ownership by matching the employer's email domain against the
-   * company's website domain. On success marks the company verified (EMAIL_DOMAIN).
+   * Verify company ownership.
+   *
+   * TWO PATHS, and which one applies is decided by whether an admin already vouched:
+   *
+   *  - ADMIN-APPROVED — the approval carries the verification. Normally claim() has
+   *    already done this, so the call is a no-op; the branch remains for an employer who
+   *    claimed before this composition existed, who would otherwise be permanently stuck
+   *    behind a check their company data cannot pass.
+   *  - SELF-SERVICE — unchanged. The domain match is the only evidence there is, so it
+   *    stays authoritative and a mismatch is still a 400.
    */
   async verifyEmail(
     userId: string,
@@ -69,6 +114,14 @@ export class EmployerCompanyService {
     if (company.isVerified) {
       return new EmployerCompanyResponseDto(company);
     }
+
+    const approved = await this.requests.findApprovedByUserId(userId);
+    if (approved?.approvedCompanyId === companyId) {
+      return new EmployerCompanyResponseDto(
+        await this.verifyOnApproval(approved.id, userEmail, company),
+      );
+    }
+
     if (!company.website) {
       throw new BadRequestException(
         'Company has no website to verify the email domain against.',
@@ -110,6 +163,59 @@ export class EmployerCompanyService {
     const company = await this.companyRepo.findById(ctx.companyId);
     if (!company) throw new NotFoundException('Company not found');
     return new EmployerCompanyResponseDto(company);
+  }
+
+  /**
+   * Mark a company verified on the strength of an admin approval, and record separately
+   * what the automated domain check thought.
+   *
+   * `verificationMethod` is set to ADMIN_REVIEW rather than EMAIL_DOMAIN even when the
+   * domains happen to match, because the approval is what actually carried it. Collapsing
+   * the two would leave an audit unable to tell which signal was relied on.
+   */
+  private async verifyOnApproval(
+    requestId: string,
+    userEmail: string,
+    company: Company,
+  ): Promise<Company> {
+    await this.recordDomainSignal(requestId, userEmail, company.website);
+    return this.companyRepo.markVerified(
+      company.id,
+      CompanyVerificationMethod.ADMIN_REVIEW,
+    );
+  }
+
+  /**
+   * Advisory only. A failure to write it must never block a verification the admin already
+   * authorised — the point of the column is to inform a later review, not to gate anything.
+   */
+  private async recordDomainSignal(
+    requestId: string,
+    userEmail: string,
+    website: string | null,
+  ): Promise<void> {
+    const emailDomain = domainFromEmail(userEmail);
+    const siteDomain = website ? domainFromUrl(website) : null;
+
+    const result = !siteDomain
+      ? DomainCheckResult.NO_WEBSITE
+      : emailDomain && emailDomain === siteDomain
+        ? DomainCheckResult.MATCH
+        : DomainCheckResult.MISMATCH;
+
+    try {
+      await this.requests.recordDomainCheck(requestId, result);
+      if (result !== DomainCheckResult.MATCH) {
+        this.logger.warn(
+          `Employer request ${requestId} verified by admin approval, but the domain check ` +
+            `returned ${result} (${emailDomain ?? 'no email domain'} vs ${siteDomain ?? 'no website'}).`,
+        );
+      }
+    } catch (err) {
+      this.logger.error(
+        `Could not record the domain check for request ${requestId}: ${(err as Error).message}`,
+      );
+    }
   }
 
   async updateProfile(

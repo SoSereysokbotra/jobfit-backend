@@ -21,6 +21,7 @@ import { AuthModule } from '@modules/auth/auth.module';
 import { AdminAuthController } from './presentation/controllers/admin-auth.controller';
 import { AdminSystemController } from './presentation/controllers/admin-system.controller';
 import { AdminUserController } from './presentation/controllers/admin-user.controller';
+import { AdminCompanyController } from './presentation/controllers/admin-company.controller';
 import { AdminEmailController } from './presentation/controllers/admin-email.controller';
 import { AdminAuditController } from './presentation/controllers/admin-audit.controller';
 
@@ -43,6 +44,7 @@ import { AuditLogRepository } from './infrastructure/repositories/audit-log.repo
     AdminAuthController,
     AdminSystemController,
     AdminUserController,
+    AdminCompanyController,
     AdminEmailController,
     AdminAuditController,
   ],

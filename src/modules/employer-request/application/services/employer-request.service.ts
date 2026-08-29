@@ -207,5 +207,6 @@ export function toDto(row: EmployerRequest): EmployerRequestDto {
     isPublicDomain: isPublicDomain(row.companyEmail),
     hoursAwaitingDecision: hours,
     breachesSla: hours !== null && hours > SLA_HOURS,
+    domainCheck: row.domainCheck ?? undefined,
   });
 }

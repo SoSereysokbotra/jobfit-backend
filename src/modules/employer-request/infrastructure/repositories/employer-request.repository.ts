@@ -6,6 +6,7 @@
 
 import { Injectable } from '@nestjs/common';
 import {
+  DomainCheckResult,
   EmployerRequest,
   EmployerRequestStatus,
   Prisma,
@@ -45,6 +46,30 @@ export class EmployerRequestRepository {
         companyEmail: email,
         status: EmployerRequestStatus.APPROVED,
       },
+    });
+  }
+
+  /**
+   * The approved ticket behind a signed-in employer, if they arrived through admin review.
+   *
+   * `approvedUserId` is unique, so there is at most one. Null means this account was NOT
+   * admin-approved — a seeded or self-service employer — and Phase 4 leaves that path's
+   * strict domain check exactly as it was.
+   */
+  findApprovedByUserId(userId: string): Promise<EmployerRequest | null> {
+    return this.prisma.employerRequest.findUnique({
+      where: { approvedUserId: userId },
+    });
+  }
+
+  /** Store what the automated domain check found. Advisory only — it blocks nothing. */
+  recordDomainCheck(
+    id: string,
+    result: DomainCheckResult,
+  ): Promise<EmployerRequest> {
+    return this.prisma.employerRequest.update({
+      where: { id },
+      data: { domainCheck: result, domainCheckedAt: new Date() },
     });
   }
 

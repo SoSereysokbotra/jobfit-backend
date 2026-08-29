@@ -13,6 +13,9 @@
 
 import { Module } from '@nestjs/common';
 import { JobModule } from '@modules/job/job.module';
+// Phase 4: first-login claim is checked against the request's approvedCompanyId, and
+// the domain-check outcome is recorded on it.
+import { EmployerRequestModule } from '@modules/employer-request/employer-request.module';
 
 // Controllers
 import { EmployerCompanyController } from './presentation/controllers/employer-company.controller';
@@ -37,7 +40,7 @@ import { ApplicationTransitionModule } from '../application/application-transiti
 // Signs the short-lived résumé download URLs the pipeline hands an employer.
 
 @Module({
-  imports: [JobModule, ApplicationTransitionModule],
+  imports: [JobModule, ApplicationTransitionModule, EmployerRequestModule],
   controllers: [
     EmployerCompanyController,
     EmployerJobController,

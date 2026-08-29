@@ -154,6 +154,23 @@ enum CompanyVerificationMethod {
   ADMIN_REVIEW
 }
 
+/// What the automated email-domain check found at first-login claim.
+///
+/// A SOFT SIGNAL, recorded and never enforced, for an employer who arrived through admin
+/// approval (employer_logic.md v2.1 section 6). The check cannot be authoritative there:
+/// it answers "no website" for many seeded and ingested company rows, and MISMATCH for a
+/// recruiter whose address sits on a subsidiary or regional domain. Either would block an
+/// employer a human already verified against a business registration.
+///
+/// It still gets recorded, because "the admin approved them AND the domain matched" and
+/// "the admin approved them but the domain did not" are different facts, and an audit
+/// should not have to guess which one happened.
+enum DomainCheckResult {
+  MATCH
+  MISMATCH
+  NO_WEBSITE
+}
+
 /// The employer onboarding ticket's lifecycle (employer_logic.md v2.1 section 2).
 ///
 /// DELIBERATELY SEPARATE from UserStatus. This ticket exists BEFORE any account does and
@@ -528,6 +545,11 @@ model EmployerRequest {
   /// User rather than inventing a second mechanism. Cleared once used.
   activationCode       String?
   activationCodeExpiry DateTime?
+
+  /// Outcome of the automated domain check, run once at first-login claim. See
+  /// DomainCheckResult — recorded, never enforced, for an admin-approved employer.
+  domainCheck     DomainCheckResult?
+  domainCheckedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

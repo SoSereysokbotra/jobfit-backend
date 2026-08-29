@@ -46,7 +46,7 @@ export class EmployerCompanyController {
     @Body() dto: ClaimCompanyDto,
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<EmployerCompanyResponseDto> {
-    return this.companyService.claim(user.id, dto);
+    return this.companyService.claim(user.id, user.email, dto);
   }
 
   @Post(':id/verify-email')

@@ -7,7 +7,7 @@ import {
   ApiProperty,
   ApiPropertyOptional,
 } from '@nestjs/swagger';
-import { EmployerRequestStatus } from '@prisma/client';
+import { DomainCheckResult, EmployerRequestStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   IsEmail,
@@ -224,6 +224,15 @@ export class EmployerRequestDto {
 
   @ApiProperty({ description: 'hoursAwaitingDecision > 48.' })
   breachesSla: boolean;
+
+  @ApiPropertyOptional({
+    enum: DomainCheckResult,
+    description:
+      'What the automated email-domain check found at first-login claim, or null if the ' +
+      'employer has not claimed yet. ADVISORY — the admin approval is what verified the ' +
+      'company. MISMATCH or NO_WEBSITE is worth a second look, not a block.',
+  })
+  domainCheck?: DomainCheckResult;
 
   constructor(init: EmployerRequestDto) {
     Object.assign(this, init);
