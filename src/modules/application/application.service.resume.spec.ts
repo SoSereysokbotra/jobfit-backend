@@ -16,6 +16,9 @@ describe('ApplicationService.submitApplication — which résumé gets recorded'
     sourceType: 'INTERNAL' as const,
     externalUrl: undefined,
     isApplicableInApp: true,
+    // submitApplication refuses a job that is not PUBLISHED; these tests are about which
+    // résumé gets recorded, so the posting is a normal published one.
+    status: { isPublished: () => true },
   };
 
   let applicationRepository: { findByUserAndJob: jest.Mock; save: jest.Mock };

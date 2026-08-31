@@ -71,6 +71,17 @@ export class ApplicationService {
       });
     }
 
+    // A posting the employer has not published yet is not an offer to apply. DRAFT is
+    // half-written by definition and CLOSED has been taken down; accepting either would
+    // put a candidate into a pipeline the employer never opened. The public read path
+    // hides drafts too — this is the integrity guard behind it, so a guessed id cannot
+    // create the row that the listing refuses to show.
+    if (!job.status.isPublished()) {
+      throw new BadRequestException(
+        'This job is not accepting applications.',
+      );
+    }
+
     const existing = await this.applicationRepository.findByUserAndJob(
       userId,
       dto.jobId,

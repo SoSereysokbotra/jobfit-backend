@@ -14,8 +14,15 @@ export class SearchJobsUseCase implements IUseCase<SearchJobsRequest, Job[]> {
   ) {}
 
   async execute(query: SearchJobsRequest): Promise<Result<Job[]>> {
+    // Public browse is PUBLISHED-only, and the caller does not get a say in it.
+    // `status` used to be passed straight through from the query string, so an
+    // unauthenticated `?status=DRAFT` enumerated every unpublished posting on the
+    // platform and an omitted status returned drafts mixed into normal results. A
+    // draft is a half-written posting the employer has not released; it is not
+    // public data. Closed postings stay reachable by id (a candidate who applied
+    // still has to be able to read what they applied to) but are not browsable.
     const filters: JobFilters = {
-      status: query.status,
+      status: 'PUBLISHED',
       remoteType: query.remoteType,
       skillIds: query.skillIds,
       minSalary: query.minSalary,

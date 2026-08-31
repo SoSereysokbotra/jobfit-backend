@@ -103,9 +103,22 @@ export class JobService {
     return JobMapper.toResponse(result.value);
   }
 
+  /**
+   * Public read of a single posting. Only reached from the @Public() `GET /jobs/:id`.
+   *
+   * A DRAFT answers 404, deliberately worded the same as a job that does not exist: the
+   * caller is anonymous, so "exists but is a draft" is not a distinction they are owed,
+   * and saying it would confirm which ids are real. CLOSED stays readable — a candidate
+   * who already applied has to be able to open what they applied to, and their saved
+   * jobs and application history render from this endpoint.
+   *
+   * Employers read their own drafts through `GET /employer/jobs`, which is scoped to
+   * their company.
+   */
   async findById(id: string): Promise<JobResponseDto> {
     const job = await this.jobRepo.findById(id);
     if (!job) throw new NotFoundException('Job not found');
+    if (job.status.isDraft()) throw new NotFoundException('Job not found');
     return this.withCompanyName(JobMapper.toResponse(job));
   }
 
@@ -156,15 +169,31 @@ export class JobService {
     return JobMapper.toResponse(job);
   }
 
+  /**
+   * Map a use-case failure to the right HTTP status.
+   *
+   * These use cases report ownership and existence failures as plain `Result.fail`
+   * strings, which publish/close used to blanket-convert into 400. That answered
+   * "Forbidden" with a Bad Request — the same refusal `update` and `delete` correctly
+   * return as 403 — so the status contradicted the message and told a client nothing
+   * it could branch on. Only genuine rule violations ("a closed job cannot be
+   * published") are 400 here.
+   */
+  private failResult(error: string): never {
+    if (error === 'Forbidden') throw new ForbiddenException();
+    if (error === 'Job not found') throw new NotFoundException(error);
+    throw new BadRequestException(error);
+  }
+
   async publish(id: string, companyId: string): Promise<JobResponseDto> {
     const result = await this.publishJobUseCase.execute({ jobId: id, companyId });
-    if (result.isFailure) throw new BadRequestException(result.error);
+    if (result.isFailure) this.failResult(result.error);
     return JobMapper.toResponse(result.value);
   }
 
   async close(id: string, companyId: string): Promise<JobResponseDto> {
     const result = await this.closeJobUseCase.execute({ jobId: id, companyId });
-    if (result.isFailure) throw new BadRequestException(result.error);
+    if (result.isFailure) this.failResult(result.error);
     return JobMapper.toResponse(result.value);
   }
 

@@ -1,23 +1,20 @@
-import { IsOptional, IsEnum, IsString, IsInt, Min, IsArray } from 'class-validator';
+// Public job browse/search parameters.
+//
+// There is deliberately NO `status` here. It used to be an accepted query parameter that
+// was passed straight to the repository, which made `GET /jobs?status=DRAFT` an
+// unauthenticated listing of every unpublished posting. Browse is PUBLISHED-only and the
+// caller does not choose — see SearchJobsUseCase. Employers read their own drafts through
+// `GET /employer/jobs`, which is scoped to their company.
+
+import { IsOptional, IsString, IsInt, Min, IsArray } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-
-export enum JobStatusQuery {
-  DRAFT = 'DRAFT',
-  PUBLISHED = 'PUBLISHED',
-  CLOSED = 'CLOSED',
-}
 
 export class SearchJobQueryDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   q?: string;
-
-  @ApiPropertyOptional({ enum: JobStatusQuery })
-  @IsOptional()
-  @IsEnum(JobStatusQuery)
-  status?: JobStatusQuery;
 
   @ApiPropertyOptional()
   @IsOptional()

@@ -12,11 +12,19 @@ import { ApplicationService } from './application.service';
 describe('ApplicationService.submitApplication — internal vs external', () => {
   const user = { id: 'u1' };
 
-  const makeJob = (sourceType: 'INTERNAL' | 'EXTERNAL', externalUrl?: string) => ({
+  // `status` is a JobStatus value object on the real entity, and submitApplication now
+  // refuses anything that is not PUBLISHED — a draft is not an invitation to apply.
+  // These fixtures are published unless a test says otherwise.
+  const makeJob = (
+    sourceType: 'INTERNAL' | 'EXTERNAL',
+    externalUrl?: string,
+    isPublished = true,
+  ) => ({
     id: 'j1',
     sourceType,
     externalUrl,
     isApplicableInApp: sourceType === 'INTERNAL',
+    status: { isPublished: () => isPublished },
   });
 
   let applicationRepository: {
@@ -98,6 +106,22 @@ describe('ApplicationService.submitApplication — internal vs external', () => 
       service.submitApplication('u1', { jobId: 'j1' } as never),
     ).rejects.toThrow(BadRequestException);
     expect(applicationRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('refuses a job that is not published, and stores nothing', async () => {
+    // A DRAFT is a half-written posting the employer has not released. The public
+    // listing hides drafts, and this is the guard behind that: a guessed job id must
+    // not be able to create the application row the listing refuses to show. Found by
+    // the 2026-08-30 end-to-end run, where a seeker applied to an unpublished job and
+    // it entered the employer's pipeline — see docs/EMPLOYER_E2E_FINDINGS.md finding 1.
+    jobRepository.findById.mockResolvedValue(makeJob('INTERNAL', undefined, false));
+
+    await expect(
+      service.submitApplication('u1', { jobId: 'j1' } as never),
+    ).rejects.toThrow(BadRequestException);
+    expect(applicationRepository.save).not.toHaveBeenCalled();
+    expect(timelineRepository.addEvent).not.toHaveBeenCalled();
+    expect(screening.screen).not.toHaveBeenCalled();
   });
 
   it('accepts an INTERNAL job', async () => {
