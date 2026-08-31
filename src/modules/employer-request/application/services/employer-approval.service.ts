@@ -17,6 +17,7 @@ import {
 import {
   AuditActionType,
   AuditResourceType,
+  CompanyVerificationMethod,
   EmployerRequest,
   EmployerRequestStatus,
   Prisma,
@@ -222,22 +223,25 @@ export class EmployerApprovalService {
 
     const password = await Password.fromPlain(dto.password);
 
+    const userId = request.approvedUserId as string;
+
     // One transaction: an account whose password was set but whose code was not cleared
     // could be activated twice, and a verified flag without a password would be a
     // sign-in with an empty hash.
-    await this.prisma.$transaction([
-      this.prisma.user.update({
-        where: { id: request.approvedUserId as string },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: userId },
         data: {
           passwordHash: password.value,
           emailVerified: true,
         },
-      }),
-      this.prisma.employerRequest.update({
+      });
+      await tx.employerRequest.update({
         where: { id: request.id },
         data: { activationCode: null, activationCodeExpiry: null },
-      }),
-    ]);
+      });
+      await this.linkApprovedCompany(tx, userId, request);
+    });
 
     this.logger.log(`Employer account activated: ${email}`);
     return new EmployerRequestMessageDto(
@@ -246,6 +250,73 @@ export class EmployerApprovalService {
   }
 
   /* ─────────────────────────── internals ─────────────────────────── */
+
+  /**
+   * Link the freshly activated account to the company the admin approved it for, and
+   * record the verification that approval carries.
+   *
+   * WHY THIS EXISTS. Approval writes the company onto the REQUEST (`approvedCompanyId`);
+   * the thing every employer feature actually reads is `EmployerProfile`, which links the
+   * USER to a company. Nothing created that row. employer_logic.md §6 put the claim at
+   * first login, but no first-login claim screen was ever built — so an employer who did
+   * everything right (register, get approved, activate, sign in) landed on a portal where
+   * every page answered 403 "No company associated with this account. Claim a company
+   * first.", with nothing in the UI able to fix it. Activation is the correct moment: the
+   * admin has already chosen the company, and the employer has just proved inbox control.
+   * Asking them to then "claim" a company somebody else picked is a step with no decision
+   * in it.
+   *
+   * Runs INSIDE the activation transaction: an activated account that is not linked to its
+   * company is the broken state this exists to remove, so it must not be reachable.
+   *
+   * `EmployerCompanyService.claim` still exists and is unchanged — it remains the
+   * self-service path for an employer with no approved request. This does not call it
+   * because EmployerModule already imports EmployerRequestModule, so depending on it here
+   * would close a module cycle.
+   */
+  private async linkApprovedCompany(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    request: EmployerRequest,
+  ): Promise<void> {
+    const companyId = request.approvedCompanyId;
+    if (!companyId) return; // Approved without a company — nothing to link.
+
+    // Both of these are conflicts a human has to resolve, never something to force. A
+    // second profile would silently move the employer to a different company; claiming a
+    // company that another account already manages would hand two employers the same
+    // candidate pipeline. Skip and say so — the account still activates, and the
+    // self-service claim endpoint can be used once the conflict is sorted out.
+    const [alreadyLinked, companyTaken] = await Promise.all([
+      tx.employerProfile.findUnique({ where: { userId }, select: { id: true } }),
+      tx.employerProfile.findFirst({ where: { companyId }, select: { userId: true } }),
+    ]);
+    if (alreadyLinked) return;
+    if (companyTaken) {
+      this.logger.warn(
+        `Activated ${request.companyEmail} but company ${companyId} is already claimed by ` +
+          `user ${companyTaken.userId}. No profile created — needs admin review.`,
+      );
+      return;
+    }
+
+    const { firstName, lastName } = splitContactName(request.contactName);
+    await tx.employerProfile.create({
+      data: { userId, companyId, firstName, lastName },
+    });
+
+    // The approval IS the verification (§6): an admin checked a business registration.
+    // Only stamp an unverified company, so a company already verified by a stronger or
+    // earlier signal keeps the method that actually verified it.
+    await tx.company.updateMany({
+      where: { id: companyId, isVerified: false },
+      data: {
+        isVerified: true,
+        verificationMethod: CompanyVerificationMethod.ADMIN_REVIEW,
+        verifiedAt: new Date(),
+      },
+    });
+  }
 
   private async requireRequest(id: string): Promise<EmployerRequest> {
     const request = await this.repo.findById(id);
@@ -293,4 +364,24 @@ export class EmployerApprovalService {
     }
     return err;
   }
+}
+
+/**
+ * Split the contact name the employer gave on the request into the first/last pair
+ * EmployerProfile requires. The form collects one free-text field, so this is a best
+ * effort: everything before the first space is the first name, the rest is the surname.
+ * A single word becomes the first name with the surname left blank rather than guessed,
+ * and the employer can correct both in account settings.
+ */
+function splitContactName(contactName: string): {
+  firstName: string;
+  lastName: string;
+} {
+  const parts = contactName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return { firstName: 'Employer', lastName: '' };
+  const [firstName, ...rest] = parts;
+  return {
+    firstName: firstName.slice(0, 60),
+    lastName: rest.join(' ').slice(0, 60),
+  };
 }

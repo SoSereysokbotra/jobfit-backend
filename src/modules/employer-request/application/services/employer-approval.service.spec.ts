@@ -50,8 +50,14 @@ describe('EmployerApprovalService', () => {
     $transaction: jest.Mock;
   };
   let tx: {
-    user: { create: jest.Mock };
+    user: { create: jest.Mock; update: jest.Mock };
     employerRequest: { update: jest.Mock };
+    employerProfile: {
+      findUnique: jest.Mock;
+      findFirst: jest.Mock;
+      create: jest.Mock;
+    };
+    company: { updateMany: jest.Mock };
   };
   let repo: {
     findById: jest.Mock;
@@ -73,7 +79,10 @@ describe('EmployerApprovalService', () => {
 
   beforeEach(() => {
     tx = {
-      user: { create: jest.fn().mockResolvedValue({ id: 'user-new' }) },
+      user: {
+        create: jest.fn().mockResolvedValue({ id: 'user-new' }),
+        update: jest.fn().mockResolvedValue({}),
+      },
       employerRequest: {
         update: jest
           .fn()
@@ -81,6 +90,13 @@ describe('EmployerApprovalService', () => {
             Promise.resolve(request({ ...data, status: data.status })),
           ),
       },
+      // activate() links the approved company inside the same transaction.
+      employerProfile: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 'profile-1' }),
+      },
+      company: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     };
     prisma = {
       company: {
@@ -210,16 +226,98 @@ describe('EmployerApprovalService', () => {
 
       await service.activate(dto);
 
-      const userUpdate = prisma.user.update.mock.calls[0][0];
+      const userUpdate = tx.user.update.mock.calls[0][0];
       expect(userUpdate.where).toEqual({ id: 'user-new' });
       expect(userUpdate.data.emailVerified).toBe(true);
       expect(userUpdate.data.passwordHash).toEqual(expect.stringMatching(/^\$2[aby]\$/));
 
-      const reqUpdate = prisma.employerRequest.update.mock.calls[0][0];
+      const reqUpdate = tx.employerRequest.update.mock.calls[0][0];
       expect(reqUpdate.data).toEqual({
         activationCode: null,
         activationCodeExpiry: null,
       });
+    });
+
+    // The gap that made an activated employer useless: approval writes the company onto
+    // the REQUEST, but every employer feature reads EmployerProfile, and nothing created
+    // it. §6 put the claim at first login and no first-login screen was ever built, so
+    // the portal answered 403 everywhere with no way out. Activation links it now.
+    it('links the account to the approved company, so the portal works immediately', async () => {
+      repo.findApprovedByEmail.mockResolvedValue(
+        request({
+          status: EmployerRequestStatus.APPROVED,
+          approvedUserId: 'user-new',
+          approvedCompanyId: 'company-1',
+          contactName: 'Jane Doe',
+          activationCode: '048213',
+        }),
+      );
+
+      await service.activate(dto);
+
+      expect(tx.employerProfile.create).toHaveBeenCalledWith({
+        data: {
+          userId: 'user-new',
+          companyId: 'company-1',
+          firstName: 'Jane',
+          lastName: 'Doe',
+        },
+      });
+    });
+
+    // §6: the admin checked a business registration, so the approval IS the verification.
+    it('stamps the company verified by ADMIN_REVIEW, but never re-stamps a verified one', async () => {
+      repo.findApprovedByEmail.mockResolvedValue(
+        request({
+          status: EmployerRequestStatus.APPROVED,
+          approvedUserId: 'user-new',
+          approvedCompanyId: 'company-1',
+          activationCode: '048213',
+        }),
+      );
+
+      await service.activate(dto);
+
+      const call = tx.company.updateMany.mock.calls[0][0];
+      // The isVerified:false filter is what stops a company verified by a different
+      // signal from having its method overwritten.
+      expect(call.where).toEqual({ id: 'company-1', isVerified: false });
+      expect(call.data.verificationMethod).toBe('ADMIN_REVIEW');
+      expect(call.data.isVerified).toBe(true);
+    });
+
+    it('does not hand an employer a company another account already manages', async () => {
+      repo.findApprovedByEmail.mockResolvedValue(
+        request({
+          status: EmployerRequestStatus.APPROVED,
+          approvedUserId: 'user-new',
+          approvedCompanyId: 'company-1',
+          activationCode: '048213',
+        }),
+      );
+      tx.employerProfile.findFirst.mockResolvedValue({ userId: 'someone-else' });
+
+      await service.activate(dto);
+
+      // Still activates — the password is set and the code burned — but the conflict is
+      // left for an admin rather than resolved by giving two employers one pipeline.
+      expect(tx.user.update).toHaveBeenCalled();
+      expect(tx.employerProfile.create).not.toHaveBeenCalled();
+      expect(tx.company.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('activates normally when the request carries no company', async () => {
+      repo.findApprovedByEmail.mockResolvedValue(
+        request({
+          status: EmployerRequestStatus.APPROVED,
+          approvedUserId: 'user-new',
+          approvedCompanyId: null,
+          activationCode: '048213',
+        }),
+      );
+
+      await expect(service.activate(dto)).resolves.toBeDefined();
+      expect(tx.employerProfile.create).not.toHaveBeenCalled();
     });
 
     // Invariant 4. Both branches must be indistinguishable to the caller.

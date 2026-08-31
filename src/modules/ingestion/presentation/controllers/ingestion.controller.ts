@@ -1,9 +1,19 @@
 // src/modules/ingestion/presentation/controllers/ingestion.controller.ts
 //
-// Employer-managed manual trigger for a job-ingestion run (FR-JOBS-001). Global
-// JwtAuthGuard + RolesGuard enforce auth; @Roles('EMPLOYER') restricts it to the
-// employer dashboard. A scheduled 6-hour cron can call IngestionService directly
-// later. (Ingested jobs stay employer-less — pulled into the shared pool.)
+// Admin-managed manual trigger for a job-ingestion run (FR-JOBS-001). Global
+// JwtAuthGuard + RolesGuard enforce auth; @Roles('ADMIN') restricts it to the admin
+// panel. A scheduled 6-hour cron can call IngestionService directly later.
+// (Ingested jobs stay employer-less — pulled into the shared pool.)
+//
+// WHY ADMIN AND NOT EMPLOYER. This used to be @Roles('EMPLOYER') at /employer/ingest,
+// which put two platform operations in a customer's portal. `listImported` takes no
+// company scope, so a recruiter's own hiring portal listed a hundred postings scraped
+// from other companies — their competitors — which is not something an employer has any
+// reason to browse there. And the trigger let ANY employer start a platform-wide scrape
+// that creates companies and jobs every other user then sees. Ingestion is platform
+// content management: the admin already owns companies, jobs and users, so it belongs
+// with them. Nothing about the ingestion itself changed — the same 348 external postings
+// keep reaching seekers.
 
 import {
   BadRequestException,
@@ -26,10 +36,10 @@ import { ImportedJob, IngestionResult, JobSource } from '../../ingestion.types';
  */
 const INGESTABLE: JobSource[] = ['THEMUSE', 'BONGTHOM', 'JOBNET'];
 
-@ApiTags('Employer - Ingestion')
+@ApiTags('Admin - Ingestion')
 @ApiBearerAuth()
-@Roles('EMPLOYER')
-@Controller('employer/ingest')
+@Roles('ADMIN')
+@Controller('admin/ingest')
 export class IngestionController {
   constructor(private readonly ingestion: IngestionService) {}
 
