@@ -4,11 +4,19 @@
 //   1. production + no SMTP config  => boot throws (no unverifiable registrations)
 //   2. a send failure               => throws, so no caller mistakes a bounce for a send
 // Plus the readiness snapshot the mail health indicator reads.
+//
+// And the suppression gate (Redis audit R3): the list was written but the sender never
+// read it, so these tests exist to keep the sender reading it.
 
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import { EmailService } from './email.service';
+import {
+  EmailSuppressedError,
+  EmailSuppressionService,
+  SuppressionCheckUnavailableError,
+} from './email-suppression.service';
 
 jest.mock('nodemailer');
 
@@ -30,11 +38,15 @@ const SMTP_ENV = {
 describe('EmailService', () => {
   let sendMail: jest.Mock;
   let verify: jest.Mock;
+  let assertSendable: jest.Mock;
+  let suppression: EmailSuppressionService;
 
   beforeEach(() => {
     jest.clearAllMocks();
     sendMail = jest.fn().mockResolvedValue({ messageId: 'msg-1' });
     verify = jest.fn().mockResolvedValue(true);
+    assertSendable = jest.fn().mockResolvedValue(undefined);
+    suppression = { assertSendable } as unknown as EmailSuppressionService;
     mockedNodemailer.createTransport.mockReturnValue({
       sendMail,
       verify,
@@ -47,7 +59,7 @@ describe('EmailService', () => {
 
   describe('startup guard', () => {
     it('throws on boot when NODE_ENV=production and SMTP is not configured', () => {
-      const service = new EmailService(configOf({ NODE_ENV: 'production' }));
+      const service = new EmailService(configOf({ NODE_ENV: 'production' }), suppression);
 
       expect(() => service.onModuleInit()).toThrow(
         /Email delivery is not configured/,
@@ -64,14 +76,14 @@ describe('EmailService', () => {
         };
         delete env[missing];
 
-        expect(() => new EmailService(configOf(env)).onModuleInit()).toThrow(
+        expect(() => new EmailService(configOf(env), suppression).onModuleInit()).toThrow(
           /Email delivery is not configured/,
         );
       },
     );
 
     it('boots and skips sends in development when SMTP is not configured', async () => {
-      const service = new EmailService(configOf({ NODE_ENV: 'development' }));
+      const service = new EmailService(configOf({ NODE_ENV: 'development' }), suppression);
 
       expect(() => service.onModuleInit()).not.toThrow();
       expect(service.isConfigured).toBe(false);
@@ -85,6 +97,7 @@ describe('EmailService', () => {
     it('builds the transport and boots when SMTP is configured in production', () => {
       const service = new EmailService(
         configOf({ NODE_ENV: 'production', ...SMTP_ENV }),
+        suppression,
       );
 
       expect(() => service.onModuleInit()).not.toThrow();
@@ -102,6 +115,7 @@ describe('EmailService', () => {
     it('uses implicit TLS on port 465', () => {
       const service = new EmailService(
         configOf({ NODE_ENV: 'production', ...SMTP_ENV, EMAIL_PORT: '465' }),
+        suppression,
       );
       service.onModuleInit();
 
@@ -117,6 +131,7 @@ describe('EmailService', () => {
     beforeEach(() => {
       service = new EmailService(
         configOf({ NODE_ENV: 'production', ...SMTP_ENV }),
+        suppression,
       );
       service.onModuleInit();
     });
@@ -155,12 +170,83 @@ describe('EmailService', () => {
     });
   });
 
+  describe('suppression gate (R3)', () => {
+    let service: EmailService;
+
+    beforeEach(() => {
+      service = new EmailService(
+        configOf({ NODE_ENV: 'production', ...SMTP_ENV }),
+        suppression,
+      );
+      service.onModuleInit();
+    });
+
+    it('never sends to a suppressed address', async () => {
+      assertSendable.mockRejectedValueOnce(
+        new EmailSuppressedError('bounced@example.com'),
+      );
+
+      await expect(
+        service.sendVerificationCode('bounced@example.com', '482913'),
+      ).resolves.toBeUndefined();
+
+      // The point of the whole finding: the transport is never reached.
+      expect(sendMail).not.toHaveBeenCalled();
+    });
+
+    it('consults the list on every send path, not just one of them', async () => {
+      await service.sendVerificationCode('a@example.com', '111111');
+      await service.sendPasswordResetCode('b@example.com', '222222');
+      await service.sendPasswordResetSuccess('c@example.com');
+
+      expect(assertSendable.mock.calls.map((c) => c[0])).toEqual([
+        'a@example.com',
+        'b@example.com',
+        'c@example.com',
+      ]);
+      expect(sendMail).toHaveBeenCalledTimes(3);
+    });
+
+    it('checks suppression BEFORE the transport, so an unconfigured mailer cannot mask a missing gate', async () => {
+      const unconfigured = new EmailService(
+        configOf({ NODE_ENV: 'development' }),
+        suppression,
+      );
+      unconfigured.onModuleInit();
+
+      await unconfigured.sendVerificationCode('user@example.com', '482913');
+
+      expect(assertSendable).toHaveBeenCalledWith('user@example.com');
+    });
+
+    it('fails closed when the list cannot be read, rather than sending anyway', async () => {
+      assertSendable.mockRejectedValueOnce(
+        new SuppressionCheckUnavailableError('connection terminated'),
+      );
+
+      await expect(
+        service.sendVerificationCode('user@example.com', '482913'),
+      ).rejects.toBeInstanceOf(SuppressionCheckUnavailableError);
+      expect(sendMail).not.toHaveBeenCalled();
+    });
+
+    it('sends normally when the address is not suppressed', async () => {
+      await service.sendVerificationCode('fine@example.com', '482913');
+
+      expect(sendMail).toHaveBeenCalledTimes(1);
+      expect(sendMail.mock.calls[0][0]).toMatchObject({
+        to: 'fine@example.com',
+      });
+    });
+  });
+
   describe('verifyConnection', () => {
     it('reports false and records the reason when the handshake fails', async () => {
       // Not `Once`: onModuleInit already fires one background handshake.
       verify.mockRejectedValue(new Error('535 bad credentials'));
       const service = new EmailService(
         configOf({ NODE_ENV: 'production', ...SMTP_ENV }),
+        suppression,
       );
       service.onModuleInit();
 
@@ -172,7 +258,7 @@ describe('EmailService', () => {
     });
 
     it('reports false when there is no transport at all', async () => {
-      const service = new EmailService(configOf({ NODE_ENV: 'development' }));
+      const service = new EmailService(configOf({ NODE_ENV: 'development' }), suppression);
       service.onModuleInit();
 
       await expect(service.verifyConnection()).resolves.toBe(false);

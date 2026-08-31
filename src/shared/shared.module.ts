@@ -12,6 +12,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from './services/prisma.service';
 import { JwtService } from './services/jwt.service';
 import { EmailService } from './services/email.service';
+import { EmailSuppressionService } from './services/email-suppression.service';
 import { LoggerService } from './services/logger.service';
 import { RedisService } from './services/redis.service';
 
@@ -28,11 +29,19 @@ import { RedisService } from './services/redis.service';
       inject: [ConfigService],
     }),
   ],
-  providers: [PrismaService, JwtService, EmailService, LoggerService, RedisService],
+  providers: [
+    PrismaService,
+    JwtService,
+    EmailService,
+    EmailSuppressionService,
+    LoggerService,
+    RedisService,
+  ],
   exports: [
     PrismaService,
     JwtService,
     EmailService,
+    EmailSuppressionService,
     LoggerService,
     RedisService,
     JwtModule,

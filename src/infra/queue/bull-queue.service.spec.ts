@@ -8,6 +8,9 @@
 // returned; the HTTP client gave up first.
 //
 // These pin that every queue operation now REJECTS instead of hanging.
+//
+// Also R9: isReachable(), the probe the queue health indicator uses. It exists because
+// `/health/ready` used to answer "is the queue up?" by pinging a DIFFERENT client.
 
 import { Logger } from '@nestjs/common';
 import { BullQueueService, QueueUnavailableError } from './bull-queue.service';
@@ -16,7 +19,12 @@ import { BullQueueService, QueueUnavailableError } from './bull-queue.service';
 const neverSettles = <T>() => new Promise<T>(() => undefined);
 
 describe('BullQueueService', () => {
-  let queue: { name: string; add: jest.Mock; getJob: jest.Mock };
+  let queue: {
+    name: string;
+    add: jest.Mock;
+    getJob: jest.Mock;
+    waitUntilReady: jest.Mock;
+  };
   let service: BullQueueService;
 
   beforeEach(() => {
@@ -26,6 +34,7 @@ describe('BullQueueService', () => {
       name: 'resume-parsing',
       add: jest.fn().mockResolvedValue({ id: 'job-1' }),
       getJob: jest.fn().mockResolvedValue(undefined),
+      waitUntilReady: jest.fn().mockResolvedValue({ status: 'ready' }),
     };
     service = new BullQueueService(queue as never);
   });
@@ -101,6 +110,52 @@ describe('BullQueueService', () => {
 
     it('still rejects an unknown queue name', async () => {
       await expect(service.addJob('nope', 'x', {})).rejects.toThrow(/Unknown queue/);
+    });
+  });
+
+  describe('isReachable — the queue health probe (R9)', () => {
+    it('is true when BullMQ\'s own connection is ready', async () => {
+      await expect(service.isReachable()).resolves.toBe(true);
+      // The point of the finding: it asks BULLMQ, not RedisService.
+      expect(queue.waitUntilReady).toHaveBeenCalled();
+    });
+
+    it('is false when the connection settles into any other state', async () => {
+      queue.waitUntilReady.mockResolvedValue({ status: 'reconnecting' });
+
+      await expect(service.isReachable()).resolves.toBe(false);
+    });
+
+    it('is false, not hung, when the connection never comes up', async () => {
+      // With enableOfflineQueue at BullMQ's default this WAITS rather than rejecting, so
+      // an unbounded probe would hang the readiness endpoint instead of reporting.
+      queue.waitUntilReady.mockReturnValue(neverSettles());
+
+      const call = service.isReachable();
+      await jest.advanceTimersByTimeAsync(1000);
+      await expect(call).resolves.toBe(false);
+    });
+
+    it('gives up faster than a queue operation does', async () => {
+      queue.waitUntilReady.mockReturnValue(neverSettles());
+
+      const call = service.isReachable();
+      // Well before the 5s operation bound: a readiness probe that takes five seconds is
+      // itself a problem.
+      await jest.advanceTimersByTimeAsync(1000);
+      await expect(call).resolves.toBe(false);
+      expect(jest.getTimerCount()).toBe(0);
+    });
+
+    it('reports rather than throwing when the connection errors outright', async () => {
+      queue.waitUntilReady.mockRejectedValue(new Error('ECONNREFUSED'));
+
+      await expect(service.isReachable()).resolves.toBe(false);
+    });
+
+    it('leaves no timer behind on the healthy path', async () => {
+      await service.isReachable();
+      expect(jest.getTimerCount()).toBe(0);
     });
   });
 });

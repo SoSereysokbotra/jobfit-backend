@@ -39,6 +39,15 @@ import { Job, Queue } from 'bullmq';
 const QUEUE_OP_TIMEOUT_MS = 5000;
 
 /**
+ * Bound on the readiness probe (Redis audit R9), shorter than an operation's.
+ *
+ * A probe that can take five seconds is itself a problem — Cloud Run's readiness check
+ * would sit on it. 1s matches what RedisHealthIndicator already uses for its own PING,
+ * so the two halves of the queue answer on the same clock.
+ */
+const QUEUE_HEALTH_TIMEOUT_MS = 1000;
+
+/**
  * The queue could not be reached in time.
  *
  * A distinct type so callers can tell "the background job was never scheduled" from a
@@ -61,6 +70,41 @@ export class BullQueueService {
   constructor(
     @InjectQueue('resume-parsing') private readonly resumeParsingQueue: Queue,
   ) {}
+
+  /**
+   * Can BullMQ actually reach Redis right now?
+   *
+   * This exists because `/health/ready` used to answer that question by pinging
+   * RedisService — a DIFFERENT ioredis client, with different connection state and the
+   * opposite offline-queue configuration. It could therefore report the queue healthy
+   * while uploads hung (Redis audit R9). This pings BullMQ's own client.
+   *
+   * `waitUntilReady()` is the check rather than a PING: it resolves exactly when BullMQ's
+   * connection is usable, which is the question being asked, and `status` confirms the
+   * client did not settle into some other state. It is also the same call BullMQ makes
+   * internally before an operation, so this probes the real precondition for `add()`.
+   *
+   * Bounded, for the same reason as everything else here: with `enableOfflineQueue` at
+   * BullMQ's default, waiting on a down connection does not reject — it waits, forever.
+   * An unbounded health check against a down Redis would hang the readiness probe,
+   * trading a wrong answer for no answer.
+   *
+   * Returns a boolean rather than throwing: a probe reports, it does not fail.
+   */
+  async isReachable(): Promise<boolean> {
+    try {
+      const client = await this.raceWithTimeout(
+        this.resumeParsingQueue.waitUntilReady(),
+        'healthCheck',
+        QUEUE_HEALTH_TIMEOUT_MS,
+      );
+      return client.status === 'ready';
+    } catch {
+      // Deliberately quiet: this runs on every readiness probe, and during an outage the
+      // degraded readiness payload is the report. Logging here would be the flood.
+      return false;
+    }
+  }
 
   /** Enqueue a job onto the named queue. Throws {@link QueueUnavailableError} on timeout. */
   async addJob(queueName: string, jobName: string, data: unknown): Promise<Job> {
@@ -91,17 +135,8 @@ export class BullQueueService {
    * pretend the write was undone.
    */
   private async bounded<T>(operation: string, work: Promise<T>): Promise<T> {
-    let timer: NodeJS.Timeout | undefined;
     try {
-      return await Promise.race([
-        work,
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () => reject(new QueueUnavailableError(operation, QUEUE_OP_TIMEOUT_MS)),
-            QUEUE_OP_TIMEOUT_MS,
-          );
-        }),
-      ]);
+      return await this.raceWithTimeout(work, operation, QUEUE_OP_TIMEOUT_MS);
     } catch (err) {
       if (err instanceof QueueUnavailableError) {
         this.logger.error(
@@ -109,6 +144,30 @@ export class BullQueueService {
         );
       }
       throw err;
+    }
+  }
+
+  /**
+   * The race itself, without the logging — shared with the health probe, which must stay
+   * quiet. The timer and late-rejection handling below are the subtle part and exist in
+   * exactly one place on purpose.
+   */
+  private async raceWithTimeout<T>(
+    work: Promise<T>,
+    operation: string,
+    timeoutMs: number,
+  ): Promise<T> {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        work,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new QueueUnavailableError(operation, timeoutMs)),
+            timeoutMs,
+          );
+        }),
+      ]);
     } finally {
       // Always clear: an un-cleared timer keeps the event loop alive for its full
       // duration on every successful call.

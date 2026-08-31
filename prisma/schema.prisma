@@ -1192,6 +1192,35 @@ model EmailEvent {
   @@map("email_events")
 }
 
+/// Addresses we must never send to again — hard bounces and spam complaints.
+///
+/// This lived in Redis (`email:suppressed:{email}`, no TTL) until the Redis audit found
+/// it was written but never read on the send path, and that a Redis restart dropped the
+/// whole list silently. It is a permanent compliance record, not a cache: mailing an
+/// address that complained is what gets a sending domain blocked.
+///
+/// `email` is the primary key — the address IS the identity, so the constraint does the
+/// deduplication. Callers lower-case and trim at the boundary.
+model SuppressedEmail {
+  email String @id
+
+  /// Free text: "hard bounce", "spam complaint", or whatever the admin typed. Nullable
+  /// because a suppression with no stated reason is still a valid suppression.
+  reason String?
+
+  /// Who suppressed it. Deliberately NOT a relation: the record must outlive the admin
+  /// account that created it, and a compliance record that disappears when someone
+  /// leaves the company is not a compliance record.
+  suppressedByAdminId String?
+
+  suppressedAt DateTime @default(now())
+
+  /// The admin list is "most recently suppressed first". The send path looks up by
+  /// primary key and needs no index of its own.
+  @@index([suppressedAt])
+  @@map("suppressed_emails")
+}
+
 /// Basic admin action log (Audit Logging). Intentionally minimal for the MVP —
 /// no old/new values, IP, or free-text reason (Phase 2+).
 model AuditLog {

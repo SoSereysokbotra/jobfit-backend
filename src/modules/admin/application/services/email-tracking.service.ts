@@ -1,30 +1,30 @@
 // src/modules/admin/application/services/email-tracking.service.ts
 //
 // Email Delivery Tracking (Feature 3): delivery metrics, bounce list and address
-// suppression. Suppressed addresses are stored in Redis (`email:suppressed:{email}`),
-// which the mail-sending layer can consult before dispatching.
+// suppression.
+//
+// Suppression itself lives in EmailSuppressionService (Postgres). It used to be a Redis
+// key written here and read only HERE — to render a flag beside a bounce — while
+// EmailService, the actual sender, never consulted it (Redis audit R3). One shared
+// service now owns the question, because two copies of "is this address suppressed?" is
+// how the sender and the admin view got out of step.
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import {
   AuditActionType,
   AuditResourceType,
   EmailEventType,
 } from '@prisma/client';
-import { RedisService } from '@shared/services/redis.service';
+import { EmailSuppressionService } from '@shared/services/email-suppression.service';
 import { EmailEventRepository } from '../../infrastructure/repositories/email-event.repository';
 import { AuditLogService } from './audit-log.service';
 import { BounceDto, EmailMetricsDto } from '../dtos/email-response.dto';
 
-const SUPPRESSION_KEY = (email: string) =>
-  `email:suppressed:${email.toLowerCase().trim()}`;
-
 @Injectable()
 export class EmailTrackingService {
-  private readonly logger = new Logger(EmailTrackingService.name);
-
   constructor(
     private readonly emailEventRepo: EmailEventRepository,
-    private readonly redis: RedisService,
+    private readonly suppression: EmailSuppressionService,
     private readonly auditLog: AuditLogService,
   ) {}
 
@@ -55,42 +55,44 @@ export class EmailTrackingService {
   /** Recent bounces/complaints, annotated with current suppression state. */
   async getBounces(skip: number, take: number): Promise<BounceDto[]> {
     const rows = await this.emailEventRepo.findBounces({ skip, take });
-    return Promise.all(
-      rows.map(async (row) => {
-        const suppressed = await this.isSuppressed(row.recipientEmail);
-        return new BounceDto({
+    // One lookup for the whole page. Asking per row was a query per row, and the page
+    // is the only caller that needs many answers at once.
+    const suppressed = await this.suppression.filterSuppressed(
+      rows.map((r) => r.recipientEmail),
+    );
+    return rows.map(
+      (row) =>
+        new BounceDto({
           id: row.id,
           recipientEmail: row.recipientEmail,
           eventType: row.eventType,
           reason: row.reason,
           createdAt: row.createdAt,
-          suppressed,
-        });
-      }),
+          suppressed: suppressed.has(row.recipientEmail.toLowerCase().trim()),
+        }),
     );
   }
 
-  /** Add an address to the suppression list. */
-  async suppress(adminId: string, email: string): Promise<void> {
-    await this.redis.set(SUPPRESSION_KEY(email), '1');
+  /**
+   * Add an address to the suppression list.
+   *
+   * Suppress FIRST, then audit: an audit row for a suppression that did not happen is
+   * worse than a suppression with no audit row. The write throws on failure so the admin
+   * finds out (Redis audit R11 — this used to be the one write with no error handling,
+   * which made it inconsistently fail-closed against neighbours that failed open).
+   */
+  async suppress(
+    adminId: string,
+    email: string,
+    reason?: string,
+  ): Promise<void> {
+    await this.suppression.suppress(email, reason, adminId);
     await this.auditLog.record({
       adminId,
       actionType: AuditActionType.EMAIL_SUPPRESSED,
       resourceType: AuditResourceType.EMAIL,
       resourceId: email.toLowerCase().trim(),
     });
-  }
-
-  /** Read-side suppression check — fails open (returns false) if Redis is unavailable. */
-  private async isSuppressed(email: string): Promise<boolean> {
-    try {
-      return await this.redis.exists(SUPPRESSION_KEY(email));
-    } catch (err) {
-      this.logger.warn(
-        `Suppression lookup failed (fail-open): ${(err as Error).message}`,
-      );
-      return false;
-    }
   }
 }
 
