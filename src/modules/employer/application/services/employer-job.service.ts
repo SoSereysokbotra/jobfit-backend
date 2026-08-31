@@ -67,6 +67,19 @@ export class EmployerJobService {
     return this.jobService.publish(jobId, ctx.companyId);
   }
 
+  /**
+   * Close a posting — JobService enforces the company-ownership check.
+   *
+   * §7.2 of the employer spec lists close alongside view and edit, and the whole
+   * lifecycle already existed in JobService.close/CloseJobUseCase, including the
+   * domain event. It was simply never routed on the employer API, so a published job
+   * could not be taken down by the employer who posted it.
+   */
+  async close(userId: string, jobId: string): Promise<JobResponseDto> {
+    const ctx = await this.context.requireContext(userId);
+    return this.jobService.close(jobId, ctx.companyId);
+  }
+
   async getAnalytics(
     userId: string,
     jobId: string,
@@ -93,9 +106,19 @@ function toJobResponse(row: JobWithSkills): JobResponseDto {
     status: row.status,
     remoteType: row.remoteType,
     location: row.location ?? undefined,
+    // Currency and period come from the row. `currency` used to be the literal 'USD'
+    // and `period` was omitted altogether, so the employer's own listing showed a KHR
+    // posting as dollars and rendered "1200-2500" with no idea whether that is monthly
+    // or annual — while POST /employer/jobs and the public endpoints returned both
+    // correctly from the same columns. Absent period still means unknown, never ANNUAL.
     salaryRange:
       row.minSalary !== null && row.maxSalary !== null
-        ? { min: row.minSalary, max: row.maxSalary, currency: 'USD' }
+        ? {
+            min: row.minSalary,
+            max: row.maxSalary,
+            currency: row.salaryCurrency,
+            period: row.salaryPeriod ?? undefined,
+          }
         : undefined,
     skillIds: row.skills.map((s) => s.skillId),
     responsibilities: row.responsibilities ?? [],

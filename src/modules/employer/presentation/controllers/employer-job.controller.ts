@@ -80,6 +80,23 @@ export class EmployerJobController {
     return this.jobService.publish(user.id, id);
   }
 
+  @Post(':id/close')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Close a published job posting',
+    description:
+      'Takes the posting down: it stops appearing in candidate search and stops ' +
+      'accepting applications. Existing applications are untouched and stay in the ' +
+      'pipeline. Closing is not reversible from here — reposting is not built yet.',
+  })
+  @ApiOkResponse({ type: JobResponseDto })
+  close(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<JobResponseDto> {
+    return this.jobService.close(user.id, id);
+  }
+
   @Get(':id/analytics')
   @ApiOperation({ summary: 'View job analytics (applications, match score)' })
   @ApiOkResponse({ type: JobAnalyticsResponseDto })
