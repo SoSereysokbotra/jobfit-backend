@@ -3,7 +3,8 @@
 // Self-contained JWT auth guard (no Passport strategy). It:
 //   1. extracts the Bearer token (falls back to an `accessToken` cookie),
 //   2. verifies the signature/expiry via @nestjs/jwt,
-//   3. checks the token's `jti` against the blacklist — FAILING OPEN if Redis is down,
+//   3. checks the token's `jti` against the blacklist — DEGRADING if Redis is down
+//      (TokenBlacklistService answers from its in-process mirror; see R6 there),
 //   4. attaches { id, email, role } to request.user.
 //
 // It depends on JwtService (provided by SharedModule's JwtModule) and
@@ -61,7 +62,9 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('Invalid or expired token');
     }
 
-    // Revocation check — fail OPEN so a Redis outage never blocks valid tokens.
+    // Revocation check. TokenBlacklistService owns the degraded behaviour (R6) and
+    // does not throw on a Redis error, so this catch is for the unexpected only —
+    // allowing the request, because a bug here must not lock every user out.
     if (payload.jti) {
       try {
         const revoked = await this.tokenBlacklistService.isBlacklisted(

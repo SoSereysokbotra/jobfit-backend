@@ -14,6 +14,13 @@
 //      believe the mail went out. Callers that must not break on a bounce (the auth event
 //      listener) catch it themselves, visibly.
 //
+// SUPPRESSION. Every send is gated on EmailSuppressionService first (Redis audit R3 —
+// the suppression list existed but the sender never consulted it, so suppressing a
+// hard-bounced address changed the admin screen and nothing else). A suppressed address
+// is SKIPPED, not thrown: the address is permanently undeliverable by our own decision,
+// which is the system working, not a failure for a caller to retry. A lookup that fails
+// DOES throw — see EmailSuppressionService for why that one fails closed.
+//
 // Delivery state (configured / verified / last error) is exposed for the readiness probe
 // via MailHealthIndicator.
 
@@ -21,6 +28,10 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
+import {
+  EmailSuppressedError,
+  EmailSuppressionService,
+} from './email-suppression.service';
 
 interface MailBody {
   text: string;
@@ -59,7 +70,10 @@ export class EmailService implements OnModuleInit {
   private lastError?: string;
   private lastSentAt?: Date;
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly suppression: EmailSuppressionService,
+  ) {}
 
   onModuleInit(): void {
     const host = this.config.get<string>('EMAIL_HOST');
@@ -238,12 +252,31 @@ export class EmailService implements OnModuleInit {
    * Deliver one mail. Throws on failure (rule 2) — callers decide whether a bounce is
    * fatal to their flow. In dev/test with no SMTP configured the send is skipped rather
    * than thrown, so the suite runs without a mail server.
+   *
+   * The suppression gate runs FIRST, before the transport check, so that whether an
+   * address is consulted does not depend on how the environment is configured. That
+   * unconditionality is the whole point of R3.
    */
   private async send(
     to: string,
     subject: string,
     body: MailBody,
   ): Promise<void> {
+    try {
+      await this.suppression.assertSendable(to);
+    } catch (err) {
+      if (err instanceof EmailSuppressedError) {
+        // Deliberate skip, not a failure: this address hard-bounced or complained and we
+        // have decided never to mail it again. Callers get a clean return.
+        this.logger.warn(
+          `Email skipped (address suppressed): "${subject}" -> ${to}`,
+        );
+        return;
+      }
+      // The lookup itself failed. Fail closed — do not send on an unverified address.
+      throw err;
+    }
+
     if (!this.transporter) {
       // Only reachable outside production — onModuleInit throws there.
       this.logger.warn(

@@ -8,7 +8,8 @@
 // Reuse:
 //   - CqrsModule  -> CommandBus, to dispatch auth's Login/Logout/RequestPasswordReset.
 //   - AuthModule  -> ACCOUNT_LOCKOUT_SERVICE (unlock), TokenBlacklistService (JwtAuthGuard).
-//   - SharedModule -> RedisService (email suppression) + JwtService (JwtAuthGuard).
+//   - SharedModule -> EmailSuppressionService (the suppression list, now in Postgres —
+//     it was RedisService until the Redis audit) + JwtService (JwtAuthGuard).
 // PrismaService is available globally (PrismaModule is @Global).
 
 import { Module } from '@nestjs/common';

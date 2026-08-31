@@ -62,7 +62,7 @@ export class AdminEmailController {
     @Body() dto: SuppressEmailDto,
     @CurrentUser('id') adminId: string,
   ): Promise<AdminMessageResponseDto> {
-    await this.emailTracking.suppress(adminId, dto.email);
+    await this.emailTracking.suppress(adminId, dto.email, dto.reason);
     return new AdminMessageResponseDto('Email address suppressed.');
   }
 }

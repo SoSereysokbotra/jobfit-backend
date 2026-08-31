@@ -38,7 +38,8 @@ export class OptionalJwtAuthGuard implements CanActivate {
             const payload = this.jwtService.verify<JwtPayload>(token);
 
             if (payload.jti) {
-                // isBlacklisted already fails open (returns false on Redis error).
+                // isBlacklisted degrades rather than throwing on a Redis error: it
+                // answers from the in-process revocation mirror (Redis audit R6).
                 const revoked = await this.tokenBlacklistService.isBlacklisted(
                     payload.jti,
                 );
