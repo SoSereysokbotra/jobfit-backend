@@ -14,6 +14,7 @@ import {
   Post,
   Req,
   Res,
+  UseFilters,
   UseGuards,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -27,6 +28,7 @@ import {
 import type { Request, Response } from 'express';
 
 import { Public } from '@common/decorators/public.decorator';
+import { AuthExceptionFilter } from '@modules/auth/presentation/exception-filters/auth-exception.filter';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { buildAuthCookieOptions } from '@common/utils/cookie.util';
 import { REFRESH_TOKEN_TTL_SECONDS } from '@modules/auth/application/auth.constants';
@@ -41,6 +43,14 @@ const REFRESH_COOKIE = 'refresh_token';
 
 @ApiTags('Admin - Auth')
 @Controller('admin')
+// Domain errors from the shared LoginCommand (InvalidCredentialsError,
+// EmailNotVerifiedError, LoginBlockedError) are plain AuthError subclasses, not
+// HttpExceptions. Without this filter they reach the global handler as 500s, so every
+// failed sign-in on this portal answered "Internal server error" — including the
+// approved-but-not-yet-activated case this controller documents as a 401, and the
+// lockout the user has to be told about. The filter is what maps them to 401/403/429;
+// AuthController has always had it, and reusing the command means reusing the filter.
+@UseFilters(AuthExceptionFilter)
 export class AdminAuthController {
   private readonly nodeEnv?: string;
 
