@@ -16,22 +16,19 @@
 // the same lie in a new place. One registration, imported by both.
 
 import { Module } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
+import { resolveRedisConnection } from '@config/redis-connection';
 import { BullQueueService } from './bull-queue.service';
 import { DEFAULT_JOB_OPTIONS } from './job-options';
 
 @Module({
   imports: [
+    // Resolved through the SHARED helper, not from redis.host/redis.port directly.
+    // Those keys ignore REDIS_URL, which is the one variable managed providers give you
+    // and the one cloudbuild.yaml sets — so this queue used to point at localhost in any
+    // deployment configured by URL, and nothing said so. See @config/redis-connection.
     BullModule.forRootAsync({
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        connection: {
-          host: config.get<string>('redis.host'),
-          port: config.get<number>('redis.port'),
-          password: config.get<string>('redis.password'),
-        },
-      }),
+      useFactory: () => ({ connection: resolveRedisConnection() }),
     }),
     // defaultJobOptions is NOT optional decoration: without it BullMQ gives a job one
     // attempt and keeps every completed job in Redis forever (Redis audit R5). See

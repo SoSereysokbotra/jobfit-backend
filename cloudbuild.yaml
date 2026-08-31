@@ -91,14 +91,29 @@ steps:
       # handshake is async); that surfaces as mail.degraded on /health/ready.
       # SMTP_FROM must match the authenticated Gmail account, otherwise Gmail rewrites it.
       - '--set-env-vars=^|^NODE_ENV=production|LOG_FORMAT=json|LOG_LEVEL=info|METRICS_ENABLED=true|TRACE_ENABLED=false|SERVICE_NAME=${_SERVICE}|SERVICE_VERSION=$BUILD_ID|GCP_PROJECT_ID=$PROJECT_ID|CORS_ORIGIN=${_CORS_ORIGIN}|REDIS_PREFIX=prod:|EMAIL_HOST=smtp.gmail.com|EMAIL_PORT=587|EMAIL_USER=soviseth869@gmail.com|SMTP_FROM=JobFit Support <soviseth869@gmail.com>'
-      # REDIS_URL still omitted — the secret exists but its value is unverified, and a bad
-      # host is worse than none (Redis is optional; the services that use it degrade).
-      # REDIS_PREFIX is set REGARDLESS, and deliberately so: it costs nothing while
-      # REDIS_URL is absent, and it means the day someone wires a shared Redis instance
-      # they do not silently share `lockout:*` / `blacklist:*` with another environment
-      # (Redis audit R7). Every environment needs its OWN value — dev:, staging:, prod:.
+      # REDIS_URL is now wired from Secret Manager. It was deliberately omitted for a long
+      # time — "the secret exists but its value is unverified, and a bad host is worse
+      # than none". Two things changed that calculation:
+      #
+      #   1. A bad host no longer takes the service down. RedisService is lazyConnect with
+      #      a non-fatal onModuleInit, retries forever with a 5s ceiling (R4), and bounds
+      #      every command at 2s (R10). A wrong value now costs degraded caching and a log
+      #      line, not a boot failure.
+      #   2. Both clients finally agree on where Redis is. BullMQ used to read only
+      #      REDIS_HOST/REDIS_PORT, so setting REDIS_URL alone would have connected the
+      #      cache and left the job queue on localhost, silently. Both now resolve through
+      #      @config/redis-connection.
+      #
+      # ⚠️ VERIFY THE SECRET'S VALUE BEFORE THE FIRST DEPLOY WITH THIS LINE. It must be
+      # redis://…  or rediss://…  (rediss = TLS, which Upstash and most managed providers
+      # require). A malformed value now throws AT BOOT by design — better a failed deploy
+      # than a service silently talking to nothing. See docs/REDIS_PRODUCTION_SETUP.md.
+      #
+      # REDIS_PREFIX is set separately as a plain env var (above): every environment needs
+      # its OWN value — dev:, staging:, prod: — so two of them sharing one Redis instance
+      # cannot collide on `lockout:*` / `blacklist:*` (Redis audit R7).
       #
       # SLACK_WEBHOOK_URL wired (Phase 4 alerts).
       # HEALTHCHECKS_PING_URL wired (dead-man's-switch heartbeat).
       # SUPABASE_* required at boot. EMAIL_PASS is the Gmail app password.
-      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,METRICS_TOKEN=METRICS_TOKEN:latest,SLACK_WEBHOOK_URL=SLACK_WEBHOOK_URL:latest,HEALTHCHECKS_PING_URL=HEALTHCHECKS_PING_URL:latest,SUPABASE_URL=SUPABASE_URL:latest,SUPABASE_SERVICE_ROLE_KEY=SUPABASE_SERVICE_ROLE_KEY:latest,SUPABASE_ANON_KEY=SUPABASE_ANON_KEY:latest,SUPABASE_JWT_SECRET=SUPABASE_JWT_SECRET:latest,EMAIL_PASS=EMAIL_PASS:latest'
+      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,METRICS_TOKEN=METRICS_TOKEN:latest,SLACK_WEBHOOK_URL=SLACK_WEBHOOK_URL:latest,HEALTHCHECKS_PING_URL=HEALTHCHECKS_PING_URL:latest,SUPABASE_URL=SUPABASE_URL:latest,SUPABASE_SERVICE_ROLE_KEY=SUPABASE_SERVICE_ROLE_KEY:latest,SUPABASE_ANON_KEY=SUPABASE_ANON_KEY:latest,SUPABASE_JWT_SECRET=SUPABASE_JWT_SECRET:latest,EMAIL_PASS=EMAIL_PASS:latest,REDIS_URL=REDIS_URL:latest'

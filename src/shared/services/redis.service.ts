@@ -24,6 +24,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
+import { resolveRedisConnection } from '@config/redis-connection';
 
 /** Ramp: attempt 1 waits 200ms, attempt 2 waits 400ms, and so on up to the cap. */
 const RECONNECT_STEP_MS = 200;
@@ -90,19 +91,17 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       retryStrategy: reconnectDelayMs,
     };
 
-    // Prefer a full REDIS_URL if provided; otherwise assemble from host/port/password
-    // (the keys JobFit's config/env define).
-    const url = this.config.get<string>('REDIS_URL');
-    if (url) {
-      this.client = new Redis(url, commonOpts);
-    } else {
-      this.client = new Redis({
-        host: this.config.get<string>('REDIS_HOST') ?? 'localhost',
-        port: parseInt(this.config.get<string>('REDIS_PORT') ?? '6379', 10),
-        password: this.config.get<string>('REDIS_PASSWORD') || undefined,
-        ...commonOpts,
-      });
-    }
+    // Resolved by the SHARED helper so this client and BullMQ's cannot end up pointing at
+    // different servers — they read different variables until now, and only this one
+    // understood REDIS_URL. Values come via ConfigService so any .env loading still
+    // applies; the helper only decides how to interpret them.
+    const connection = resolveRedisConnection({
+      REDIS_URL: this.config.get<string>('REDIS_URL'),
+      REDIS_HOST: this.config.get<string>('REDIS_HOST'),
+      REDIS_PORT: this.config.get<string>('REDIS_PORT'),
+      REDIS_PASSWORD: this.config.get<string>('REDIS_PASSWORD'),
+    });
+    this.client = new Redis({ ...connection, ...commonOpts });
 
     this.client.on('error', (err: Error) => {
       // Log once per outage to avoid spamming while Redis is down.

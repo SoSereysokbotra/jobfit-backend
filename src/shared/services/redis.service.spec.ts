@@ -129,14 +129,27 @@ describe('RedisService', () => {
       expect(constructorOptions().keyPrefix).toBe('prod:');
     });
 
-    it('uses REDIS_URL when given, with the same strategy', () => {
+    it('resolves REDIS_URL into host/port, with the same strategy', () => {
       new RedisService(configOf({ REDIS_URL: 'redis://cache:6379' }));
 
-      expect(MockedRedis.mock.calls[0][0]).toBe('redis://cache:6379');
-      const strategy = constructorOptions().retryStrategy as (
-        t: number,
-      ) => number | null;
+      // Parsed through @config/redis-connection rather than handed to ioredis as a raw
+      // string, so this client and BullMQ's resolve the same target from the same env.
+      const opts = constructorOptions();
+      expect(opts.host).toBe('cache');
+      expect(opts.port).toBe(6379);
+      const strategy = opts.retryStrategy as (t: number) => number | null;
       expect(strategy(50)).toBe(5000);
+    });
+
+    it('enables TLS from a rediss:// URL, and leaves it off otherwise', () => {
+      new RedisService(configOf({ REDIS_URL: 'rediss://secure.upstash.io:6379' }));
+      expect(constructorOptions().tls).toEqual({});
+
+      MockedRedis.mockClear();
+      new RedisService(configOf({ REDIS_HOST: 'localhost' }));
+      // ioredis reads the presence of `tls` as "use TLS", so a local Redis needs the key
+      // absent, not undefined.
+      expect('tls' in constructorOptions()).toBe(false);
     });
   });
 

@@ -84,10 +84,19 @@ npx eslint "src/**/*.ts"
 npx jest --silent
 ```
 
-**Known flakes, not regressions:** `http-cache.interceptor.spec.ts` and `ai.client.spec.ts`
-bind real HTTP servers and occasionally fail under parallel load. Both pass in isolation.
-Jest also prints "a worker process has failed to exit gracefully" on some full runs —
-intermittent and pre-existing; it reproduces with the newest specs excluded.
+**Known flakes, not regressions.** All three are load-sensitive and pass in isolation;
+none touches the code changed here.
+
+- `http-cache.interceptor.spec.ts`, `ai.client.spec.ts` — bind real HTTP servers.
+- `refresh-token.handler.spec.ts` — an INTEGRATION test against the real `DATABASE_URL`
+  with `jest.setTimeout(30000)`. Observed failing once on a run that took 318s wall-clock
+  (a normal run is ~150s), i.e. it timed out against a remote database under parallel
+  load. It stubs Redis with a no-op, so no Redis path runs in it at all.
+
+Three full runs were done at this commit: 98/98 twice (142s, 154s) and 96/98 once (318s,
+the two HTTP/DB suites above). Jest also prints "a worker process has failed to exit
+gracefully" on some runs — intermittent and pre-existing; it reproduces with the newest
+specs excluded.
 
 ⚠️ **The migration has not been applied to any database.** `prisma migrate deploy` (or
 `prisma migrate dev` locally) still has to run. The code queries `suppressed_emails`, so
