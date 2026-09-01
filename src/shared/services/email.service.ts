@@ -227,6 +227,45 @@ export class EmailService implements OnModuleInit {
   }
 
   /**
+   * The admin needs something more before they can decide (PENDING_INFO).
+   *
+   * `question` is the admin's own words, verbatim — the point of this mail is to carry a
+   * specific question, and paraphrasing it into a generic "we need more information" would
+   * leave the employer guessing at what to send.
+   *
+   * REPLY IS THE ANSWER CHANNEL, deliberately. There is no authenticated route for an
+   * employer to amend a request: no account exists yet, and inventing an anonymous edit
+   * endpoint keyed on the request id would let anyone holding that id rewrite the company
+   * details an admin is in the middle of reviewing. A reply lands in a human inbox that is
+   * already reading the queue.
+   */
+  async sendEmployerRequestMoreInfo(
+    to: string,
+    companyName: string,
+    question: string,
+    requestId: string,
+  ): Promise<void> {
+    const url = `${this.appUrl}/employer/request/${requestId}`;
+    await this.send(to, 'We need a little more about your JobFit request', {
+      text:
+        `We are reviewing the employer request for ${companyName} and need one more ` +
+        `thing before we can decide.
+
+${question}
+
+` +
+        'Reply to this email with the details and we will pick it up from there. Your ' +
+        `request is still open — you can check it at ${url}`,
+      html:
+        `<p>We are reviewing the employer request for <strong>${companyName}</strong> and ` +
+        'need one more thing before we can decide.</p>' +
+        `<blockquote>${question}</blockquote>` +
+        '<p>Reply to this email with the details and we will pick it up from there. Your ' +
+        `request is still open — you can <a href="${url}">check its status</a>.</p>`,
+    });
+  }
+
+  /**
    * A rejected request. `reason` is the admin's own words and is shown verbatim,
    * because a rejection with no reason is one the employer cannot act on.
    */

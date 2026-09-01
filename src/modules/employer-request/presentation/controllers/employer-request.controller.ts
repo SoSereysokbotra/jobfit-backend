@@ -17,13 +17,21 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
+  Param,
+  ParseUUIDPipe,
   Post,
   UseGuards,
 } from '@nestjs/common';
 import { ThrottlerGuard } from '@nestjs/throttler';
-import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiOkResponse,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 
 import { Public } from '@common/decorators/public.decorator';
 import { RateLimit } from '@common/decorators/rate-limit.decorator';
@@ -35,6 +43,7 @@ import {
   CreateEmployerRequestDto,
   EmployerRequestMessageDto,
   EmployerRequestReceiptDto,
+  EmployerRequestStatusDto,
 } from '../../application/dtos/employer-request.dtos';
 
 @ApiTags('Employer Onboarding')
@@ -70,6 +79,27 @@ export class EmployerRequestController {
     @Body() dto: CreateEmployerRequestDto,
   ): Promise<EmployerRequestReceiptDto> {
     return this.requests.submit(dto);
+  }
+
+  @Get(':id')
+  @Public()
+  @RateLimit(THROTTLERS.employerRequest.name)
+  @ApiOperation({
+    summary: 'Check the status of a request you submitted',
+    description:
+      'THE ID IS THE CREDENTIAL — it is a v4 UUID returned only on the receipt, and holding ' +
+      'it is the whole claim to read this. So the payload is thin by design: company name, ' +
+      'status, when it was submitted, and the admin message when there is one addressed to ' +
+      'the employer. No contact email, no reviewer, no account id. Existed for nothing to ' +
+      'read before: a rejected or information-pending employer had no account, no screen ' +
+      'and no mail, so the answer never reached them at all.',
+  })
+  @ApiOkResponse({ type: EmployerRequestStatusDto })
+  @ApiResponse({ status: 404, description: 'No request with that id.' })
+  status(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<EmployerRequestStatusDto> {
+    return this.requests.publicStatus(id);
   }
 
   @Post('activate')

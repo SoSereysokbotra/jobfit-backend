@@ -75,11 +75,16 @@ export class AdminEmployerRequestController {
     summary: 'Move a request to REVIEWING, PENDING_INFO or REJECTED',
     description:
       'Approval is not here — it creates an account, so it has its own route, payload and ' +
-      'transaction. A rejection requires `adminNotes`; that text is emailed to the ' +
-      'employer verbatim.',
+      'transaction. REJECTED and PENDING_INFO both require `adminNotes` and both email it ' +
+      'to the employer verbatim — as the reason, and as the question to answer. REVIEWING ' +
+      'is internal triage and sends nothing. Mail failure is logged, never fatal: the ' +
+      'decision is already recorded and a rejection cannot be retried.',
   })
   @ApiOkResponse({ type: EmployerRequestDto })
-  @ApiResponse({ status: 400, description: 'Rejecting without a reason.' })
+  @ApiResponse({
+    status: 400,
+    description: 'Rejecting, or asking for more information, without a note.',
+  })
   @ApiResponse({ status: 409, description: 'Already approved or rejected.' })
   review(
     @Param('id', ParseUUIDPipe) id: string,
