@@ -1,0 +1,101 @@
+# .github/workflows/ci.yml
+#
+# The check that `main`'s branch protection has been asserting without anything behind it.
+#
+# WHY THIS EXISTS. Until now `tsc`, `jest` and `eslint` ran only when a human remembered to
+# run them, which meant a PR could be approved and merged on the strength of nobody having
+# looked. src/app.module.wiring.spec.ts documents what that costs: a broken AppModule that
+# could not start at all shipped while 896 unit tests passed, and it was found by accident
+# months later. Its own header ends "Nothing would have caught it — there is no CI." This
+# file is that sentence being retired.
+#
+# WHAT THE JOB NEEDS, and why each piece is not optional:
+#
+#   pgvector, not stock postgres. prisma/migrations/20260720060000_semantic_matching does
+#   `CREATE EXTENSION IF NOT EXISTS vector`, so `migrate deploy` fails on the plain image
+#   before a single test runs.
+#
+#   `prisma generate` BEFORE the typecheck. The client is generated code that is not in the
+#   repo; against a stale one, `tsc` reports missing models — SuppressedEmail, added by the
+#   email-suppression work — as if the source were wrong. On a fresh CI checkout there is no
+#   client at all.
+#
+#   A real database. Most of the suite is unit tests, but refresh-token.handler.spec.ts and
+#   refresh-token.race.spec.ts are integration tests that open DATABASE_URL directly, and
+#   they cover refresh-token theft detection — the last thing to leave unverified.
+#
+# JWT_SECRET is a throwaway: env.validation.ts requires it (`min(1)`) and refuses to boot
+# without it. Nothing here signs anything a real client will ever see.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# A second push to the same PR makes the first run's answer irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: typecheck · lint · test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: jobfit_test
+        ports:
+          - 5432:5432
+        # Steps start as soon as the container does, which is well before Postgres is
+        # accepting connections. Without this the migrate step loses the race.
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/jobfit_test
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/jobfit_test
+      JWT_SECRET: ci-throwaway-secret
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Reads the `packageManager` field in package.json, so the version here follows the
+      # repo instead of drifting from it.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # Matches the Dockerfile, which is what actually runs in prod.
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm exec prisma generate
+
+      - name: Apply migrations
+        run: pnpm exec prisma migrate deploy
+
+      - name: Typecheck
+        run: pnpm exec tsc --noEmit -p tsconfig.json
+
+      - name: Lint
+        run: pnpm exec eslint "{src,test}/**/*.ts"
+
+      # --ci so a missing snapshot fails instead of being written and silently passing.
+      - name: Test
+        run: pnpm exec jest --silent --ci
