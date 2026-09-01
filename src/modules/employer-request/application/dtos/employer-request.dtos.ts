@@ -102,8 +102,10 @@ export class ReviewEmployerRequestDto {
   @ApiPropertyOptional({
     maxLength: 2000,
     description:
-      'Required when rejecting — it is emailed to the employer verbatim. A rejection with ' +
-      'no reason is one they cannot act on.',
+      'Required when rejecting or asking for more information — it is emailed to the ' +
+      'employer verbatim, as the reason or as the question. A rejection with no reason is ' +
+      'one they cannot act on, and a request for information that does not say what is ' +
+      'missing is one they cannot answer. Optional on REVIEWING, which sends no mail.',
   })
   @IsOptional()
   @IsString()
@@ -246,6 +248,34 @@ export class EmployerRequestListDto {
   constructor(items: EmployerRequestDto[], total: number) {
     this.items = items;
     this.total = total;
+  }
+}
+
+/**
+ * What the employer sees about their OWN request, via the id on their receipt.
+ *
+ * A deliberately smaller shape than EmployerRequestDto, which is the admin view. Every
+ * field the admin one carries and this one does not — companyEmail, contactName,
+ * adminNotes on a status that is not addressed to the employer, reviewedByAdminId,
+ * approvedUserId, domainCheck, the SLA clock — was left out on purpose: the reader here is
+ * authenticated by nothing stronger than possession of a UUID.
+ */
+export class EmployerRequestStatusDto {
+  @ApiProperty() id: string;
+  @ApiProperty() companyName: string;
+  @ApiProperty({ enum: EmployerRequestStatus }) status: EmployerRequestStatus;
+  @ApiProperty() submittedAt: Date;
+
+  @ApiPropertyOptional({
+    description:
+      "The admin's own words, present only when the status is PENDING_INFO (what they " +
+      'need) or REJECTED (why). Absent otherwise — a note on a request still in triage is ' +
+      'internal.',
+  })
+  message?: string;
+
+  constructor(init: EmployerRequestStatusDto) {
+    Object.assign(this, init);
   }
 }
 
