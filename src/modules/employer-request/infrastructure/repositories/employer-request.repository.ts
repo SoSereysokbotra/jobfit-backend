@@ -21,6 +21,8 @@ export class EmployerRequestRepository {
     companyName: string;
     companyEmail: string;
     contactName: string;
+    contactFirstName?: string | null;
+    contactLastName?: string | null;
     contactRole: string;
     description: string;
     companyWebsite?: string | null;

@@ -533,7 +533,18 @@ model EmployerRequest {
 
   // ── What the employer submitted ──
   companyName       String
+  /// Display name for the review queue. Composed from the two fields below when the intake
+  /// form supplies them, and typed free-text when it does not.
   contactName       String
+  /// The contact's name AS TWO FIELDS, because EmployerProfile stores it as two.
+  ///
+  /// Nullable, and that is the whole design: every request submitted before this column
+  /// existed has only `contactName`, so approval falls back to splitting it on the first
+  /// space. That fallback is a guess — "Mary Jane Watson" becomes a surname of
+  /// "Jane Watson" — which is why new intake asks instead of inferring. Backfilling the old
+  /// rows would mean persisting the same guess as though it were an answer.
+  contactFirstName  String?
+  contactLastName   String?
   contactRole       String
   /// Becomes the login address. Not unique: a rejected request must not permanently
   /// block the address, and the real conflict check is the unique index on users.email,
