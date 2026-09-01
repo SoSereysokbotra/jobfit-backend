@@ -37,7 +37,19 @@ export class RegisterHandler implements ICommandHandler<RegisterCommand> {
 
     const email = command.email.toLowerCase().trim();
     const existing = await this.userRepo.findByEmail(email);
-    if (existing && existing.isVerified) {
+    // Two reasons to refuse, and the SECOND one is not obvious.
+    //
+    // `isVerified` is the ordinary taken-address case. The role check exists because an
+    // unverified row is not always a half-finished signup: approving an employer request
+    // creates a real EMPLOYER row with `emailVerified: false` and an empty password hash,
+    // which stays that way until the employer redeems their activation code. Falling into
+    // the reuse branch below with that row would rewrite its password and hand the signup
+    // an EMPLOYER-role account, because reuse never touches `role` — public signup has no
+    // concept of one.
+    //
+    // Same error either way: distinguishing them would say whether an address is an
+    // employer under review, which the intake endpoint deliberately refuses to reveal.
+    if (existing && (existing.isVerified || existing.role !== 'JOB_SEEKER')) {
       throw new EmailAlreadyRegisteredError();
     }
 
@@ -47,7 +59,7 @@ export class RegisterHandler implements ICommandHandler<RegisterCommand> {
 
     let user: UserEntity;
     if (existing) {
-      // Re-registration of an unverified account: refresh credentials + code (same id).
+      // Re-registration of an unverified JOB_SEEKER: refresh credentials + code (same id).
       if (command.name) existing.name = command.name;
       existing.passwordHash = passwordHash;
       existing.setVerificationCode(code, expiry);
