@@ -1,7 +1,7 @@
 // src/modules/employer-request/application/services/employer-request.review.spec.ts
 //
-// The admin review transitions, and specifically WHETHER THE EMPLOYER EVER HEARS ABOUT
-// THEM.
+// EmployerRequestService: intake, and the admin review transitions — specifically WHETHER
+// THE EMPLOYER EVER HEARS ABOUT THEM.
 //
 // Before this, `review()` wrote `adminNotes` to the row and stopped. The rejection reason
 // an admin was REQUIRED to type reached nobody, and PENDING_INFO asked a question through
@@ -18,7 +18,9 @@
 //      makes REJECTED final, so an admin who saw an error could never retry the rejection
 //      that had in fact already been recorded;
 //   4. the public status view withholds `adminNotes` on statuses that are not addressed to
-//      the employer, because the id that authenticates that route is just a UUID.
+//      the employer, because the id that authenticates that route is just a UUID;
+//   5. intake stores the contact's first and last name as given, and builds the display
+//      name from them — the queue must never show one name while the account gets another.
 
 import { BadRequestException } from '@nestjs/common';
 import { EmployerRequestStatus } from '@prisma/client';
@@ -198,5 +200,70 @@ describe('EmployerRequestService.publicStatus — what the UUID buys you', () =>
       'submittedAt',
     ]);
     expect(JSON.stringify(dto)).not.toContain('techcorp.com');
+  });
+});
+
+describe('EmployerRequestService.submit — the contact name is asked for, not inferred', () => {
+  let repo: { findOpenByEmail: jest.Mock; create: jest.Mock };
+  let service: EmployerRequestService;
+
+  const BASE = {
+    companyName: 'TechCorp Inc',
+    companyEmail: 'Recruiting@TechCorp.com',
+    contactName: 'Mary Jane Watson',
+    contactRole: 'Head of Talent',
+    description: 'We hire engineers.',
+  };
+
+  beforeEach(() => {
+    repo = {
+      findOpenByEmail: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockResolvedValue({ ...REQUEST }),
+    };
+    service = new EmployerRequestService(repo as never, {} as never);
+  });
+
+  it('stores both halves and BUILDS the display name from them', async () => {
+    await service.submit({
+      ...BASE,
+      contactFirstName: '  Mary Jane  ',
+      contactLastName: '  Watson  ',
+    });
+
+    expect(repo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contactFirstName: 'Mary Jane',
+        contactLastName: 'Watson',
+        // Built, not copied — the queue cannot show one name while the account gets another.
+        contactName: 'Mary Jane Watson',
+        companyEmail: 'recruiting@techcorp.com',
+      }),
+    );
+  });
+
+  it('leaves the parts null when only the one-line name is given', async () => {
+    await service.submit(BASE);
+
+    expect(repo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contactName: 'Mary Jane Watson',
+        contactFirstName: null,
+        contactLastName: null,
+      }),
+    );
+  });
+
+  it('does not pair a real first name with an empty surname', async () => {
+    await service.submit({ ...BASE, contactFirstName: 'Mary Jane' });
+
+    // Half a pair is no pair: approval falls back to the split rather than writing a
+    // profile with a blank surname the employer never agreed to.
+    expect(repo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contactFirstName: 'Mary Jane',
+        contactLastName: null,
+        contactName: 'Mary Jane Watson',
+      }),
+    );
   });
 });

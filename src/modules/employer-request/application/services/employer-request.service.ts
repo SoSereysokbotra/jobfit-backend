@@ -71,10 +71,18 @@ export class EmployerRequestService {
       );
     }
 
+    const first = dto.contactFirstName?.trim() || null;
+    const last = dto.contactLastName?.trim() || null;
+
     const created = await this.repo.create({
       companyName: dto.companyName.trim(),
       companyEmail: email,
-      contactName: dto.contactName.trim(),
+      // When the form gave both halves, the display name is BUILT from them rather than
+      // taken from `contactName`, so the queue can never show one name while the account
+      // gets another.
+      contactName: first && last ? `${first} ${last}` : dto.contactName.trim(),
+      contactFirstName: first,
+      contactLastName: last,
       contactRole: dto.contactRole.trim(),
       description: dto.description.trim(),
       companyWebsite: dto.companyWebsite?.trim() || null,

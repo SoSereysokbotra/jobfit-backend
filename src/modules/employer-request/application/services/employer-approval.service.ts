@@ -300,7 +300,7 @@ export class EmployerApprovalService {
       return;
     }
 
-    const { firstName, lastName } = splitContactName(request.contactName);
+    const { firstName, lastName } = contactNameParts(request);
     await tx.employerProfile.create({
       data: { userId, companyId, firstName, lastName },
     });
@@ -367,11 +367,29 @@ export class EmployerApprovalService {
 }
 
 /**
- * Split the contact name the employer gave on the request into the first/last pair
- * EmployerProfile requires. The form collects one free-text field, so this is a best
- * effort: everything before the first space is the first name, the rest is the surname.
- * A single word becomes the first name with the surname left blank rather than guessed,
- * and the employer can correct both in account settings.
+ * The first/last pair EmployerProfile requires, ASKED FOR WHEN POSSIBLE.
+ *
+ * Intake now collects the two separately, so for any request submitted through the form
+ * this is a read, not a derivation. The split below survives only for the rows that predate
+ * those columns and for the §4.1 email/Telegram channel, where an admin is transcribing one
+ * line somebody wrote in prose.
+ */
+function contactNameParts(request: EmployerRequest): {
+  firstName: string;
+  lastName: string;
+} {
+  const firstName = request.contactFirstName?.trim();
+  const lastName = request.contactLastName?.trim();
+  if (firstName && lastName) return { firstName, lastName };
+
+  return splitContactName(request.contactName);
+}
+
+/**
+ * Best-effort fallback: everything before the first space is the first name, the rest is
+ * the surname. Right for "Jane Doe", wrong for "Mary Jane Watson", which is precisely why
+ * it is no longer the first choice. A single word becomes the first name with the surname
+ * left blank rather than guessed, and the employer can correct both in account settings.
  */
 function splitContactName(contactName: string): {
   firstName: string;

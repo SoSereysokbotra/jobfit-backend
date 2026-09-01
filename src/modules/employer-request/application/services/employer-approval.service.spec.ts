@@ -265,6 +265,63 @@ describe('EmployerApprovalService', () => {
       });
     });
 
+    // Intake collects first and last separately now, so for a request submitted through
+    // the form this is a read. The name below is the case the old split got wrong: it
+    // reads everything after the first space as the surname, making "Mary Jane" a person
+    // called Mary with the surname "Jane Watson".
+    it('uses the name parts the employer gave, not a split of the display name', async () => {
+      repo.findApprovedByEmail.mockResolvedValue(
+        request({
+          status: EmployerRequestStatus.APPROVED,
+          approvedUserId: 'user-new',
+          approvedCompanyId: 'company-1',
+          contactName: 'Mary Jane Watson',
+          contactFirstName: 'Mary Jane',
+          contactLastName: 'Watson',
+          activationCode: '048213',
+        }),
+      );
+
+      await service.activate(dto);
+
+      expect(tx.employerProfile.create).toHaveBeenCalledWith({
+        data: {
+          userId: 'user-new',
+          companyId: 'company-1',
+          firstName: 'Mary Jane',
+          lastName: 'Watson',
+        },
+      });
+    });
+
+    // A row from before the columns existed, or one an admin transcribed from an email.
+    // Half a pair is not a pair — one field alone tells you nothing about where the other
+    // one ends, so it falls back rather than pairing a real name with an empty string.
+    it('falls back to splitting when the parts are missing or half-present', async () => {
+      repo.findApprovedByEmail.mockResolvedValue(
+        request({
+          status: EmployerRequestStatus.APPROVED,
+          approvedUserId: 'user-new',
+          approvedCompanyId: 'company-1',
+          contactName: 'Sokha Chan',
+          contactFirstName: 'Sokha',
+          contactLastName: null,
+          activationCode: '048213',
+        }),
+      );
+
+      await service.activate(dto);
+
+      expect(tx.employerProfile.create).toHaveBeenCalledWith({
+        data: {
+          userId: 'user-new',
+          companyId: 'company-1',
+          firstName: 'Sokha',
+          lastName: 'Chan',
+        },
+      });
+    });
+
     // §6: the admin checked a business registration, so the approval IS the verification.
     it('stamps the company verified by ADMIN_REVIEW, but never re-stamps a verified one', async () => {
       repo.findApprovedByEmail.mockResolvedValue(

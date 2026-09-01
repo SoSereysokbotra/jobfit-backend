@@ -45,11 +45,39 @@ export class CreateEmployerRequestDto {
   @MaxLength(255)
   companyEmail: string;
 
-  @ApiProperty({ example: 'Jane Doe', maxLength: 120 })
+  @ApiProperty({
+    example: 'Jane Doe',
+    maxLength: 120,
+    description:
+      'The contact as one line, for the review queue. Kept for the intake channels that ' +
+      'only ever have one — §4.1 email and Telegram, where an admin types what the ' +
+      'employer wrote. Prefer sending the two fields below as well.',
+  })
   @IsString()
   @IsNotEmpty()
   @MaxLength(120)
   contactName: string;
+
+  @ApiPropertyOptional({
+    example: 'Jane',
+    maxLength: 120,
+    description:
+      'Send this and `contactLastName` together and the account is created with exactly ' +
+      'these. Omit them and approval falls back to splitting `contactName` on the first ' +
+      'space, which is a guess: it reads "Mary Jane Watson" as the surname "Jane Watson".',
+  })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  contactFirstName?: string;
+
+  @ApiPropertyOptional({ example: 'Doe', maxLength: 120 })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  contactLastName?: string;
 
   @ApiProperty({ example: 'Head of Talent', maxLength: 120 })
   @IsString()
