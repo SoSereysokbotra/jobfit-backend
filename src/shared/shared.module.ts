@@ -12,6 +12,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from './services/prisma.service';
 import { JwtService } from './services/jwt.service';
 import { EmailService } from './services/email.service';
+import { EmailSuppressionService } from './services/email-suppression.service';
 import { LoggerService } from './services/logger.service';
 import { RedisService } from './services/redis.service';
 import { SecurityEventService } from './services/security-event.service';
@@ -33,6 +34,7 @@ import { SecurityEventService } from './services/security-event.service';
     PrismaService,
     JwtService,
     EmailService,
+    EmailSuppressionService,
     LoggerService,
     RedisService,
     SecurityEventService,
@@ -41,6 +43,7 @@ import { SecurityEventService } from './services/security-event.service';
     PrismaService,
     JwtService,
     EmailService,
+    EmailSuppressionService,
     LoggerService,
     RedisService,
     SecurityEventService,

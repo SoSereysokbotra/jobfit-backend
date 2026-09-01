@@ -102,13 +102,34 @@ steps:
       # registrations it can never complete. A *wrong* EMAIL_PASS still boots (the SMTP
       # handshake is async); that surfaces as mail.degraded on /health/ready.
       # SMTP_FROM must match the authenticated Gmail account, otherwise Gmail rewrites it.
-      - '--set-env-vars=^|^NODE_ENV=production|LOG_FORMAT=json|LOG_LEVEL=info|METRICS_ENABLED=true|TRACE_ENABLED=false|SERVICE_NAME=${_SERVICE}|SERVICE_VERSION=$BUILD_ID|GCP_PROJECT_ID=$PROJECT_ID|CORS_ORIGIN=${_CORS_ORIGIN}|EMAIL_HOST=smtp.gmail.com|EMAIL_PORT=587|EMAIL_USER=soviseth869@gmail.com|SMTP_FROM=JobFit Support <soviseth869@gmail.com>|AI_SERVICE_URL=${_AI_SERVICE_URL}'
+      # REDIS_PREFIX namespaces every key this app writes, so two environments sharing one
+      # Redis instance cannot collide on `lockout:*` / `blacklist:*` (Redis audit R7).
+      # Each environment needs its OWN value: dev:, staging:, prod:.
+      - '--set-env-vars=^|^NODE_ENV=production|LOG_FORMAT=json|LOG_LEVEL=info|METRICS_ENABLED=true|TRACE_ENABLED=false|SERVICE_NAME=${_SERVICE}|SERVICE_VERSION=$BUILD_ID|GCP_PROJECT_ID=$PROJECT_ID|CORS_ORIGIN=${_CORS_ORIGIN}|REDIS_PREFIX=prod:|EMAIL_HOST=smtp.gmail.com|EMAIL_PORT=587|EMAIL_USER=soviseth869@gmail.com|SMTP_FROM=JobFit Support <soviseth869@gmail.com>|AI_SERVICE_URL=${_AI_SERVICE_URL}'
       # AI_SERVICE_KEY is the shared secret for jobfits-ai-service (sent as
       # X-AI-Service-Key). It pairs with _AI_SERVICE_URL above: the URL is public config,
       # the key is not. Both are needed — a URL without a key gets 401 on every call
       # except /health and /ready.
-      # REDIS_URL still omitted — the secret exists but its value is unverified, and a bad
-      # host is worse than none (Redis is optional/fail-open). SLACK_WEBHOOK_URL wired
-      # (Phase 4 alerts). HEALTHCHECKS_PING_URL wired (dead-man's-switch heartbeat).
+      #
+      # REDIS_URL is now wired from Secret Manager. It was deliberately omitted for a long
+      # time — "the secret exists but its value is unverified, and a bad host is worse
+      # than none". Two things changed that calculation:
+      #
+      #   1. A bad host no longer takes the service down. RedisService is lazyConnect with
+      #      a non-fatal onModuleInit, retries forever with a 5s ceiling (R4), and bounds
+      #      every command at 2s (R10). A wrong value now costs degraded caching and a log
+      #      line, not a boot failure.
+      #   2. Both clients finally agree on where Redis is. BullMQ used to read only
+      #      REDIS_HOST/REDIS_PORT, so setting REDIS_URL alone would have connected the
+      #      cache and left the job queue on localhost, silently. Both now resolve through
+      #      @config/redis-connection.
+      #
+      # ⚠️ VERIFY THE SECRET'S VALUE BEFORE THE FIRST DEPLOY WITH THIS LINE. It must be
+      # redis://…  or rediss://…  (rediss = TLS, which Upstash and most managed providers
+      # require). A malformed value now throws AT BOOT by design — better a failed deploy
+      # than a service silently talking to nothing. See docs/REDIS_PRODUCTION_SETUP.md.
+      #
+      # SLACK_WEBHOOK_URL wired (Phase 4 alerts).
+      # HEALTHCHECKS_PING_URL wired (dead-man's-switch heartbeat).
       # SUPABASE_* required at boot. EMAIL_PASS is the Gmail app password.
-      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,METRICS_TOKEN=METRICS_TOKEN:latest,SLACK_WEBHOOK_URL=SLACK_WEBHOOK_URL:latest,HEALTHCHECKS_PING_URL=HEALTHCHECKS_PING_URL:latest,SUPABASE_URL=SUPABASE_URL:latest,SUPABASE_SERVICE_ROLE_KEY=SUPABASE_SERVICE_ROLE_KEY:latest,SUPABASE_ANON_KEY=SUPABASE_ANON_KEY:latest,SUPABASE_JWT_SECRET=SUPABASE_JWT_SECRET:latest,EMAIL_PASS=EMAIL_PASS:latest,AI_SERVICE_KEY=AI_SERVICE_KEY:latest'
+      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,METRICS_TOKEN=METRICS_TOKEN:latest,SLACK_WEBHOOK_URL=SLACK_WEBHOOK_URL:latest,HEALTHCHECKS_PING_URL=HEALTHCHECKS_PING_URL:latest,SUPABASE_URL=SUPABASE_URL:latest,SUPABASE_SERVICE_ROLE_KEY=SUPABASE_SERVICE_ROLE_KEY:latest,SUPABASE_ANON_KEY=SUPABASE_ANON_KEY:latest,SUPABASE_JWT_SECRET=SUPABASE_JWT_SECRET:latest,EMAIL_PASS=EMAIL_PASS:latest,AI_SERVICE_KEY=AI_SERVICE_KEY:latest,REDIS_URL=REDIS_URL:latest'

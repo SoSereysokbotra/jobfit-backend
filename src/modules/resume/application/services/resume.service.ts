@@ -8,13 +8,17 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { ResumeRepository } from '../../infrastructure/repositories/resume.repository';
 import { UserRepository } from '@modules/user/infrastructure/repositories/user.repository';
 import { StorageService } from '@infra/storage/storage.service';
-import { BullQueueService } from '@infra/queue/bull-queue.service';
+import {
+  BullQueueService,
+  QueueUnavailableError,
+} from '@infra/queue/bull-queue.service';
 import { DomainEventBus } from '@events/domain-event-bus.service';
 import { ResumeDefaultChangedEvent } from '../../domain/events/resume-default-changed.event';
 import {
@@ -40,6 +44,8 @@ const MIME_TO_TYPE: Record<string, ResumeFileType> = {
 
 @Injectable()
 export class ResumeService {
+  private readonly logger = new Logger(ResumeService.name);
+
   constructor(
     private readonly resumeRepository: ResumeRepository,
     private readonly userRepository: UserRepository,
@@ -95,11 +101,30 @@ export class ResumeService {
 
     // Enqueue async parsing (BullMQ 'resume-parsing' queue). The resume stays PENDING
     // until the worker flips it to SUCCESS/FAILED.
-    await this.queue.addJob('resume-parsing', 'parseResume', {
-      resumeId: resume.id,
-      fileUrl: resume.fileUrl,
-      fileType: resume.fileType,
-    });
+    //
+    // THE UPLOAD ITSELF HAS ALREADY SUCCEEDED by this point — the file is in storage and
+    // the row is saved. So a queue outage must not fail the request and orphan the file;
+    // it must stop the row from CLAIMING something untrue. PENDING means "a worker will
+    // pick this up", and if nothing was scheduled that is a lie the user would sit in
+    // front of forever.
+    try {
+      await this.queue.addJob('resume-parsing', 'parseResume', {
+        resumeId: resume.id,
+        fileUrl: resume.fileUrl,
+        fileType: resume.fileType,
+      });
+    } catch (err) {
+      if (!(err instanceof QueueUnavailableError)) throw err;
+      this.logger.error(
+        `Resume ${resume.id} uploaded but parsing was not scheduled: ${err.message}`,
+      );
+      // FAILED, not PENDING: the file is safe and re-uploadable, and the client can say
+      // so instead of showing a spinner that never resolves.
+      resume.parsingStatus = 'FAILED';
+      resume.parsingError =
+        'Could not start processing — the job queue is unavailable. Please try again.';
+      await this.resumeRepository.save(resume);
+    }
 
     return resume;
   }
