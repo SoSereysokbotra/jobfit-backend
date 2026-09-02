@@ -10,7 +10,12 @@
 // changes about once a year.
 
 import { normalizePlace, splitLocationParts } from './location-normalize';
-import { LocationRecord, ResolvedPlace } from './location.types';
+import {
+  CitySuggestion,
+  CountryOption,
+  LocationRecord,
+  ResolvedPlace,
+} from './location.types';
 
 /**
  * Scoring weights for picking between candidates.
@@ -160,6 +165,94 @@ export class LocationIndex {
 
     const best = this.bestCandidate([cityKey], countryFilter, new Set());
     return best ? toResolvedPlace(best.row) : null;
+  }
+
+  /**
+   * Every country the dataset knows, for the profile/onboarding country picker.
+   *
+   * Served from THIS table rather than a second hardcoded ISO list, so a country the
+   * picker offers is always a country cities can be resolved in. The onboarding wizard
+   * previously hardcoded seven US cities, which made a Cambodian address literally
+   * unenterable in a required field.
+   */
+  listCountries(): CountryOption[] {
+    const byCode = new Map<string, string>();
+    for (const row of this.rows) {
+      if (!byCode.has(row.countryCode)) byCode.set(row.countryCode, row.countryName);
+    }
+    return [...byCode]
+      .map(([code, name]) => ({ code, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /**
+   * City suggestions for a typeahead.
+   *
+   * Matches against the SAME key map resolution uses — display names, ASCII forms and
+   * every alternate — so typing Khmer, "PNH" or "Phnom" all find Phnom Penh. A search
+   * that only looked at display names would offer a Cambodian user a list they cannot
+   * reach in their own script.
+   *
+   * Suggestions are a convenience, never a gate: the caller still accepts free text, so
+   * a place below the dataset's 15,000-population floor is typed rather than blocked.
+   */
+  searchCities(opts: {
+    countryCode?: string | null;
+    query?: string | null;
+    limit?: number;
+  }): CitySuggestion[] {
+    const limit = Math.min(Math.max(opts.limit ?? 10, 1), 50);
+    const country = opts.countryCode?.toUpperCase() ?? null;
+    const query = normalizePlace(opts.query);
+
+    const seen = new Set<number>();
+    const hits: Array<{ row: IndexedPlace; tier: number }> = [];
+
+    /**
+     * Relevance tier, applied BEFORE population.
+     *
+     * Population alone put Norwalk and Petaluma above Chicopee for "chic", because both
+     * carry some obscure alternate name beginning with those letters and are larger. A
+     * typeahead that buries the city you are literally spelling is worse than useless,
+     * so a display-name match always outranks an alternate-only one.
+     */
+    const tierOf = (row: IndexedPlace): number => {
+      if (!query) return 0;
+      const name = normalizePlace(row.name);
+      if (name === query) return 0; // exact
+      if (name.startsWith(query)) return 1; // typing the city's own name
+      return 2; // reached only through an alternate/ASCII form
+    };
+
+    const consider = (index: number): void => {
+      const row = this.rows[index];
+      if (country && row.countryCode !== country) return;
+      if (seen.has(row.geonameId)) return;
+      seen.add(row.geonameId);
+      hits.push({ row, tier: tierOf(row) });
+    };
+
+    if (!query) {
+      // No query yet: the country's largest cities are the useful default.
+      this.rows.forEach((_, index) => consider(index));
+    } else {
+      for (const [key, indices] of this.byName) {
+        if (key.startsWith(query)) indices.forEach(consider);
+      }
+    }
+
+    return hits
+      .sort((a, b) => a.tier - b.tier || b.row.population - a.row.population)
+      .slice(0, limit)
+      .map((hit) => hit.row)
+      .map((row) => ({
+        geonameId: row.geonameId,
+        name: row.name,
+        admin1Name: row.admin1Name,
+        countryCode: row.countryCode,
+        countryName: row.countryName,
+        population: row.population,
+      }));
   }
 
   /** Look up every part, score the candidates, return the winner. */

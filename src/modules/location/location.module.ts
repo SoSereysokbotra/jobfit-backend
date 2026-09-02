@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { LocationResolverService } from './location-resolver.service';
+import { LocationController } from './presentation/controllers/location.controller';
 
 /**
  * Place resolution — turns free-text locations into rows of the `locations` reference
@@ -12,6 +13,7 @@ import { LocationResolverService } from './location-resolver.service';
  * the 34k-row table is loaded exactly once per process.
  */
 @Module({
+  controllers: [LocationController],
   providers: [LocationResolverService],
   exports: [LocationResolverService],
 })

@@ -31,3 +31,20 @@ export interface ResolvedPlace {
   admin1Code: string | null;
   admin1Name: string | null;
 }
+
+/** One entry of the country list served to the onboarding/profile pickers. */
+export interface CountryOption {
+  /** ISO-3166 alpha-2. */
+  code: string;
+  name: string;
+}
+
+/** One city suggestion. `admin1Name` disambiguates the many Springfields. */
+export interface CitySuggestion {
+  geonameId: number;
+  name: string;
+  admin1Name: string | null;
+  countryCode: string;
+  countryName: string;
+  population: number;
+}

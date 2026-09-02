@@ -6,7 +6,12 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import { LocationIndex } from './location-index';
-import { LocationRecord, ResolvedPlace } from './location.types';
+import {
+  CitySuggestion,
+  CountryOption,
+  LocationRecord,
+  ResolvedPlace,
+} from './location.types';
 
 @Injectable()
 export class LocationResolverService implements OnModuleInit {
@@ -77,5 +82,19 @@ export class LocationResolverService implements OnModuleInit {
     country: string | null | undefined,
   ): ResolvedPlace | null {
     return this.index?.resolveStructured(city, country) ?? null;
+  }
+
+  /** Every country in the dataset, for the profile/onboarding picker. */
+  listCountries(): CountryOption[] {
+    return this.index?.listCountries() ?? [];
+  }
+
+  /** City suggestions for a typeahead. Empty when the table has not loaded. */
+  searchCities(opts: {
+    countryCode?: string | null;
+    query?: string | null;
+    limit?: number;
+  }): CitySuggestion[] {
+    return this.index?.searchCities(opts) ?? [];
   }
 }

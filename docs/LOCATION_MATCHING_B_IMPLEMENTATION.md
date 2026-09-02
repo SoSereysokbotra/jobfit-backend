@@ -1,6 +1,6 @@
 # Option B — Structured location matching: phased implementation plan
 
-**Status:** PHASES 0-2 COMPLETE (2026-09-02) — phase 3 awaiting approval
+**Status:** PHASES 0-3 COMPLETE (2026-09-02) — phase 4 awaiting approval
 **Written:** 2026-09-02
 **Root problem:** see `LOCATION_MATCHING_ROOT_PROBLEM.md`
 
@@ -309,15 +309,75 @@ only when the pipeline next runs for a user; phase 5 backfills them deliberately
   code into `country`; never silently drop a bare city.
 - `profile-form.tsx` city/country inputs: same components, so both entry points agree.
 
-### Acceptance criteria
-- [ ] A user in Cambodia can complete onboarding with **Phnom Penh, Cambodia** — the field that is currently impossible to satisfy
-- [ ] A user in the US, Thailand and the UK can each complete it too — verified, not assumed
-- [ ] The saved profile has `city` and `country` that `resolveStructured` resolves to a real row
-- [ ] `"CA"` can never end up in the `country` column
-- [ ] Selecting "Remote" saves a remote preference rather than silently saving nothing
-- [ ] Frontend typecheck/build green
+### Acceptance criteria — RESULTS (measured 2026-09-02)
 
-> ### 🛑 STOP — report results, wait for approval.
+Simulating the wizard's own data path — chip → saved profile → `resolveStructured`:
+
+| Picked | Stored | Resolves to |
+|---|---|---|
+| Phnom Penh + Cambodia | `{city:"Phnom Penh", country:"Cambodia"}` | Phnom Penh / KH |
+| Siem Reap + Cambodia | `{city:"Siem Reap", country:"Cambodia"}` | Siem Reap / KH |
+| Chicago + United States | `{city:"Chicago", country:"United States"}` | Chicago / US |
+| Bangkok + Thailand | `{city:"Bangkok", country:"Thailand"}` | Bangkok / TH |
+| London + United Kingdom | `{city:"London", country:"United Kingdom"}` | London / GB |
+| Singapore + Singapore | `{city:"Singapore", country:"Singapore"}` | Singapore / SG |
+
+- [x] **A user in Cambodia can complete onboarding with Phnom Penh** — the field that was
+      previously impossible to satisfy. 244 countries offered, all from the place table.
+- [x] US, Thailand, UK and Singapore verified too — one code path, no per-country logic
+- [x] Saved city/country resolve to a real row via `resolveStructured`
+- [x] **`"CA"` can no longer reach the country column**: "San Francisco" + the selector
+      stores `country: "United States"` and resolves to San Francisco/US [California]
+- [x] Free text still works — an unlisted village stores `{city:"Some Small Village",
+      country:"Cambodia"}`; the city does not resolve but the country still does
+- [x] "Remote" is no longer a fake location. It was in the old list, had no comma, so
+      `parseLocationInput` returned undefined and the profile **silently saved nothing**.
+      Remote is a work preference and is captured by `REMOTE_OPTIONS` → `remoteTypes`.
+- [x] Backend suite green: **114 suites / 1,327 tests**
+- [x] Frontend **TypeScript compiles clean** (`tsc --noEmit`, and Next reports
+      "Compiled successfully")
+- [x] Frontend `npm run build` **passes** (exit 0, 53 static pages) — after a separate
+      cleanup of six PRE-EXISTING lint errors, approved by the user. See below.
+
+### The frontend build was already red before phase 3 — fixed separately
+
+`npm run build` exits 1 on `@typescript-eslint/no-unused-vars`. **Proven pre-existing**
+by linting the committed (HEAD) versions of the same files:
+
+| File | Errors | Mine? |
+|---|---|---|
+| `onboarding/resume/page.tsx` | `Sparkles`, `Search`, `marketInsight` unused | **No** — all three are reported identically at HEAD. The `Sparkles`/`marketInsight` usages sit inside a **commented-out** JSX block. |
+| `user-profile/components/avatar-upload-modal.tsx` | `X`, `ImageIcon`, `selectedFile` unused | **No** — identical at HEAD, and the file is untouched in the working tree. Nothing to do with this work. |
+
+Phase 3 introduced **no new lint errors**. The six were cleaned up on the user's approval,
+as work separate from the location change:
+
+- `onboarding/resume/page.tsx` — deleted the commented-out "Market Insight" JSX block, the
+  `marketInsight` const it was the only reader of, and `getMarketSalaryInsight()` which
+  then had no callers; dropped the `Sparkles` and `Search` imports. All dead code.
+- `avatar-upload-modal.tsx` — dropped the unused `X` and `ImageIcon` imports; `selectedFile`
+  was written three times and never read, so the value binding is omitted
+  (`const [, setSelectedFile]`) and the writes are untouched. **No behaviour change.**
+
+`npm run build` now exits 0.
+
+### Deviations from plan
+1. **No `@RateLimit` on the new routes.** The plan said to add one. In this codebase
+   `ThrottlerGuard` is applied to the auth controller and the single public write
+   (employer requests) — nothing else. These are authenticated reads of static reference
+   data served from memory, so they follow the actual convention rather than the assumed
+   one. (The rule that still holds: never a bare `@SkipThrottle()`.)
+2. **`parseLocationInput` was DELETED, not fixed.** Once both pickers pass an explicitly
+   chosen country it had no callers, and leaving a function whose contract is "guess the
+   country from a string" invites the bug back. Replaced by `locationFrom(city, country)`,
+   which never infers. A comment in its place records why.
+3. **`profile-form.tsx` needed no change.** It already builds `LocationDto` from separate
+   city and country inputs and never infers — verified, not assumed.
+4. **Typeahead ranking added.** Population alone put Norwalk and Petaluma above Chicopee
+   for "chic" (both carry an obscure alternate name and are larger). Display-name matches
+   now outrank alternate-only ones: "chic" → Chicago · Chico · Chicopee · Chicago Lawn.
+
+> ### 🛑 PHASE 3 COMPLETE — awaiting approval for phase 4.
 
 ---
 
