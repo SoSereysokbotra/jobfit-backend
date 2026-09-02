@@ -249,7 +249,7 @@ model User {
   // Employer profile
   employerProfile          EmployerProfile?
   /// Authentication history. SetNull on delete, so the trail outlives the account.
-  securityEvents SecurityEvent[]
+  securityEvents           SecurityEvent[]
   /// Onboarding tickets this admin reviewed, and the one that created this account.
   reviewedEmployerRequests EmployerRequest[] @relation("EmployerRequestReviewer")
   employerRequest          EmployerRequest?  @relation("EmployerRequestAccount")
@@ -641,8 +641,8 @@ model Company {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  employers       EmployerProfile[]
-  jobs            Job[]
+  employers        EmployerProfile[]
+  jobs             Job[]
   /// Onboarding tickets the admin approved for this company.
   employerRequests EmployerRequest[]
 
@@ -1834,4 +1834,67 @@ model TrackedJob {
   @@index([userId, stage, position])
   @@index([userId, archivedAt])
   @@map("tracked_jobs")
+}
+
+// ─── Location reference data (LOCATION_MATCHING_B_IMPLEMENTATION.md, phase 0) ──
+/// A place, imported from GeoNames `cities15000` — the vocabulary both sides of a
+/// location comparison get resolved into.
+///
+/// WHY THIS TABLE EXISTS: location scoring used to be a regex containment test
+/// between two free-text strings ("Phnom Penh" vs "Toul Kork, Phnom Penh"), so a
+/// user's score depended on how they spelled their own city. See
+/// docs/LOCATION_MATCHING_ROOT_PROBLEM.md. Resolving both a profile and a job
+/// posting to a row here is what makes "same city / same province / same country"
+/// a checkable question instead of a string coincidence.
+///
+/// REFERENCE DATA, NOT USER DATA. Rows are owned by the import script
+/// (scripts/import-geonames.ts), keyed on `geonameId` so re-running it is
+/// idempotent. Nothing in the app writes here.
+model Location {
+  id String @id @default(uuid())
+
+  /// GeoNames' own id — the natural key the importer upserts on.
+  geonameId Int @unique
+
+  /// Display name ("Phnom Penh") and its ASCII form, which is what lookup normalises to.
+  name      String
+  asciiName String
+
+  /// Every other name this place is known by — other languages, scripts and
+  /// abbreviations. THIS IS THE POINT OF THE DATASET: it is what lets Khmer script,
+  /// "Phnom Penh" and "PNH" all resolve to the same row instead of scoring differently.
+  /// Verified 2026-09-02: Phnom Penh carries 72 alternates, 4 of them Khmer.
+  alternateNames String[] @default([])
+
+  /// ISO-3166 alpha-2, plus the resolved country name from countryInfo.txt.
+  countryCode String
+  countryName String
+
+  /// First-level division: state, province, region. Resolved from
+  /// admin1CodesASCII.txt where possible.
+  ///
+  /// ⚠️ LEGITIMATELY EMPTY for city-states — verified: Singapore's admin1 code is "".
+  /// Two places with no admin1 are NOT in the same province, so any comparison must
+  /// treat blank as "unknown", never as a match.
+  admin1Code String?
+  admin1Name String?
+
+  /// Used to break ties when a name is ambiguous (there are many Springfields):
+  /// the most populous wins.
+  population Int @default(0)
+
+  /// Stored for a possible future distance-based scorer (option C in the root-problem
+  /// doc). NOT read by option B's hierarchy scoring — recorded because the import is
+  /// free, not because anything uses it yet.
+  latitude  Float?
+  longitude Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Lookup is always "this ascii name, optionally within this country".
+  @@index([asciiName])
+  @@index([countryCode])
+  @@index([countryCode, admin1Code])
+  @@map("locations")
 }

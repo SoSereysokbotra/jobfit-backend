@@ -51,6 +51,7 @@ import { OfferModule } from './modules/offer/offer.module';
 import { SavedJobModule } from './modules/saved-job/saved-job.module';
 import { IngestionModule } from './modules/ingestion/ingestion.module';
 import { MatchingModule } from './modules/matching/matching.module';
+import { LocationModule } from './modules/location/location.module';
 import { GenerationModule } from './modules/generation/generation.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { PaymentModule } from './modules/payment/payment.module';
@@ -120,6 +121,7 @@ import { AlertingModule } from './modules/alerting/alerting.module';
     OfferModule,
     SavedJobModule,
     IngestionModule,
+    LocationModule,
     MatchingModule,
     GenerationModule,
     NotificationModule,
