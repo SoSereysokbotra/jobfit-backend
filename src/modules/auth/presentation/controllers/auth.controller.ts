@@ -24,7 +24,7 @@ import {
 } from '@nestjs/common';
 import { CommandBus } from '@nestjs/cqrs';
 import { ConfigService } from '@nestjs/config';
-import { ThrottlerGuard, SkipThrottle } from '@nestjs/throttler';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -38,7 +38,10 @@ import {
 import type { Request, Response } from 'express';
 
 import { JwtAuthGuard } from '../../../../common/guards/jwt-auth.guard';
-import { RateLimit } from '../../../../common/decorators/rate-limit.decorator';
+import {
+  NoRateLimit,
+  RateLimit,
+} from '../../../../common/decorators/rate-limit.decorator';
 import { Public } from '../../../../common/decorators/public.decorator';
 import { CurrentUser } from '../../../../common/decorators/current-user.decorator';
 import { buildAuthCookieOptions } from '../../../../common/utils/cookie.util';
@@ -448,8 +451,11 @@ export class AuthController {
   }
 
   // ---- Current user (requires a valid access token) ----
+  // @NoRateLimit, not a bare @SkipThrottle(): see the decorator's doc comment.
+  // A bare call skips only a throttler named "default" (we register none), which
+  // left this route charged against every limiter at once.
   @Get('me')
-  @SkipThrottle()
+  @NoRateLimit()
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('access-token')
   @ApiOperation({

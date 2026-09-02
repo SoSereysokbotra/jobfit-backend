@@ -20,3 +20,25 @@ export function RateLimit(activeName: string) {
     // Names not present in `skip` (i.e. activeName) remain enforced.
     return SkipThrottle(skip);
 }
+
+/**
+ * Exempt a route from EVERY named throttler.
+ *
+ * ⚠️ USE THIS, NEVER A BARE `@SkipThrottle()`. That decorator's signature is
+ * `SkipThrottle(skip = { default: true })`, so calling it with no arguments skips
+ * exactly one throttler — the one *named* `"default"`. Every throttler in
+ * throttler.config.ts has an explicit name and none is called "default", so a bare
+ * call skips NOTHING and the guard then charges the route against all of them.
+ *
+ * That was a live production bug on `GET /auth/me`: the route inherited the
+ * controller's ThrottlerGuard and hit every limiter at once, so the tightest —
+ * `resend`, 3 per 15 min per IP — threw ThrottlerException on the 4th call. The
+ * extension calls /auth/me on every popup open, so three opens locked the user out
+ * for 15 minutes (blockDuration defaults to ttl, and retrying while blocked just
+ * returns the same 429).
+ */
+export function NoRateLimit() {
+    const skip: Record<string, boolean> = {};
+    for (const name of ALL_THROTTLER_NAMES) skip[name] = true;
+    return SkipThrottle(skip);
+}
