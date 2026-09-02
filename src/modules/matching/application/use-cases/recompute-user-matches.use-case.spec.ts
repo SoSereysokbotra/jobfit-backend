@@ -7,6 +7,7 @@
 import { RecomputeUserMatchesUseCase } from './recompute-user-matches.use-case';
 import { ComputeMatchScoreUseCase } from './compute-match-score.use-case';
 import { AiServiceError } from '@infra/ai/ai.errors';
+import { stubLocationResolver } from '../../../location/location-resolver.stub';
 
 describe('RecomputeUserMatchesUseCase', () => {
   // Stands in for ActiveResumeService — the rule for WHICH résumé is tested in its own
@@ -49,7 +50,7 @@ describe('RecomputeUserMatchesUseCase', () => {
           deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
         },
       };
-      service = new RecomputeUserMatchesUseCase(prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, activeResume());
+      service = new RecomputeUserMatchesUseCase(prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, activeResume(), stubLocationResolver());
       // Isolate scoring from the retriever internals.
       jest.spyOn(service, 'retrieveRankedJobs').mockResolvedValue([
         { id: 'jobA', cosine_sim: 0.8 },
@@ -71,8 +72,12 @@ describe('RecomputeUserMatchesUseCase', () => {
       });
       expect(prisma.recommendation.upsert.mock.calls[1][0]).toEqual({
         where: { userId_jobId: { userId: 'u1', jobId: 'jobB' } },
-        update: { score: 58, breakdown: { skills: 50, experience: 80, location: 50, salary: 50, other: 50 }, reasonExplanation: 'Frontend Engineer: partial skills match.', computedAt: expect.any(Date), staleAt: null },
-        create: { userId: 'u1', jobId: 'jobB', score: 58, breakdown: { skills: 50, experience: 80, location: 50, salary: 50, other: 50 }, reasonExplanation: 'Frontend Engineer: partial skills match.', computedAt: expect.any(Date) },
+        // location is NULL, not 50: this profile has no city, so no comparison happened.
+        // The old scorer returned a neutral 50 here and folded it into the total as if it
+        // were a measurement. It is now dropped and the remaining weights rescaled, which
+        // is why the score is 59 rather than 58.
+        update: { score: 59, breakdown: { skills: 50, experience: 80, location: null, salary: 50, other: 50 }, reasonExplanation: 'Frontend Engineer: partial skills match.', computedAt: expect.any(Date), staleAt: null },
+        create: { userId: 'u1', jobId: 'jobB', score: 59, breakdown: { skills: 50, experience: 80, location: null, salary: 50, other: 50 }, reasonExplanation: 'Frontend Engineer: partial skills match.', computedAt: expect.any(Date) },
       });
 
       // §6: the upsert only ever writes the new top-N, so anything else the user still
@@ -115,7 +120,7 @@ describe('RecomputeUserMatchesUseCase', () => {
         },
       };
       const aiClient = { rerank: jest.fn() };
-      const service = new RecomputeUserMatchesUseCase(prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, activeResume());
+      const service = new RecomputeUserMatchesUseCase(prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, activeResume(), stubLocationResolver());
 
       // rerank:false is explicit — this test is about RRF fusion, and the reranker is
       // ON by default in production, which would otherwise reorder the result.
@@ -140,7 +145,7 @@ describe('RecomputeUserMatchesUseCase', () => {
         parsedResumeData: { findUnique: jest.fn().mockResolvedValue(null) },
       };
       const aiClient = { rerank: jest.fn() };
-      const service = new RecomputeUserMatchesUseCase(prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, activeResume());
+      const service = new RecomputeUserMatchesUseCase(prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, activeResume(), stubLocationResolver());
 
       const result = await service.retrieveRankedJobs('u1', 10);
 
@@ -178,7 +183,7 @@ describe('RecomputeUserMatchesUseCase', () => {
           scores: [{ id: 'a', score: 0.5 }, { id: 'b', score: 0.1 }, { id: 'c', score: 0.9 }],
         }),
       };
-      const service = new RecomputeUserMatchesUseCase(prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, activeResume());
+      const service = new RecomputeUserMatchesUseCase(prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, activeResume(), stubLocationResolver());
 
       const result = await service.retrieveRankedJobs('u1', 3, { rerank: true });
 
@@ -226,7 +231,7 @@ describe('RecomputeUserMatchesUseCase', () => {
     it('reranks by default when no explicit option is given (config ON)', async () => {
       const { prisma, aiClient } = rerankFixtures();
       const service = new RecomputeUserMatchesUseCase(
-        prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, activeResume(), withConfig(true),
+        prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, activeResume(), stubLocationResolver(), withConfig(true),
       );
 
       const result = await service.retrieveRankedJobs('u1', 3);
@@ -238,7 +243,7 @@ describe('RecomputeUserMatchesUseCase', () => {
     it('skips the reranker when the config flag is off', async () => {
       const { prisma, aiClient } = rerankFixtures();
       const service = new RecomputeUserMatchesUseCase(
-        prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, activeResume(), withConfig(false),
+        prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, activeResume(), stubLocationResolver(), withConfig(false),
       );
 
       const result = await service.retrieveRankedJobs('u1', 3);
@@ -252,7 +257,7 @@ describe('RecomputeUserMatchesUseCase', () => {
       // cannot silently inherit whatever the deployment has enabled.
       const { prisma, aiClient } = rerankFixtures();
       const service = new RecomputeUserMatchesUseCase(
-        prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, activeResume(), withConfig(true),
+        prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, activeResume(), stubLocationResolver(), withConfig(true),
       );
 
       const result = await service.retrieveRankedJobs('u1', 3, { rerank: false });
@@ -270,7 +275,7 @@ describe('RecomputeUserMatchesUseCase', () => {
         ),
       };
       const service = new RecomputeUserMatchesUseCase(
-        prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, activeResume(), withConfig(true),
+        prisma as never, new ComputeMatchScoreUseCase(), aiClient as never, activeResume(), stubLocationResolver(), withConfig(true),
       );
 
       const result = await service.retrieveRankedJobs('u1', 3);
@@ -327,8 +332,56 @@ describe('RecomputeUserMatchesUseCase.scoreJobs', () => {
       new ComputeMatchScoreUseCase(),
       { rerank: jest.fn() } as never,
       activeResumeStub as never,
+      stubLocationResolver(),
     );
   };
+
+  // END-TO-END WIRING, not just the scorer: proves the use-case resolves the profile's
+  // free-text city and the job's free-text location into real places before comparing.
+  // Every other location test operates on already-resolved inputs.
+  it('resolves both sides and grades a foreign job below a local one', async () => {
+    const prisma = buildPrisma(PROFILE);
+    prisma.job.findMany = jest.fn().mockResolvedValue([
+      {
+        id: 'local',
+        title: 'Backend Engineer',
+        remoteType: 'ON_SITE',
+        location: 'Phnom Penh, Cambodia',
+        minSalary: null,
+        maxSalary: null,
+        company: { industry: null, city: null, country: null },
+      },
+      {
+        id: 'foreign',
+        title: 'Backend Engineer',
+        remoteType: 'ON_SITE',
+        location: 'Bangkok, Thailand',
+        minSalary: null,
+        maxSalary: null,
+        company: { industry: null, city: null, country: null },
+      },
+    ]);
+    const service = new RecomputeUserMatchesUseCase(
+      prisma as never,
+      new ComputeMatchScoreUseCase(),
+      { rerank: jest.fn() } as never,
+      { findActiveResumeId: jest.fn().mockResolvedValue(null) } as never,
+      stubLocationResolver(),
+    );
+
+    const scored = await service.scoreJobs('u1', [
+      { id: 'local', cosine_sim: 0.8 },
+      { id: 'foreign', cosine_sim: 0.8 },
+    ]);
+
+    const local = scored!.find((j) => j.jobId === 'local')!;
+    const foreign = scored!.find((j) => j.jobId === 'foreign')!;
+    expect(local.breakdown.location).toBe(100); // same city
+    expect(foreign.breakdown.location).toBe(30); // different country
+    // Identical in every other input, so the whole gap comes from geography — which is
+    // exactly what the old scorer could not produce: both were 55 there.
+    expect(local.score).toBeGreaterThan(foreign.score);
+  });
 
   it('scores the jobs it is given, without touching the recommendations cache', async () => {
     const service = make(PROFILE);

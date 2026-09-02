@@ -9,6 +9,7 @@
 //   Chicago / San Francisco — "IL" and "CA" as STATE codes ("CA" is also Canada's ISO code)
 //   London GB vs London CA  — same name, two countries
 //   Springfield MO vs MA    — same name, twice in ONE country
+//   Phnom Penh + Dangkao    — two cities in ONE province (KH.22), for the 'same province' rung
 //   Singapore               — city-state with NO admin1 (admin1Code: null)
 //   New York City           — carries "NY" as an alternate NAME, not merely a state code
 
@@ -49,6 +50,22 @@ export const LOCATION_FIXTURES: LocationRecord[] = [
     "admin1Code": "24",
     "admin1Name": "Siem Reap",
     "population": 139458
+  },
+  {
+    "geonameId": 1830784,
+    "name": "Dangkao",
+    "asciiName": "Dangkao",
+    "alternateNames": [
+      "Dangkao",
+      "Khum Dangkao",
+      "Khŭm Dângkaô",
+      "Rung"
+    ],
+    "countryCode": "KH",
+    "countryName": "Cambodia",
+    "admin1Code": "22",
+    "admin1Name": "Phnom Penh",
+    "population": 76421
   },
   {
     "geonameId": 4887398,

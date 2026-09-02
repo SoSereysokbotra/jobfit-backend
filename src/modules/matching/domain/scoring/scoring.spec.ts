@@ -4,10 +4,17 @@ import { scoreLocation } from './location-scorer';
 import { scoreSalary } from './salary-scorer';
 import { scoreOther, weightedMatch } from './weighted-match.calculator';
 import { CandidateContext, JobContext } from './types';
+import { LocationIndex } from '../../../location/location-index';
+import { LOCATION_FIXTURES } from '../../../location/location-fixtures';
+
+// Real places, resolved the same way production resolves them. The scorer compares
+// PLACES now, so a test that hand-built a place object would prove nothing about whether
+// a user's typed city reaches the right row.
+const places = new LocationIndex(LOCATION_FIXTURES);
+const at = (text: string) => places.resolveText(text);
 
 const candidate = (over: Partial<CandidateContext> = {}): CandidateContext => ({
-  city: null,
-  country: null,
+  place: null,
   desiredRemoteTypes: [],
   minSalary: null,
   maxSalary: null,
@@ -18,7 +25,8 @@ const candidate = (over: Partial<CandidateContext> = {}): CandidateContext => ({
 
 const job = (over: Partial<JobContext> = {}): JobContext => ({
   remoteType: 'ON_SITE',
-  location: null,
+  place: null,
+  locationLabel: null,
   minSalary: null,
   maxSalary: null,
   industry: null,
@@ -54,55 +62,79 @@ describe('scoring', () => {
   });
 
   describe('scoreLocation', () => {
-    it('remote job suits everyone', () => {
+    it('remote job suits everyone, even an unresolved candidate', () => {
       expect(scoreLocation(candidate(), job({ remoteType: 'REMOTE' }))).toBe(100);
     });
-    it('city match on an on-site job -> 100', () => {
+
+    it('same city -> 100', () => {
       expect(
         scoreLocation(
-          candidate({ city: 'Phnom Penh' }),
-          job({ location: 'Phnom Penh, Cambodia' }),
+          candidate({ place: at('Phnom Penh') }),
+          job({ place: at('Phnom Penh, Cambodia') }),
         ),
       ).toBe(100);
     });
-    it('country match -> 80', () => {
+
+    it('same city reached by different spellings still -> 100', () => {
+      // The old scorer gave these different scores purely on spelling.
+      expect(
+        scoreLocation(candidate({ place: at('PNH') }), job({ place: at('Phnom Penh') })),
+      ).toBe(100);
+    });
+
+    it('same country, same province -> 85', () => {
+      // Dangkao is its own city row inside Phnom Penh province (KH.22) — a commutable
+      // job, and a case the old flat 55 could not express at all.
+      expect(
+        scoreLocation(candidate({ place: at('Phnom Penh') }), job({ place: at('Dangkao') })),
+      ).toBe(85);
+    });
+
+    it('same country, different province -> 70', () => {
       expect(
         scoreLocation(
-          candidate({ country: 'Cambodia' }),
-          job({ location: 'Siem Reap, Cambodia' }),
+          candidate({ place: at('Phnom Penh') }),
+          job({ place: at('Siem Reap, Cambodia') }),
         ),
-      ).toBe(80);
+      ).toBe(70);
     });
-    it('does not match a country code inside a longer place name', () => {
-      // Measured 2026-08-12: a profile with country "CA" (San Francisco, CA) scored a
-      // "country match" against every Cambodian job, because "cambodia" contains "ca".
+
+    it('different country -> 30', () => {
       expect(
         scoreLocation(
-          candidate({ city: 'San Francisco', country: 'CA' }),
-          job({ location: 'Phnom Penh, Cambodia' }),
+          candidate({ place: at('Phnom Penh') }),
+          job({ place: at('Bangkok, Thailand') }),
         ),
-      ).not.toBe(80);
+      ).toBe(30);
     });
-    it('still matches a standalone country code', () => {
-      expect(
-        scoreLocation(
-          candidate({ country: 'CA' }),
-          job({ location: 'San Francisco, CA' }),
-        ),
-      ).toBe(80);
+
+    // THE DISCRIMINATION THIS REWRITE EXISTS FOR. Under the regex scorer a Siem Reap job
+    // and a Bangkok job both scored 55 for a Phnom Penh candidate, so location could not
+    // affect ranking at all.
+    it('ranks a same-country job above a foreign one', () => {
+      const me = candidate({ place: at('Phnom Penh') });
+      const near = scoreLocation(me, job({ place: at('Siem Reap, Cambodia') }))!;
+      const far = scoreLocation(me, job({ place: at('Bangkok, Thailand') }))!;
+      expect(near).toBeGreaterThan(far);
     });
-    it('does not match a city name inside a longer word', () => {
-      expect(
-        scoreLocation(candidate({ city: 'Bath' }), job({ location: 'Bathurst, Australia' })),
-      ).not.toBe(100);
+
+    // Two city-states both have admin1 === null. `null === null` would rank them as
+    // sharing a province; 25 of the 34,129 imported places are like this.
+    it('does not treat two unknown provinces as the same province', () => {
+      const singapore = at('Singapore')!;
+      expect(singapore.admin1Code).toBeNull();
+      const elsewhere = { ...singapore, geonameId: -1, countryCode: 'SG' };
+      expect(scoreLocation(candidate({ place: singapore }), job({ place: elsewhere }))).toBe(
+        70,
+      );
     });
-    it('wants remote but job is on-site -> 40', () => {
-      expect(
-        scoreLocation(
-          candidate({ city: 'X', desiredRemoteTypes: ['REMOTE'] }),
-          job({ location: 'Y' }),
-        ),
-      ).toBe(40);
+
+    it('returns NULL when the candidate has no resolvable location', () => {
+      expect(scoreLocation(candidate(), job({ place: at('Phnom Penh') }))).toBeNull();
+    });
+
+    it('returns NULL when the job has no resolvable location', () => {
+      expect(scoreLocation(candidate({ place: at('Phnom Penh') }), job())).toBeNull();
     });
   });
 

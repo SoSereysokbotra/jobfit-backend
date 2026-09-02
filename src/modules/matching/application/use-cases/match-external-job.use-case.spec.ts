@@ -9,6 +9,7 @@
 // jobs, three confident numbers, none of them computed.
 
 import { MatchExternalJobUseCase } from './match-external-job.use-case';
+import { stubLocationResolver } from '../../../location/location-resolver.stub';
 
 const JOB = {
   title: 'Food and Beverage Manager',
@@ -51,7 +52,7 @@ function build(opts: { embedFails?: boolean; profileVector?: boolean } = {}) {
   };
   // Structured Experience rows win here (count 2), so no résumé lookup is reached.
   const activeResume: any = { findActiveResumeId: jest.fn().mockResolvedValue(null) };
-  return new MatchExternalJobUseCase(prisma, aiClient, activeResume);
+  return new MatchExternalJobUseCase(prisma, aiClient, activeResume, stubLocationResolver());
 }
 
 describe('MatchExternalJobUseCase', () => {

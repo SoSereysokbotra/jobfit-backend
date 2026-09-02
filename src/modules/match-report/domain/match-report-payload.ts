@@ -59,7 +59,13 @@ export interface ReportMatchRate {
   subScores: {
     skills: number;
     experience: number;
-    location: number;
+    /**
+     * Null when location could not be measured — the profile or the posting named a
+     * place that could not be resolved. Excluded from `overall` rather than scored as a
+     * neutral value, and rendered as "not computed", the way `skills` is under
+     * `semantic: false`.
+     */
+    location: number | null;
     salary: number;
     other: number;
   };

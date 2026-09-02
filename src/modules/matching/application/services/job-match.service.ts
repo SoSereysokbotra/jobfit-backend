@@ -20,6 +20,7 @@ import { ActiveResumeService } from '../../../resume/application/services/active
 import { ComputeMatchScoreUseCase } from '../use-cases/compute-match-score.use-case';
 import { RecomputeUserMatchesUseCase } from '../use-cases/recompute-user-matches.use-case';
 import { CandidateContext, JobContext, SubScores } from '../../domain/scoring/types';
+import { LocationResolverService } from '../../../location/location-resolver.service';
 
 export interface JobMatchResult {
   /** 0-100 weighted total. */
@@ -42,6 +43,7 @@ export class JobMatchService {
     private readonly compute: ComputeMatchScoreUseCase,
     private readonly recompute: RecomputeUserMatchesUseCase,
     private readonly activeResume: ActiveResumeService,
+    private readonly locations: LocationResolverService,
   ) {}
 
   /** Null when the user has no profile — there is nothing to match against. */
@@ -66,7 +68,9 @@ export class JobMatchService {
           location: true,
           minSalary: true,
           maxSalary: true,
-          company: { select: { industry: true } },
+          // `city`/`country` back the location fallback below: an internal job whose
+          // own `location` is blank still happens somewhere — at its company.
+          company: { select: { industry: true, city: true, country: true } },
         },
       }),
     ]);
@@ -78,8 +82,7 @@ export class JobMatchService {
     const cosineSim = cosineRow ? Number(cosineRow.cosine_sim) : 0;
 
     const candidate: CandidateContext = {
-      city: profile.city,
-      country: profile.country,
+      place: this.locations.resolveStructured(profile.city, profile.country),
       desiredRemoteTypes: profile.desiredRemoteTypes,
       minSalary: profile.minSalary,
       maxSalary: profile.maxSalary,
@@ -88,7 +91,14 @@ export class JobMatchService {
     };
     const jobCtx: JobContext = {
       remoteType: job.remoteType,
-      location: job.location,
+      // The job's own location first; failing that, the company's structured city and
+      // country. Ingested rows often carry no location (bongthom deliberately writes
+      // null rather than guessing "Phnom Penh"), and the employer's own address is a
+      // fact we already hold rather than an inference.
+      place:
+        this.locations.resolveText(job.location) ??
+        this.locations.resolveStructured(job.company?.city, job.company?.country),
+      locationLabel: job.location,
       minSalary: job.minSalary,
       maxSalary: job.maxSalary,
       industry: job.company?.industry ?? null,
@@ -129,14 +139,18 @@ export class JobMatchService {
       reasons.push('Experience: none on your profile yet.');
     }
 
-    if (b.location >= 80) {
-      reasons.push(
-        job.remoteType === 'REMOTE'
-          ? 'Location: remote, which matches your preference.'
-          : `Location: ${job.location ?? 'this location'} matches your preference.`,
-      );
-    } else if (job.location) {
-      reasons.push(`Location: ${job.location} is outside your stated preference.`);
+    // Null means no comparison happened — one side named a place we could not resolve.
+    // There is nothing truthful to say then, so say nothing rather than implying a
+    // verdict in either direction.
+    if (b.location !== null) {
+      const where = job.locationLabel ?? 'this location';
+      if (job.remoteType === 'REMOTE') {
+        reasons.push('Location: remote, which matches your preference.');
+      } else if (b.location >= 80) {
+        reasons.push(`Location: ${where} matches your preference.`);
+      } else {
+        reasons.push(`Location: ${where} is outside your stated preference.`);
+      }
     }
 
     if (job.minSalary || job.maxSalary) {

@@ -7,6 +7,7 @@ import { logAiFallback } from '@infra/ai/ai-degradation.logger';
 import { ActiveResumeService } from '../../../resume/application/services/active-resume.service';
 import { ComputeMatchScoreUseCase } from './compute-match-score.use-case';
 import { CandidateContext, JobContext, SubScores } from '../../domain/scoring/types';
+import { LocationResolverService } from '../../../location/location-resolver.service';
 import { reciprocalRankFusion } from '../../domain/rrf';
 import { toExperienceTitles, toStringArray } from '../../domain/parsed-resume-json';
 
@@ -80,6 +81,7 @@ export class RecomputeUserMatchesUseCase {
     private readonly compute: ComputeMatchScoreUseCase,
     private readonly aiClient: AiClient,
     private readonly activeResume: ActiveResumeService,
+    private readonly locations: LocationResolverService,
     configService?: ConfigService,
   ) {
     // Optional so the many places that construct this directly in tests keep working;
@@ -182,8 +184,7 @@ export class RecomputeUserMatchesUseCase {
     if (!profile) return null;
 
     const candidate: CandidateContext = {
-      city: profile.city,
-      country: profile.country,
+      place: this.locations.resolveStructured(profile.city, profile.country),
       desiredRemoteTypes: profile.desiredRemoteTypes,
       minSalary: profile.minSalary,
       maxSalary: profile.maxSalary,
@@ -200,7 +201,8 @@ export class RecomputeUserMatchesUseCase {
         location: true,
         minSalary: true,
         maxSalary: true,
-        company: { select: { industry: true } },
+        // `city`/`country` back the location fallback below.
+        company: { select: { industry: true, city: true, country: true } },
       },
     });
     const jobById = new Map(jobs.map((j) => [j.id, j]));
@@ -219,7 +221,13 @@ export class RecomputeUserMatchesUseCase {
 
       const jobCtx: JobContext = {
         remoteType: job.remoteType,
-        location: job.location,
+        // The job's own location first, then the company's structured address. Ingested
+        // rows often carry no location at all (bongthom writes null rather than guessing
+        // "Phnom Penh"), and the employer's address is a fact we hold, not an inference.
+        place:
+          this.locations.resolveText(job.location) ??
+          this.locations.resolveStructured(job.company?.city, job.company?.country),
+        locationLabel: job.location,
         minSalary: job.minSalary,
         maxSalary: job.maxSalary,
         industry: job.company?.industry
@@ -532,7 +540,8 @@ export class RecomputeUserMatchesUseCase {
     if (b.skills >= 70) bits.push('strong skills match');
     else if (b.skills >= 45) bits.push('partial skills match');
     else bits.push('some overlap');
-    if (b.location >= 80) bits.push('location fits');
+    // Only claim a location fit when one was actually measured.
+    if (b.location !== null && b.location >= 80) bits.push('location fits');
     if (b.salary >= 100) bits.push('salary in range');
     return `${title}: ${bits.join(', ')}.`;
   }

@@ -1,6 +1,6 @@
 # Option B — Structured location matching: phased implementation plan
 
-**Status:** PHASES 0-1 COMPLETE (2026-09-02) — phase 2 awaiting approval
+**Status:** PHASES 0-2 COMPLETE (2026-09-02) — phase 3 awaiting approval
 **Written:** 2026-09-02
 **Root problem:** see `LOCATION_MATCHING_ROOT_PROBLEM.md`
 
@@ -230,22 +230,64 @@ local runs are unaffected either way.
    job's `Company.city`/`country`, which are already structured.
 7. Rewrite the `scoreLocation` cases in `domain/scoring/scoring.spec.ts`.
 
-### Acceptance criteria
-Measured against a real profile of `Phnom Penh, Cambodia`:
+### Acceptance criteria — RESULTS (measured 2026-09-02, real 34,129-row table)
 
-- [ ] `"Phnom Penh, Cambodia"` → 100
-- [ ] `"Toul Kork, Phnom Penh"` → 100
-- [ ] `"ភ្នំពេញ"` → 100
-- [ ] `"Siem Reap, Cambodia"` → 70
-- [ ] `"Bangkok, Thailand"` → 30
-- [ ] `"Remote"` → 100
-- [ ] `""` / unparseable → `null`, **and the total is computed without it**
-- [ ] Same ladder verified for a `Chicago, US` profile — no country-specific code paths
-- [ ] A Phnom Penh job and a Bangkok job with otherwise identical inputs differ in the final match % by ~10.5 points (was: 0)
-- [ ] Full backend test suite green
-- [ ] No consumer still reads `candidate.city` / `job.location` for scoring
+Profile = **Phnom Penh, Cambodia**:
 
-> ### 🛑 STOP — report results, wait for approval.
+| Job location | Score | Rung |
+|---|---|---|
+| `Phnom Penh, Cambodia` | **100** | same city |
+| `Toul Kork, Phnom Penh` | **100** | same city (unknown district ignored) |
+| Khmer script | **100** | same city |
+| `Dangkao` | **85** | same province (KH.22) |
+| `Siem Reap, Cambodia` | **70** | same country |
+| `Bangkok, Thailand` | **30** | different country |
+| REMOTE-flagged job | **100** | remote suits anyone |
+| `asdfgh` / `""` | **null** | not measured, excluded from the total |
+
+- [x] Same ladder verified on a **Chicago, US** profile — `Chicago, IL` 100 · `Aurora, IL` 85
+      · `Austin, TX` 70 · `Toronto, Canada` 30. **No country-specific code path exists.**
+- [x] Candidate with an unresolvable city → **null**, not a neutral number
+- [x] A null location is **excluded and the weights rescaled**: same sub-scores give 55
+      with location=30 and **59** with location=null — it does not deflate the total
+- [x] Same-city vs different-country, all else identical: **65 vs 55 = 10 points**
+      (was **0** — both scored 55 under the regex scorer)
+- [x] Full suite green: **114 suites / 1,327 tests**
+- [x] No consumer reads raw location strings for scoring — the remaining `job.location`
+      reads only feed the resolver, the display label, or the embedding text. The old
+      `mentionsPlace` regex is **deleted**.
+
+### What changed, file by file
+| File | Change |
+|---|---|
+| `domain/scoring/location-scorer.ts` | regex → hierarchy ladder; returns `number \| null` |
+| `domain/scoring/types.ts` | contexts carry `place: ResolvedPlace \| null`; `JobContext.locationLabel` kept for display only; `SubScores.location` nullable |
+| `domain/scoring/weighted-match.calculator.ts` | new `blendMeasured()` — drops nulls and rescales |
+| `application/use-cases/match-external-job.use-case.ts` | resolves both sides; `fieldForwardScore` rescales |
+| `application/services/job-match.service.ts` | resolves; falls back to the company's structured city/country; `explain()` stays silent when location is unmeasured |
+| `application/use-cases/recompute-user-matches.use-case.ts` | same, for the bulk pipeline |
+| `match-report/domain/match-report-payload.ts` | `subScores.location` nullable |
+| `presentation/dtos/job-match.dto.ts`, `external-job-match.dto.ts` | location documented as nullable = "not computed" |
+| `matching.module.ts` | imports `LocationModule` |
+
+### Notes
+1. **Internal jobs gained a fallback.** When `Job.location` is null (bongthom writes null
+   deliberately rather than guessing "Phnom Penh"), the job's **company** `city`/`country`
+   is used — a fact already stored, not an inference.
+2. **A new end-to-end test** proves the use-case resolves free text on BOTH sides before
+   comparing: two otherwise-identical jobs score location 100 and 30. No other test
+   covered the wiring, only the scorer.
+3. **`Dangkao` was added to the fixtures** to test the same-province rung with a real
+   Cambodian pair rather than an invented one.
+4. **A test stub** (`location-resolver.stub.ts`) runs specs against the real
+   `LocationIndex` over fixtures — not canned answers, which would let broken resolution
+   pass.
+
+### ⚠️ Stored scores are now STALE
+`recommendations.breakdown` rows still hold the old regex numbers. They are rewritten
+only when the pipeline next runs for a user; phase 5 backfills them deliberately.
+
+> ### 🛑 PHASE 2 COMPLETE — awaiting approval for phase 3.
 
 ---
 
