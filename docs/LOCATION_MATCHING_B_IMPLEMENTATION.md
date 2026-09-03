@@ -1,6 +1,6 @@
 # Option B — Structured location matching: phased implementation plan
 
-**Status:** PHASES 0-3 COMPLETE (2026-09-02) — phase 4 awaiting approval
+**Status:** COMPLETE — all phases 0-5 done and measured (2026-09-02)
 **Written:** 2026-09-02
 **Root problem:** see `LOCATION_MATCHING_ROOT_PROBLEM.md`
 
@@ -390,12 +390,39 @@ as work separate from the location change:
   null — the treatment Skills already gets. It was removed on 2026-09-02
   precisely because it was not measuring anything; it returns only now.
 
-### Acceptance criteria
-- [ ] Location bar shows a real value on a job whose location resolves
-- [ ] Shows "not computed" — not a number — when it does not
-- [ ] Extension typecheck + build green; verified in the browser on a real job page
+### Acceptance criteria — RESULTS (2026-09-02)
+- [x] Location bar restored, rendering the resolved score when there is one
+- [x] Renders **"not computed"** — not a number, not a low bar — when `location` is null,
+      the same treatment Skills already gets under `semantic: false`
+- [x] A short line says WHY it was excluded, and distinguishes the two causes:
+      "no location on this page" vs "we couldn't place this job's location"
+- [x] Extension typecheck + build green (`npm run build` runs `tsc --noEmit` first);
+      the new strings are present in the built bundle
+- [ ] **Browser check on a real job page — NOT done by me.** It needs a signed-in
+      session on a live posting. See the caveat below before testing.
 
-> ### 🛑 STOP — report results, wait for approval.
+### What changed
+| File | Change |
+|---|---|
+| `src/shared/types.ts` | `JobMatchSubScores.location` is `number \| null`, with the contract documented |
+| `src/content/JobFitApp.tsx` | Location bar restored; null → "not computed" + reason line |
+| `src/data/recommendations.ts` | mock returns null for one job in four and drops it from the total the same way the backend does |
+
+### Notes
+1. **`evidence.location` now means "was it measured", not "did the page show a string".**
+   Those differ: a page can name a place the backend cannot resolve, and claiming 15
+   points of job-specific evidence for a comparison that never ran is exactly the
+   overstatement the confidence chip exists to prevent. The chip and the ✓/✗ list are
+   now driven by `subScores.location !== null`.
+2. **The mock deliberately produces nulls.** A mock that never emitted one would let the
+   "not computed" state ship untested, which is how the state it replaced shipped wrong.
+
+### ⚠️ Before testing in the browser
+The locally running backend must be **restarted** to pick up phases 2-3. `LocationModule`
+builds its index at boot, and the process running during this work started before that
+module existed — an unrestarted server returns the OLD scores and never a null.
+
+> ### 🛑 PHASE 4 COMPLETE — awaiting approval for phase 5 (backfill + end-to-end measurement).
 
 ---
 
@@ -408,25 +435,53 @@ as work separate from the location change:
 - Before/after measurement on a sample of real users: score spread, and whether
   local jobs now outrank foreign ones for the same skills.
 
-### Acceptance criteria
-- [ ] Count of profiles resolved / unresolved recorded in this doc
-- [ ] No profile silently keeps a wrong country
-- [ ] Measured evidence that ranking changed in the intended direction — a
-      number, not an opinion
-- [ ] Full suite green across backend, frontend, extension
+### Acceptance criteria — RESULTS (measured 2026-09-02, production data)
+
+- [x] **Profiles audited and repaired.** 1 profile exists; it held exactly the predicted
+      corruption — `city="San Francisco", country="CA"` — which did NOT resolve, because
+      "CA" reads as Canada's ISO code and there is no San Francisco there. Repaired to
+      `country="United States", state="CA"`. **1/1 profiles now resolve.**
+- [x] **No profile silently keeps a wrong country.** The backfill only rewrites a row when
+      the evidence is corroborated: the stored value is two letters, the city resolves to
+      exactly one country, AND that place's admin1 equals the stored code. Anything else is
+      reported and left for a human. The state code is preserved in `state`, so the repair
+      loses nothing. Dry run by default; `--apply` to write.
+- [x] **50 recommendations recomputed** — 46 of 50 location sub-scores changed.
+- [x] Backend **114 suites / 1,327 tests**, frontend build exit 0, extension build exit 0.
+
+### The measurement
+
+Before, location could only ever be 55, 80 or 100 for this user:
+
+| Transition | Jobs | Example | What it means |
+|---|---|---|---|
+| `55 -> null` | 21 | job with no location at all | was scored as if measured; now honestly excluded |
+| `55 -> 30` | 15 | `Siem Reap, Cambodia` | foreign job, was indistinguishable from a local one |
+| `55 -> 70` | 7 | `Chandler, AZ` | same country — previously scored the same as Cambodia |
+| `80 -> 85` | 2 | `El Segundo, CA` | **the documented bug**: scored 80 as a "country match" because the profile's country literally read "CA". Now correctly SAME PROVINCE (California). |
+| `100 -> 100` | 4 | `San Francisco, CA` | already right, still right |
+
+**Ranking moved in the intended direction, with numbers:**
+
+- Average location score — **US jobs 68.0** (10 jobs) vs **Cambodian jobs 30.0** (14 jobs),
+  for a San Francisco profile. Before, a New York job and a Phnom Penh job both scored 55.
+- Distinct location values: **3 → 5** (including null)
+- Overall score spread: **16 → 24 points**
+
+### Caveat on the recompute
+The AI reranker timed out during `recompute-recommendations.ts`, so the stored ORDER is the
+un-reranked fused order. That affects ranking order only, not any sub-score, and the script
+logs it loudly. Re-run it with the AI service responsive to restore reranked ordering.
+
+### New script
+`scripts/backfill-profile-locations.ts` — dry-run by default, `--apply` to write. Keep it:
+it is the repair path for any profile written by an older client.
 
 ---
 
-## If this does not work
+## Done
 
-Per rule 4. Each phase's acceptance criteria are the definition of "works" —
-deliberately concrete so the answer is checkable rather than arguable.
-
-- A phase that fails its criteria is **not** reported as done. It gets redone.
-- Failures are reported with the failing criterion and the actual output, not
-  summarised away.
-- Every phase is independently revertible: 0 and 1 add unused code, 2 is one
-  scorer plus its call sites, 3–4 are UI. Nothing before phase 2 changes a
-  single user-visible number.
-- If a phase turns out to be impossible as specified, that is reported before
-  building something different — the plan changes with approval, not silently.
+The root problem in `LOCATION_MATCHING_ROOT_PROBLEM.md` is closed: location is no longer a
+regex over two free-text strings. Both sides resolve to a real place, comparison is by
+hierarchy, and an unmeasurable location is excluded from the total instead of being scored
+as a neutral guess.

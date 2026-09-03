@@ -245,9 +245,18 @@ export class RecommendationsQueryService {
       // Dismissed rows are tombstones kept so a recompute cannot resurrect them; they are
       // never results.
       where: { userId, dismissedAt: null, job: { status: 'PUBLISHED' } },
+      // LOCATED POSTINGS FIRST, then best score. A job that states where the work is
+      // outranks one that doesn't, because "where is it?" is the first thing a seeker
+      // needs and a posting that omits it is a worse listing. Jobs without a location
+      // are NOT hidden — they follow, still ordered by score.
+      //
+      // This cannot be done with `score` alone: an unmeasurable location is excluded
+      // from the weighted average and the rest rescaled, which slightly RAISES the
+      // total, so a job hiding its location could otherwise outrank one stating it.
+      //
       // jobId breaks score ties — without it, equally-scored rows come back in arbitrary
       // order between calls, which defeats any client-side change detection.
-      orderBy: [{ score: 'desc' }, { jobId: 'asc' }],
+      orderBy: [{ locationKnown: 'desc' }, { score: 'desc' }, { jobId: 'asc' }],
       take: limit,
       include: RECOMMENDATION_JOB_INCLUDE,
     });

@@ -67,8 +67,8 @@ describe('RecomputeUserMatchesUseCase', () => {
       // field stays pinned exactly.
       expect(prisma.recommendation.upsert.mock.calls[0][0]).toEqual({
         where: { userId_jobId: { userId: 'u1', jobId: 'jobA' } },
-        update: { score: 77, breakdown: { skills: 80, experience: 80, location: 100, salary: 50, other: 50 }, reasonExplanation: 'Backend Engineer: strong skills match, location fits.', computedAt: expect.any(Date), staleAt: null },
-        create: { userId: 'u1', jobId: 'jobA', score: 77, breakdown: { skills: 80, experience: 80, location: 100, salary: 50, other: 50 }, reasonExplanation: 'Backend Engineer: strong skills match, location fits.', computedAt: expect.any(Date) },
+        update: { score: 77, breakdown: { skills: 80, experience: 80, location: 100, salary: 50, other: 50 }, locationKnown: true, reasonExplanation: 'Backend Engineer: strong skills match, location fits.', computedAt: expect.any(Date), staleAt: null },
+        create: { userId: 'u1', jobId: 'jobA', score: 77, breakdown: { skills: 80, experience: 80, location: 100, salary: 50, other: 50 }, locationKnown: true, reasonExplanation: 'Backend Engineer: strong skills match, location fits.', computedAt: expect.any(Date) },
       });
       expect(prisma.recommendation.upsert.mock.calls[1][0]).toEqual({
         where: { userId_jobId: { userId: 'u1', jobId: 'jobB' } },
@@ -76,8 +76,8 @@ describe('RecomputeUserMatchesUseCase', () => {
         // The old scorer returned a neutral 50 here and folded it into the total as if it
         // were a measurement. It is now dropped and the remaining weights rescaled, which
         // is why the score is 59 rather than 58.
-        update: { score: 59, breakdown: { skills: 50, experience: 80, location: null, salary: 50, other: 50 }, reasonExplanation: 'Frontend Engineer: partial skills match.', computedAt: expect.any(Date), staleAt: null },
-        create: { userId: 'u1', jobId: 'jobB', score: 59, breakdown: { skills: 50, experience: 80, location: null, salary: 50, other: 50 }, reasonExplanation: 'Frontend Engineer: partial skills match.', computedAt: expect.any(Date) },
+        update: { score: 59, breakdown: { skills: 50, experience: 80, location: null, salary: 50, other: 50 }, locationKnown: false, reasonExplanation: 'Frontend Engineer: partial skills match.', computedAt: expect.any(Date), staleAt: null },
+        create: { userId: 'u1', jobId: 'jobB', score: 59, breakdown: { skills: 50, experience: 80, location: null, salary: 50, other: 50 }, locationKnown: false, reasonExplanation: 'Frontend Engineer: partial skills match.', computedAt: expect.any(Date) },
       });
 
       // §6: the upsert only ever writes the new top-N, so anything else the user still

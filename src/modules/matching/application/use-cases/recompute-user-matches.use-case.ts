@@ -110,6 +110,11 @@ export class RecomputeUserMatchesUseCase {
     for (const { jobId, score, breakdown, reasonExplanation } of scored) {
       // Prisma's Json input wants an index-signature type; SubScores is fixed-shape.
       const breakdownJson = breakdown as unknown as Record<string, number>;
+      // Did the posting tell us where the work is? Postings that do are shown first —
+      // see the `locationKnown` column. This is listing quality, not fit: `score`
+      // already carries the fit, and location is null there precisely because nothing
+      // was measured.
+      const locationKnown = breakdown.location !== null;
 
       // `dismissedAt` is deliberately absent from `update`: refreshing the score of a
       // job the user rejected is fine, un-rejecting it is not. Clearing `staleAt` here
@@ -119,6 +124,7 @@ export class RecomputeUserMatchesUseCase {
         update: {
           score,
           breakdown: breakdownJson,
+          locationKnown,
           reasonExplanation,
           computedAt: now,
           staleAt: null,
@@ -128,6 +134,7 @@ export class RecomputeUserMatchesUseCase {
           jobId,
           score,
           breakdown: breakdownJson,
+          locationKnown,
           reasonExplanation,
           computedAt: now,
         },
