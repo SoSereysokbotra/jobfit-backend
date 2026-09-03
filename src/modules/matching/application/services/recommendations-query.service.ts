@@ -30,6 +30,31 @@ const SCOUT_CANDIDATE_CAP = 500;
 const SCOUT_RESULT_LIMIT = 50;
 
 /**
+ * How long to wait before retrying a recompute that produced nothing.
+ *
+ * WHY THIS EXISTS. `execute` returns 0 without clearing `staleAt` when retrieval comes
+ * back empty or the user has no profile — correctly, because the rows ARE still stale.
+ * But the read path's trigger is "any row is stale", so the pair looped: every single
+ * request re-ran the full retriever (two SQL queries plus, when the shortlist is
+ * non-empty, an LLM rerank on the request path) and ended in the same place.
+ *
+ * WHY A COOLDOWN AND NOT CLEARING `staleAt`. Clearing would say the scores are current
+ * when they are not, and would strand the user: the flag is the only record that a
+ * recompute is owed, so a candidate whose embedding is FAILED today would never pick up
+ * a successful re-embed tomorrow. The flag stays; only the retry RATE is limited.
+ *
+ * WHY IN PROCESS AND NOT A COLUMN. This is transient operational state — "this instance
+ * tried recently" — not a fact about the user's data, and giving `recommendations` a
+ * column for it would muddy `staleAt`'s meaning. Losing it on restart or spreading it
+ * across instances is harmless: the worst case is one extra attempt per instance per
+ * window, which is exactly what a backoff is for.
+ */
+const RECOMPUTE_RETRY_COOLDOWN_MS = 5 * 60 * 1000;
+
+/** Cap on the cooldown map, so a large user base cannot grow it without bound. */
+const MAX_COOLDOWN_ENTRIES = 10_000;
+
+/**
  * Reads a user's recommendations (job-enriched) for the API, recomputing lazily when the
  * cache cannot be trusted. There is still no nightly batch; this read path is the only
  * thing that keeps scores current.
@@ -42,9 +67,15 @@ const SCOUT_RESULT_LIMIT = 50;
  * Only the first existed before, which is why "upload a better CV and your matches move"
  * did not work: the embedding was rebuilt, the cached scores were not, and the row count
  * was never zero again (MENTOR_REVIEW_2026-08-18 §6).
+ *
+ * A recompute that produces nothing leaves `staleAt` set, so the trigger stays true and
+ * the next read would try again immediately. `RECOMPUTE_RETRY_COOLDOWN_MS` bounds that.
  */
 @Injectable()
 export class RecommendationsQueryService {
+  /** userId -> epoch ms before which no further recompute will be attempted. */
+  private readonly retryNotBefore = new Map<string, number>();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly recompute: RecomputeUserMatchesUseCase,
@@ -53,20 +84,46 @@ export class RecommendationsQueryService {
   async getForUser(userId: string, limit = DEFAULT_LIMIT): Promise<RecommendedJobDto[]> {
     let rows = await this.read(userId, limit);
 
-    if (rows.length === 0 || rows.some((r) => r.staleAt !== null)) {
+    const needsRecompute = rows.length === 0 || rows.some((r) => r.staleAt !== null);
+    if (needsRecompute && this.mayRetry(userId)) {
       try {
-        await this.recompute.execute(userId, limit);
+        const written = await this.recompute.execute(userId, limit);
+        // Wrote nothing, so `staleAt` is still set and this read path would otherwise
+        // re-run the whole retriever on the very next request. Hold off instead.
+        if (written === 0) this.holdOff(userId);
+        else this.retryNotBefore.delete(userId);
         rows = await this.read(userId, limit);
       } catch {
         // Serve what we have. A failed recompute must not turn "slightly old matches"
         // into "no matches" — which is exactly why staleness is a marker and not a
-        // delete. The rows stay flagged, so the next read tries again.
+        // delete. The rows stay flagged, so a later read tries again.
         // (No rethrow, and no logging here: RecomputeUserMatchesUseCase logs its own
         //  failures with the detail that is worth having.)
+        this.holdOff(userId);
       }
     }
 
     return rows.map((r) => toRecommendedJobDto(r));
+  }
+
+  /** False while a recompute that produced nothing is still inside its cooldown. */
+  private mayRetry(userId: string): boolean {
+    const until = this.retryNotBefore.get(userId);
+    if (until === undefined) return true;
+    if (Date.now() < until) return false;
+    this.retryNotBefore.delete(userId);
+    return true;
+  }
+
+  /** Suppress further attempts for this user until the cooldown expires. */
+  private holdOff(userId: string): void {
+    if (this.retryNotBefore.size >= MAX_COOLDOWN_ENTRIES) {
+      const now = Date.now();
+      for (const [key, until] of this.retryNotBefore) {
+        if (until <= now) this.retryNotBefore.delete(key);
+      }
+    }
+    this.retryNotBefore.set(userId, Date.now() + RECOMPUTE_RETRY_COOLDOWN_MS);
   }
 
   /**
@@ -245,18 +302,30 @@ export class RecommendationsQueryService {
       // Dismissed rows are tombstones kept so a recompute cannot resurrect them; they are
       // never results.
       where: { userId, dismissedAt: null, job: { status: 'PUBLISHED' } },
-      // LOCATED POSTINGS FIRST, then best score. A job that states where the work is
-      // outranks one that doesn't, because "where is it?" is the first thing a seeker
-      // needs and a posting that omits it is a worse listing. Jobs without a location
-      // are NOT hidden — they follow, still ordered by score.
+      // BEST MATCH FIRST. `score` leads; `locationKnown` is a TIEBREAKER between equally
+      // scored rows, not the primary key.
       //
-      // This cannot be done with `score` alone: an unmeasurable location is excluded
-      // from the weighted average and the rest rescaled, which slightly RAISES the
-      // total, so a job hiding its location could otherwise outrank one stating it.
+      // It used to lead, and that was the wrong question. `locationKnown` means "this
+      // posting stated a place we could resolve" — it says nothing about whether that
+      // place is anywhere near the candidate. So the dominant sort key was indifferent
+      // to the user's own location: after moving from the US to Cambodia, well-formed US
+      // postings still sorted above everything, because they were the ones with tidy
+      // location strings. Sorting a "how good is this match for me" list by a property of
+      // the LISTING rather than of the MATCH is what made the move look ignored.
       //
-      // jobId breaks score ties — without it, equally-scored rows come back in arbitrary
-      // order between calls, which defeats any client-side change detection.
-      orderBy: [{ locationKnown: 'desc' }, { score: 'desc' }, { jobId: 'asc' }],
+      // Location now reaches the ranking the honest way — through `score`, which carries
+      // the location sub-score, and through retrieval, which no longer picks the
+      // candidate pool blind to where the user is (see RecomputeUserMatchesUseCase).
+      //
+      // Kept as a tiebreaker because the original point still holds at equal score: an
+      // unmeasurable location is dropped from the weighted average and the rest
+      // rescaled, which slightly RAISES the total, so a posting that hides its location
+      // can tie one that states it. On a tie, prefer the one that tells the user where
+      // the work is.
+      //
+      // jobId breaks the remaining ties — without it, equally-scored rows come back in
+      // arbitrary order between calls, which defeats any client-side change detection.
+      orderBy: [{ score: 'desc' }, { locationKnown: 'desc' }, { jobId: 'asc' }],
       take: limit,
       include: RECOMMENDATION_JOB_INCLUDE,
     });

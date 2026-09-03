@@ -1197,9 +1197,12 @@ model Recommendation {
 
   @@unique([userId, jobId])
   @@index([userId, score])
-  // Reads are "this user's live recommendations, jobs that state a location first, then
-  // best first"; dismissed rows are tombstones and must not cost anything to skip.
-  @@index([userId, dismissedAt, locationKnown, score])
+  // Reads are "this user's live recommendations, best match first, preferring a posting
+  // that states its location when scores tie"; dismissed rows are tombstones and must not
+  // cost anything to skip. Column order mirrors that ORDER BY — `score` leads, because
+  // sorting by `locationKnown` first ranked on a property of the LISTING rather than of
+  // the match (see RecommendationsQueryService.read).
+  @@index([userId, dismissedAt, score, locationKnown])
   @@map("recommendations")
 }
 

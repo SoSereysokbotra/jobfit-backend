@@ -92,6 +92,86 @@ describe('RecommendationsQueryService.getForUser — when it recomputes', () => 
     expect(result).toHaveLength(1);
   });
 
+  // ── retry cooldown ────────────────────────────────────────────────────────
+  //
+  // `execute` returns 0 without clearing `staleAt` when retrieval comes back empty or the
+  // user has no profile — correctly, the rows ARE still stale. But the trigger above is
+  // "any row is stale", so the two looped: every request re-ran the whole retriever and
+  // ended in the same place. The flag stays (it is the only record that a recompute is
+  // owed); the retry RATE is what is bounded.
+
+  it('does not retry immediately after a recompute that produced nothing', async () => {
+    prisma.recommendation.findMany.mockResolvedValue([
+      row({ staleAt: new Date('2026-08-19') }),
+    ]);
+    recompute.execute.mockResolvedValue(0);
+
+    await service.getForUser('u1');
+    expect(recompute.execute).toHaveBeenCalledTimes(1);
+
+    await service.getForUser('u1');
+    await service.getForUser('u1');
+
+    // Still one. Without the cooldown this is one full retrieval per request, forever.
+    expect(recompute.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry immediately after a recompute that threw', async () => {
+    prisma.recommendation.findMany.mockResolvedValue([
+      row({ staleAt: new Date('2026-08-19') }),
+    ]);
+    recompute.execute.mockRejectedValue(new Error('AI service down'));
+
+    await service.getForUser('u1');
+    await service.getForUser('u1');
+
+    expect(recompute.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries once the cooldown has elapsed', async () => {
+    prisma.recommendation.findMany.mockResolvedValue([
+      row({ staleAt: new Date('2026-08-19') }),
+    ]);
+    recompute.execute.mockResolvedValue(0);
+
+    await service.getForUser('u1');
+    expect(recompute.execute).toHaveBeenCalledTimes(1);
+
+    // Five minutes and a second later. The flag is still set, so the work is still owed.
+    jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 5 * 60 * 1000 + 1000);
+    await service.getForUser('u1');
+
+    expect(recompute.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('holds off one user without affecting another', async () => {
+    prisma.recommendation.findMany.mockResolvedValue([
+      row({ staleAt: new Date('2026-08-19') }),
+    ]);
+    recompute.execute.mockResolvedValue(0);
+
+    await service.getForUser('u1');
+    await service.getForUser('u1'); // suppressed
+    await service.getForUser('u2'); // different user — must still be attempted
+
+    expect(recompute.execute).toHaveBeenCalledTimes(2);
+    expect(recompute.execute).toHaveBeenLastCalledWith('u2', 50);
+  });
+
+  it('clears the hold after a recompute that wrote rows', async () => {
+    prisma.recommendation.findMany.mockResolvedValue([
+      row({ staleAt: new Date('2026-08-19') }),
+    ]);
+    recompute.execute.mockResolvedValueOnce(0).mockResolvedValue(7);
+
+    await service.getForUser('u1'); // writes nothing -> hold
+    jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 6 * 60 * 1000);
+    await service.getForUser('u1'); // cooldown over, writes 7 -> hold cleared
+    await service.getForUser('u1'); // rows still read back stale, so attempt again
+
+    expect(recompute.execute).toHaveBeenCalledTimes(3);
+  });
+
   it('excludes dismissed and non-published jobs from the read', async () => {
     prisma.recommendation.findMany.mockResolvedValue([row()]);
 
@@ -100,6 +180,22 @@ describe('RecommendationsQueryService.getForUser — when it recomputes', () => 
     expect(prisma.recommendation.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { userId: 'u1', dismissedAt: null, job: { status: 'PUBLISHED' } },
+      }),
+    );
+  });
+
+  it('orders by score first, with locationKnown only as a tiebreaker', async () => {
+    prisma.recommendation.findMany.mockResolvedValue([row()]);
+
+    await service.getForUser('u1');
+
+    // `locationKnown` used to LEAD, which sorted on a property of the listing ("did this
+    // posting state a place?") rather than of the match. A user who moved country kept
+    // seeing the old country's tidily-formatted postings on top, because being
+    // well-formed outranked being a good match.
+    expect(prisma.recommendation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderBy: [{ score: 'desc' }, { locationKnown: 'desc' }, { jobId: 'asc' }],
       }),
     );
   });

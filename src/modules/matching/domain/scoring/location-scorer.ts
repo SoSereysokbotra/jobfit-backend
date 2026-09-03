@@ -11,6 +11,13 @@
 //
 // Resolution happens in the application layer (LocationResolverService), so this file
 // stays a pure function of two places.
+//
+// The parameters are `Pick`ed down to what is actually read. Full CandidateContext /
+// JobContext values still satisfy them, so scoring calls are unchanged — but retrieval
+// can now rank a bare {id, remoteType, place} row through this SAME ladder without
+// inventing the salary and industry fields it has no use for. Retrieval and scoring
+// agreeing on what "near me" means is the point: a job promoted into the pool because it
+// is local must score as local once it gets there.
 
 import { CandidateContext, JobContext } from './types';
 
@@ -40,8 +47,8 @@ export const LOCATION_SCORES = {
  * failure this scorer was rewritten to remove.
  */
 export function scoreLocation(
-  candidate: CandidateContext,
-  job: JobContext,
+  candidate: Pick<CandidateContext, 'place'>,
+  job: Pick<JobContext, 'remoteType' | 'place'>,
 ): number | null {
   // Remote is a property of the job alone — it needs neither side resolved, and is
   // answerable even for a candidate whose location we never learned.

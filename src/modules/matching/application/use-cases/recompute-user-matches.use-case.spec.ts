@@ -104,6 +104,137 @@ describe('RecomputeUserMatchesUseCase', () => {
     });
   });
 
+  // ── location as a RETRIEVAL signal (not just a sub-score) ──────────────────
+  //
+  // THE REPORTED BUG. A user moved their profile from the US to Cambodia and kept seeing
+  // US jobs. Neither retriever knew where they were: the candidate embedding is built
+  // from headline/bio/industries/résumé (no city, no country) and the BM25 query text is
+  // the same fields, so the candidate pool was chosen blind to geography — and `execute`
+  // then deletes everything outside that pool. Location only entered afterwards, as a
+  // 15%-weight sub-score re-sorting a set it had no say in choosing.
+  //
+  // Measured against the live corpus before the fix: moving San Francisco -> Phnom Penh
+  // changed the retrieved set by ZERO jobs. Local postings could not appear however the
+  // list was sorted, because they were never retrieved.
+  describe('retrieveRankedJobs() — location shapes the candidate pool', () => {
+    /** Dense returns the same two location-less jobs whatever the profile says. */
+    const denseRows = [
+      { id: 'dense1', cosine_sim: 0.9 },
+      { id: 'dense2', cosine_sim: 0.8 },
+    ];
+
+    /** The corpus the location retriever resolves over. */
+    const corpus = [
+      { id: 'kh1', remoteType: 'ON_SITE', location: 'Phnom Penh, Cambodia', company: null },
+      { id: 'kh2', remoteType: 'ON_SITE', location: 'Siem Reap', company: null },
+      { id: 'us1', remoteType: 'ON_SITE', location: 'San Francisco', company: null },
+      { id: 'th1', remoteType: 'ON_SITE', location: 'Bangkok, Thailand', company: null },
+      { id: 'dense1', remoteType: 'ON_SITE', location: null, company: null },
+    ];
+
+    const serviceFor = (city: string | null, country: string | null) => {
+      const prisma: any = {
+        $queryRawUnsafe: jest
+          .fn()
+          // 1) dense, 2) cosine backfill for whatever location pulled in
+          .mockResolvedValueOnce(denseRows)
+          .mockResolvedValue([]),
+        profile: {
+          findUnique: jest.fn().mockResolvedValue({
+            headline: null, // no query text -> no BM25 list, keeps the fusion readable
+            minSalary: null,
+            desiredRemoteTypes: [],
+            city,
+            country,
+          }),
+        },
+        parsedResumeData: { findUnique: jest.fn().mockResolvedValue(null) },
+        job: { findMany: jest.fn().mockResolvedValue(corpus) },
+      };
+      const service = new RecomputeUserMatchesUseCase(
+        prisma as never,
+        new ComputeMatchScoreUseCase(),
+        { rerank: jest.fn() } as never,
+        activeResume(false),
+        stubLocationResolver(),
+      );
+      return { service, prisma };
+    };
+
+    it('pulls jobs in the candidate country into a pool dense retrieval never saw', async () => {
+      const { service } = serviceFor('Phnom Penh', 'Cambodia');
+
+      const ids = (await service.retrieveRankedJobs('u1', 10, { rerank: false })).map(
+        (r) => r.id,
+      );
+
+      // Neither Cambodian job is in the dense list, and there is no BM25 list at all.
+      // Before the fix the only possible answer here was ['dense1','dense2'].
+      expect(ids).toEqual(expect.arrayContaining(['kh1', 'kh2']));
+      // The semantic hits are not evicted — location ADDS candidates, it does not filter.
+      expect(ids).toEqual(expect.arrayContaining(['dense1', 'dense2']));
+      // Wrong country stays out: `differentCountry` is not a reason to promote a job.
+      expect(ids).not.toContain('th1');
+      expect(ids).not.toContain('us1');
+    });
+
+    it('retrieves a DIFFERENT pool for the same candidate after they move', async () => {
+      const before = serviceFor('San Francisco', 'United States');
+      const beforeIds = (
+        await before.service.retrieveRankedJobs('u1', 10, { rerank: false })
+      ).map((r) => r.id);
+
+      const after = serviceFor('Phnom Penh', 'Cambodia');
+      const afterIds = (
+        await after.service.retrieveRankedJobs('u1', 10, { rerank: false })
+      ).map((r) => r.id);
+
+      expect(beforeIds).toContain('us1');
+      expect(beforeIds).not.toContain('kh1');
+
+      expect(afterIds).toContain('kh1');
+      expect(afterIds).not.toContain('us1');
+
+      // The point of the whole fix: the SET changed, not merely its order.
+      expect(new Set(afterIds)).not.toEqual(new Set(beforeIds));
+    });
+
+    it('ranks the closer place first — same city above same country', async () => {
+      const { service } = serviceFor('Phnom Penh', 'Cambodia');
+
+      const ids = (await service.retrieveRankedJobs('u1', 10, { rerank: false })).map(
+        (r) => r.id,
+      );
+
+      // kh1 is the same city (100); kh2 is only the same country (70). The location list
+      // is ranked by the same ladder the scorer uses, so kh1 enters fusion above kh2.
+      expect(ids.indexOf('kh1')).toBeLessThan(ids.indexOf('kh2'));
+    });
+
+    it('skips the location retriever entirely for a candidate with no place', async () => {
+      const { service, prisma } = serviceFor(null, null);
+
+      const ids = (await service.retrieveRankedJobs('u1', 10, { rerank: false })).map(
+        (r) => r.id,
+      );
+
+      expect(ids).toEqual(['dense1', 'dense2']);
+      // No place to rank against — do not read the corpus at all.
+      expect(prisma.job.findMany).not.toHaveBeenCalled();
+    });
+
+    it('widens the dense pool only when there is a location list to corroborate it', async () => {
+      const withPlace = serviceFor('Phnom Penh', 'Cambodia');
+      await withPlace.service.retrieveRankedJobs('u1', 10, { rerank: false });
+      // args: (sql, userId, limit, minSalary, remoteOnly)
+      expect(withPlace.prisma.$queryRawUnsafe.mock.calls[0][2]).toBe(100);
+
+      const without = serviceFor(null, null);
+      await without.service.retrieveRankedJobs('u1', 10, { rerank: false });
+      expect(without.prisma.$queryRawUnsafe.mock.calls[0][2]).toBe(50);
+    });
+  });
+
   describe('retrieveRankedJobs() hybrid fusion', () => {
     it('fuses dense + BM25 lists via RRF and backfills cosine for BM25-only hits', async () => {
       const prisma: any = {
