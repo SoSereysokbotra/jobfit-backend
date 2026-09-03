@@ -92,6 +92,13 @@ steps:
       - '--platform=managed'
       - '--allow-unauthenticated'
       - '--port=8080'
+      # 1 GiB, not Cloud Run's 512 MiB default. The location resolver holds the
+      # GeoNames place table in memory — MEASURED at +70.5 MB retained (34,129 places,
+      # 316,522 lookup keys) — so that resolving a job's location never costs a database
+      # query on `/recommendations/by-job`, which the extension calls once per job page
+      # a user views. At 512 MiB that index competes with Node + Nest + Prisma for the
+      # same budget. See docs/LOCATION_MATCHING_B_IMPLEMENTATION.md phase 1.
+      - '--memory=1Gi'
       # TRACE_ENABLED=false until the runtime SA has roles/cloudtrace.agent.
       # Delimiter is ^|^ (not the default comma) because CORS_ORIGIN is itself a
       # comma-separated list. It cannot be ^@^ either: EMAIL_USER/SMTP_FROM contain '@'.

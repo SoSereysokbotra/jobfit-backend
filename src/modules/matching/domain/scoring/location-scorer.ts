@@ -1,50 +1,70 @@
-// Location match (weight 15%). Remote jobs suit everyone; otherwise reward
-// overlap between the candidate's city/country and the job's location string.
-// Deterministic, no GPU needed.
+// Location match (weight 15%). Compares two RESOLVED places by how much geography they
+// share. Deterministic, no GPU, no network, no geocoding.
+//
+// WHAT THIS REPLACED, and why it had to go: the previous version compared the job's
+// location TEXT against the profile's city/country text with a word-boundary regex. That
+// made a user's score depend on how they spelled their own city — "Phnom Penh" matched a
+// job listed as "Toul Kork, Phnom Penh" while "PP", Khmer script, or a blank profile
+// scored the same 50–55 as a job in Bangkok. Worse, EVERY non-match collapsed to a single
+// value, so a job across the city and a job across the world were indistinguishable.
+// The measured consequences are in docs/LOCATION_MATCHING_ROOT_PROBLEM.md.
+//
+// Resolution happens in the application layer (LocationResolverService), so this file
+// stays a pure function of two places.
 
 import { CandidateContext, JobContext } from './types';
 
+/**
+ * The ladder. Each rung answers "how much geography do these two share?".
+ *
+ * The gaps between rungs are the point: under the old scorer a Bangkok job and a Siem
+ * Reap job both scored 55 for a Phnom Penh candidate, so location contributed nothing to
+ * ranking. Here they differ by 40 points.
+ */
+export const LOCATION_SCORES = {
+  /** A remote job suits any candidate, wherever they are. */
+  remote: 100,
+  sameCity: 100,
+  sameProvince: 85,
+  sameCountry: 70,
+  differentCountry: 30,
+} as const;
+
+/**
+ * Score the geographic fit, or NULL when it could not be measured.
+ *
+ * NULL IS NOT A LOW SCORE, and callers must not coerce it into one. It means no
+ * comparison happened — the profile has no location, or one side names a place the table
+ * does not know. `weightedMatch` drops it and rescales the remaining weights; the UI says
+ * "not computed". Returning a neutral number instead would reintroduce exactly the
+ * failure this scorer was rewritten to remove.
+ */
 export function scoreLocation(
   candidate: CandidateContext,
   job: JobContext,
-): number {
-  // A remote job fits any candidate regardless of where they are.
-  if (job.remoteType === 'REMOTE') return 100;
+): number | null {
+  // Remote is a property of the job alone — it needs neither side resolved, and is
+  // answerable even for a candidate whose location we never learned.
+  if (job.remoteType === 'REMOTE') return LOCATION_SCORES.remote;
 
-  const jobLoc = job.location ?? '';
-  const cityMatch = !!candidate.city && mentionsPlace(jobLoc, candidate.city);
-  const countryMatch = !!candidate.country && mentionsPlace(jobLoc, candidate.country);
+  const here = candidate.place;
+  const there = job.place;
+  if (!here || !there) return null;
 
-  if (cityMatch) return 100;
-  if (countryMatch) return 80;
+  if (here.geonameId === there.geonameId) return LOCATION_SCORES.sameCity;
 
-  // On-site/hybrid with no geographic overlap.
-  if (candidate.desiredRemoteTypes.includes('REMOTE')) return 40; // wants remote, isn't
-  if (!candidate.city && !candidate.country) return 50; // candidate location unknown
-  return 55;
-}
+  if (here.countryCode === there.countryCode) {
+    // BOTH sides must actually have a province for "same province" to mean anything.
+    // 25 of the 34,129 imported places are city-states with no admin1 at all (verified:
+    // Singapore), and `null === null` would rank every one of them as being in the same
+    // province as all the others.
+    if (here.admin1Code && there.admin1Code && here.admin1Code === there.admin1Code) {
+      return LOCATION_SCORES.sameProvince;
+    }
+    return LOCATION_SCORES.sameCountry;
+  }
 
-/**
- * Does a job's location string name this place?
- *
- * WHOLE WORDS ONLY, and this is the whole point. A plain `includes()` matched the
- * candidate's two-letter country code INSIDE longer place names: a profile with country
- * "CA" scored 80 ("country match") against every job in **Ca**mbodia, and would do the
- * same for **Ca**nada, **Ca**meroon and Casablanca. Measured 2026-08-12 — a San
- * Francisco profile was reported as a country match for Phnom Penh.
- *
- * Word boundaries fix that without a geo database: "CA" still matches the standalone
- * "CA" in "San Francisco, CA", and no longer matches inside "Cambodia". Multi-word
- * places ("United States", "Phnom Penh") work unchanged because the phrase is matched as
- * a unit.
- */
-function mentionsPlace(jobLocation: string, place: string): boolean {
-  const trimmed = place.trim();
-  if (!trimmed) return false;
-  const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  // `\b` is meaningless beside a non-word character, so only anchor the ends that are
-  // word characters (keeps places like "Washington D.C." matchable).
-  const left = /^\w/.test(trimmed) ? '\\b' : '';
-  const right = /\w$/.test(trimmed) ? '\\b' : '';
-  return new RegExp(`${left}${escaped}${right}`, 'i').test(jobLocation);
+  // Deliberately no "neighbouring country" rung: knowing that Cambodia borders Thailand
+  // needs an adjacency table nothing here has, and guessing it would be inventing data.
+  return LOCATION_SCORES.differentCountry;
 }

@@ -45,12 +45,41 @@ export function scoreOther(
   return 40;
 }
 
+/**
+ * Weighted average over the sub-scores that were actually MEASURED.
+ *
+ * A null component is dropped and the remaining weights rescaled to sum to 1, so the
+ * total stays on the same 0-100 scale instead of being silently deflated by a missing
+ * part. With every component present this is arithmetically identical to the old
+ * fixed-weight sum.
+ *
+ * WHY RESCALE RATHER THAN SUBSTITUTE: `location` is null whenever neither side resolved
+ * to a known place. Feeding a "neutral" 50 into the sum would assert that a comparison
+ * happened and came out middling — the precise failure the location rewrite exists to
+ * remove. Dropping it says the honest thing: this total is the average of what could be
+ * measured.
+ */
+export function blendMeasured(parts: Array<[number | null, number]>): number | null {
+  let weighted = 0;
+  let weight = 0;
+  for (const [value, componentWeight] of parts) {
+    if (value === null) continue;
+    weighted += value * componentWeight;
+    weight += componentWeight;
+  }
+  // Nothing measurable at all — there is no honest number to print.
+  if (weight === 0) return null;
+  return Math.round(weighted / weight);
+}
+
 export function weightedMatch(scores: SubScores): number {
-  return Math.round(
-    scores.skills * MATCH_WEIGHTS.skills +
-      scores.experience * MATCH_WEIGHTS.experience +
-      scores.location * MATCH_WEIGHTS.location +
-      scores.salary * MATCH_WEIGHTS.salary +
-      scores.other * MATCH_WEIGHTS.other,
+  return (
+    blendMeasured([
+      [scores.skills, MATCH_WEIGHTS.skills],
+      [scores.experience, MATCH_WEIGHTS.experience],
+      [scores.location, MATCH_WEIGHTS.location],
+      [scores.salary, MATCH_WEIGHTS.salary],
+      [scores.other, MATCH_WEIGHTS.other],
+    ]) ?? 0 // unreachable: only `location` is nullable, so the weight is never 0
   );
 }

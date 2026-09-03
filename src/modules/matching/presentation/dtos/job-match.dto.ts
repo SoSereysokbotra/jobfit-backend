@@ -10,7 +10,15 @@ export class JobMatchQueryDto {
 export class MatchBreakdownDto {
   @ApiProperty() skills: number;
   @ApiProperty() experience: number;
-  @ApiProperty() location: number;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'NULL when location could not be measured — the profile or the job named a place ' +
+      'we could not resolve. It is then EXCLUDED from `score`, not scored as a neutral ' +
+      'value. Clients must render it as "not computed" rather than as a low match.',
+  })
+  location: number | null;
   @ApiProperty() salary: number;
   @ApiProperty() other: number;
 }

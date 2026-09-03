@@ -5,6 +5,9 @@ import { Module } from '@nestjs/common';
 import { ApplicationTransitionModule } from '../application/application-transition.module';
 // Which résumé the AI speaks for when a user has uploaded several (ActiveResumeService).
 import { ResumeSelectionModule } from '../resume/resume-selection.module';
+// Place resolution for the location sub-score: both a profile's city/country and a job's
+// free-text location are resolved to real places before they are compared.
+import { LocationModule } from '../location/location.module';
 import { ComputeMatchScoreUseCase } from './application/use-cases/compute-match-score.use-case';
 import { MatchExternalJobUseCase } from './application/use-cases/match-external-job.use-case';
 import { RecomputeUserMatchesUseCase } from './application/use-cases/recompute-user-matches.use-case';
@@ -23,7 +26,7 @@ import { UserProfileUpdatedListener } from './listeners/user-profile-updated.lis
 
 // PrismaService (global) and AiClient (global AiModule) inject without extra imports.
 @Module({
-  imports: [ApplicationTransitionModule, ResumeSelectionModule],
+  imports: [ApplicationTransitionModule, ResumeSelectionModule, LocationModule],
   controllers: [MatchingController],
   providers: [
     MatchingEmbeddingService,

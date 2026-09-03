@@ -7,7 +7,12 @@ import { cosineSimilarity } from '../../domain/scoring/skills-scorer';
 import { scoreExperience } from '../../domain/scoring/experience-scorer';
 import { scoreLocation } from '../../domain/scoring/location-scorer';
 import { scoreSalary } from '../../domain/scoring/salary-scorer';
-import { scoreOther, weightedMatch } from '../../domain/scoring/weighted-match.calculator';
+import {
+  blendMeasured,
+  scoreOther,
+  weightedMatch,
+} from '../../domain/scoring/weighted-match.calculator';
+import { LocationResolverService } from '../../../location/location-resolver.service';
 
 /**
  * Spread the skills sub-score for EXTERNAL jobs.
@@ -36,8 +41,21 @@ function externalSkillsScore(cosineSim: number): number {
  * jobs it's a constant CV-derived value (no per-job requirement), so weighting it
  * heavily just puts a floor under every job and flattens the ranking.
  */
-function fieldForwardScore(skills: number, experience: number, location: number): number {
-  return Math.round(skills * 0.75 + location * 0.15 + experience * 0.1);
+function fieldForwardScore(
+  skills: number,
+  experience: number,
+  location: number | null,
+): number {
+  // An unresolved location is DROPPED and the remaining weights rescaled — not scored as
+  // a neutral value. See `blendMeasured`. With location null this becomes skills ~0.88 /
+  // experience ~0.12, preserving their relative importance rather than deflating the total.
+  return (
+    blendMeasured([
+      [skills, 0.75],
+      [location, 0.15],
+      [experience, 0.1],
+    ]) ?? 0 // unreachable: skills is non-null on every path that reaches here
+  );
 }
 
 /**
@@ -128,6 +146,7 @@ export class MatchExternalJobUseCase {
     private readonly prisma: PrismaService,
     private readonly aiClient: AiClient,
     private readonly activeResume: ActiveResumeService,
+    private readonly locations: LocationResolverService,
   ) {}
 
   async execute(
@@ -150,8 +169,9 @@ export class MatchExternalJobUseCase {
     if (!profile) return null;
 
     const candidate: CandidateContext = {
-      city: profile.city,
-      country: profile.country,
+      // The profile still stores free text; resolving it here is what lets the scorer
+      // compare places instead of spellings.
+      place: this.locations.resolveStructured(profile.city, profile.country),
       desiredRemoteTypes: profile.desiredRemoteTypes,
       minSalary: profile.minSalary,
       maxSalary: profile.maxSalary,
@@ -163,7 +183,11 @@ export class MatchExternalJobUseCase {
 
     const jobContext: JobContext = {
       remoteType: job.remoteType ?? 'ON_SITE',
-      location: job.location,
+      // Resolved from whatever the job page said ("Toul Kork, Phnom Penh"). Null when it
+      // named nowhere we know — the scorer then reports location as not measured rather
+      // than guessing.
+      place: this.locations.resolveText(job.location),
+      locationLabel: job.location,
       // The external posting's salary is unknown; fall back to what we know
       // about this company's other roles so the salary sub-score isn't blind.
       minSalary: company?.minSalary ?? null,

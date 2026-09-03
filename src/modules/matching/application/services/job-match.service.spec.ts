@@ -8,6 +8,7 @@
 
 import { JobMatchService } from './job-match.service';
 import { ComputeMatchScoreUseCase } from '../use-cases/compute-match-score.use-case';
+import { stubLocationResolver } from '../../../location/location-resolver.stub';
 
 describe('JobMatchService', () => {
   const profile = {
@@ -65,6 +66,7 @@ describe('JobMatchService', () => {
       new ComputeMatchScoreUseCase(),
       recompute,
       activeResume,
+      stubLocationResolver(),
     );
   };
 

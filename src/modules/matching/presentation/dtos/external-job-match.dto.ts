@@ -49,7 +49,15 @@ export class ExternalJobMatchQueryDto {
 export class ExternalJobSubScoresDto {
   @ApiProperty() skills!: number;
   @ApiProperty() experience!: number;
-  @ApiProperty() location!: number;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'NULL when location could not be measured (unresolvable place on either side). ' +
+      'Excluded from `overall` rather than scored as a neutral value — render it as ' +
+      '"not computed", the way `semantic: false` is handled for skills.',
+  })
+  location!: number | null;
   @ApiProperty() salary!: number;
   @ApiProperty({ description: 'Industry alignment (weight 10%)' })
   other!: number;
