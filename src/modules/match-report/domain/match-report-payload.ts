@@ -58,7 +58,15 @@ export interface ReportMatchRate {
   overall: number | null;
   subScores: {
     skills: number;
-    experience: number;
+    /**
+     * Null when seniority could not be measured — the posting stated none, and no
+     * years-based requirement was found either. Excluded from `overall` rather than
+     * scored as a neutral value, the same contract as `location` below.
+     *
+     * When `experience.basis` is REQUIREMENT this is the years comparison and is always a
+     * number; under CV_DEPTH it is the scorer's ladder result, which can be null.
+     */
+    experience: number | null;
     /**
      * Null when location could not be measured — the profile or the posting named a
      * place that could not be resolved. Excluded from `overall` rather than scored as a

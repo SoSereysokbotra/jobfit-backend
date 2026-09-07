@@ -136,6 +136,11 @@ export class RecommendationsQueryService {
    * Reads the profile's own embedding columns rather than asking the AI service: the
    * question is "is THIS USER matchable", which is a fact about their row, not about
    * whether the AI happens to be up this second.
+   *
+   * The one exception is the constraint check below, which has to ask retrieval — "would
+   * there be anything here without your filter" is not answerable from the profile row.
+   * It costs two pgvector queries and is skipped entirely for candidates who set no hard
+   * constraint, which is nearly everyone.
    */
   async getReadiness(userId: string): Promise<MatchReadinessDto> {
     const [row] = await this.prisma.$queryRawUnsafe<
@@ -166,6 +171,34 @@ export class RecommendationsQueryService {
     // A usable vector is the real test. Status is how we got here; the vector is whether
     // matching can run at all — and a stale-but-present vector still matches.
     if (row.hasEmbedding) {
+      // Matching CAN run. Before calling that READY, check whether the candidate's own
+      // hard filter is what emptied the list: "remote only" is now enforced in retrieval,
+      // and 4 of 368 published jobs are REMOTE, so retrieving nothing is a legitimate
+      // outcome of a setting they chose — not a verdict on them.
+      //
+      // The test is deliberately narrow: the constrained retrieval found NOTHING and the
+      // unconstrained one found something. That is the only case where the constraint is
+      // provably the cause. If both are empty the filter is not what is wrong, and
+      // blaming it would send the user to relax a setting that would not help.
+      const impact = await this.recompute.constraintImpact(userId);
+      if (
+        impact.remoteOnly &&
+        impact.matchedWithConstraints === 0 &&
+        impact.matchedWithout > 0
+      ) {
+        return new MatchReadinessDto({
+          state: 'NO_MATCHES_FOR_CONSTRAINTS',
+          message:
+            'We could not find any remote roles for you right now. Allowing hybrid or ' +
+            'on-site work would open up more matches.',
+          transient: false,
+          action: 'WIDEN_PREFERENCES',
+          constraints: ['REMOTE_ONLY'],
+          matchedIgnoringConstraints: impact.matchedWithout,
+          embeddedAt: row.embeddedAt?.toISOString(),
+        });
+      }
+
       return new MatchReadinessDto({
         state: 'READY',
         message: 'Your profile is ready for matching.',

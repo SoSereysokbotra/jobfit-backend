@@ -22,6 +22,31 @@
 import { CandidateContext, JobContext } from './types';
 
 /**
+ * Would this candidate take a remote job?
+ *
+ * An EMPTY list is "no preference stated", not "no". Only an explicit list that omits
+ * REMOTE is a refusal.
+ */
+export function acceptsRemote(desiredRemoteTypes: string[]): boolean {
+  return desiredRemoteTypes.length === 0 || desiredRemoteTypes.includes('REMOTE');
+}
+
+/**
+ * Does this candidate work remotely and ONLY remotely?
+ *
+ * The hard-constraint case: they ticked REMOTE and nothing else on a multi-select, which
+ * is an explicit, exclusive statement — someone who would also take hybrid ticks hybrid.
+ * Retrieval treats this as a filter rather than a preference; see
+ * RecomputeUserMatchesUseCase.
+ */
+export function isRemoteOnly(desiredRemoteTypes: string[]): boolean {
+  return (
+    desiredRemoteTypes.length > 0 &&
+    desiredRemoteTypes.every((type) => type === 'REMOTE')
+  );
+}
+
+/**
  * The ladder. Each rung answers "how much geography do these two share?".
  *
  * The gaps between rungs are the point: under the old scorer a Bangkok job and a Siem
@@ -47,12 +72,31 @@ export const LOCATION_SCORES = {
  * failure this scorer was rewritten to remove.
  */
 export function scoreLocation(
-  candidate: Pick<CandidateContext, 'place'>,
+  candidate: Pick<CandidateContext, 'place' | 'desiredRemoteTypes'>,
   job: Pick<JobContext, 'remoteType' | 'place'>,
 ): number | null {
-  // Remote is a property of the job alone — it needs neither side resolved, and is
-  // answerable even for a candidate whose location we never learned.
-  if (job.remoteType === 'REMOTE') return LOCATION_SCORES.remote;
+  // A remote job removes the geography problem — but only for someone who is willing to
+  // work remotely. This used to be unconditional, which handed a PERFECT location score
+  // to every remote posting for every candidate, including the ones who had explicitly
+  // asked for on-site work. `desiredRemoteTypes` was collected from those users, stored,
+  // and read by nothing: not this scorer, not retrieval. The visible effect was remote
+  // postings floating to the top of everybody's list on an unearned 100 — in the
+  // location-fix measurement run, "Remote (US)" ranked 4th for a Phnom Penh profile and
+  // 4th again for a San Francisco one, identically, because the score had nothing to do
+  // with either of them.
+  //
+  // An empty preference list means the user never said, so the old reading still stands:
+  // remote suits a candidate who has expressed no view.
+  if (job.remoteType === 'REMOTE' && acceptsRemote(candidate.desiredRemoteTypes)) {
+    return LOCATION_SCORES.remote;
+  }
+
+  // A remote job for someone who does NOT want remote falls through to the ordinary
+  // geographic comparison rather than taking a fabricated penalty. If the posting names a
+  // place, that place is compared like any other; if it names none, the answer is null —
+  // not measured. Inventing a mismatch number here would be the same error as the
+  // neutral-50 this scorer was rewritten to remove: the retrieval filter is where a hard
+  // "remote only" preference is enforced, honestly and visibly, not a magic constant.
 
   const here = candidate.place;
   const there = job.place;

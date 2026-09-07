@@ -4,7 +4,7 @@ import { ActiveResumeService } from '../../../resume/application/services/active
 import { AiClient } from '@infra/ai/ai.client';
 import { CandidateContext, JobContext, SubScores } from '../../domain/scoring/types';
 import { cosineSimilarity } from '../../domain/scoring/skills-scorer';
-import { scoreExperience } from '../../domain/scoring/experience-scorer';
+import { scoreExperience, deriveJobLevel } from '../../domain/scoring/experience-scorer';
 import { scoreLocation } from '../../domain/scoring/location-scorer';
 import { scoreSalary } from '../../domain/scoring/salary-scorer';
 import {
@@ -43,12 +43,14 @@ function externalSkillsScore(cosineSim: number): number {
  */
 function fieldForwardScore(
   skills: number,
-  experience: number,
+  experience: number | null,
   location: number | null,
 ): number {
   // An unresolved location is DROPPED and the remaining weights rescaled — not scored as
   // a neutral value. See `blendMeasured`. With location null this becomes skills ~0.88 /
   // experience ~0.12, preserving their relative importance rather than deflating the total.
+  // `experience` is nullable for the same reason: an external posting whose title states
+  // no seniority was never compared against one.
   return (
     blendMeasured([
       [skills, 0.75],
@@ -188,6 +190,9 @@ export class MatchExternalJobUseCase {
       // than guessing.
       place: this.locations.resolveText(job.location),
       locationLabel: job.location,
+      // An external posting has no structured level, so this is the title heuristic
+      // alone — and null whenever the title says nothing, which the blend then drops.
+      requiredLevel: deriveJobLevel({ title: job.title }),
       // The external posting's salary is unknown; fall back to what we know
       // about this company's other roles so the salary sub-score isn't blind.
       minSalary: company?.minSalary ?? null,
@@ -203,7 +208,7 @@ export class MatchExternalJobUseCase {
     const skills = semantic ? externalSkillsScore(cosineSim) : SKILLS_NOT_MEASURED;
     const breakdown: SubScores = {
       skills,
-      experience: scoreExperience(candidate),
+      experience: scoreExperience(candidate, jobContext),
       location: scoreLocation(candidate, jobContext),
       salary: scoreSalary(candidate, jobContext),
       other: scoreOther(candidate, jobContext),

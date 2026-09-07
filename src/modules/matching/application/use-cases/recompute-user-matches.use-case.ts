@@ -7,7 +7,12 @@ import { logAiFallback } from '@infra/ai/ai-degradation.logger';
 import { ActiveResumeService } from '../../../resume/application/services/active-resume.service';
 import { ComputeMatchScoreUseCase } from './compute-match-score.use-case';
 import { CandidateContext, JobContext, SubScores } from '../../domain/scoring/types';
-import { scoreLocation, LOCATION_SCORES } from '../../domain/scoring/location-scorer';
+import {
+  scoreLocation,
+  isRemoteOnly,
+  LOCATION_SCORES,
+} from '../../domain/scoring/location-scorer';
+import { deriveJobLevel } from '../../domain/scoring/experience-scorer';
 import { LocationResolverService } from '../../../location/location-resolver.service';
 import { ResolvedPlace } from '../../../location/location.types';
 import { reciprocalRankFusion } from '../../domain/rrf';
@@ -25,6 +30,19 @@ export interface ScoredJob {
   score: number;
   breakdown: SubScores;
   reasonExplanation: string;
+}
+
+/**
+ * What the candidate's own hard filters are costing them, for the readiness endpoint.
+ * See {@link RecomputeUserMatchesUseCase.constraintImpact}.
+ */
+export interface ConstraintImpact {
+  /** Whether the candidate stated remote-only — the one hard constraint today. */
+  remoteOnly: boolean;
+  /** Candidates retrieved WITH the constraint applied. Zero is the interesting case. */
+  matchedWithConstraints: number;
+  /** Candidates retrieved ignoring it — what relaxing the setting would give back. */
+  matchedWithout: number;
 }
 
 export interface RetrievalOptions {
@@ -59,6 +77,9 @@ interface CandidateRetrieval {
   remoteOnly: boolean; // metadata pre-filter: candidate wants remote only
   /** Where the candidate is, resolved. Null when unset or unrecognised. */
   place: ResolvedPlace | null;
+  /** Raw stated arrangement preference, so the location list scores it exactly as the
+   *  scorer does — a remote posting is only a location "win" for someone open to remote. */
+  desiredRemoteTypes: string[];
 }
 
 // How many candidates each retriever (dense, sparse) contributes to the fusion.
@@ -244,6 +265,9 @@ export class RecomputeUserMatchesUseCase {
         location: true,
         minSalary: true,
         maxSalary: true,
+        // Structured seniority when the posting carries one; `deriveJobLevel` falls back
+        // to the title, which is where the signal actually is (29% vs 0.3% coverage).
+        experienceLevel: true,
         // `city`/`country` back the location fallback below.
         company: { select: { industry: true, city: true, country: true } },
       },
@@ -271,6 +295,7 @@ export class RecomputeUserMatchesUseCase {
           this.locations.resolveText(job.location) ??
           this.locations.resolveStructured(job.company?.city, job.company?.country),
         locationLabel: job.location,
+        requiredLevel: deriveJobLevel(job),
         minSalary: job.minSalary,
         maxSalary: job.maxSalary,
         industry: job.company?.industry
@@ -331,8 +356,19 @@ export class RecomputeUserMatchesUseCase {
     // Metadata pre-filter is OPT-IN and OFF by default: measured to trade ~11%
     // recall for +MRR on the eval set, and recall is the priority. Kept as a
     // measurable capability (valuable at scale) but not enabled in production.
+    //
+    // REMOTE-ONLY IS EXEMPT FROM THAT FLAG, and that is the fix for a preference nobody
+    // was reading. The flag bundles two filters that are not the same kind of thing: the
+    // salary floor INFERS what a candidate would accept, while "remote only" is a
+    // constraint they stated explicitly on a multi-select. Welding them to one boolean
+    // meant honouring the stated one required also enabling the inferred one — which had
+    // been measured to cost ~11% recall (commit 5a3b9da) and so was left off. The
+    // preference was not rejected on its merits; it was collateral. Salary stays behind
+    // the flag, untouched.
     const filterCand: CandidateRetrieval =
-      opts.filter === true ? cand : { ...cand, minSalary: null, remoteOnly: false };
+      opts.filter === true
+        ? cand
+        : { ...cand, minSalary: null, remoteOnly: cand.remoteOnly };
 
     // A wider dense/sparse pool only pays for itself when there is a third list to
     // corroborate against — see RETRIEVAL_POOL_WITH_LOCATION.
@@ -570,7 +606,10 @@ export class RecomputeUserMatchesUseCase {
       },
     });
 
-    const candidate = { place };
+    // Same shape the scorer receives, so a job ranked here as a location win is one that
+    // scores as a location win. Passing the preference is what stops a remote posting
+    // being promoted for a candidate who asked for on-site work.
+    const candidate = { place, desiredRemoteTypes: cand.desiredRemoteTypes };
     return jobs
       .map((job) => ({
         id: job.id,
@@ -590,6 +629,46 @@ export class RecomputeUserMatchesUseCase {
       .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
       .slice(0, limit)
       .map((row) => row.id);
+  }
+
+  /**
+   * Did this candidate's OWN hard filter empty their list, and how much would relaxing it
+   * give them back?
+   *
+   * DIAGNOSTIC ONLY — feeds the readiness endpoint's explanation of an empty list, never
+   * the recommendations themselves. Deliberately NOT `retrieveRankedJobs`: that fuses
+   * three retrievers and can call the LLM reranker, and none of that is needed to answer
+   * "would there be anything here without the filter". This is two pgvector queries.
+   *
+   * Returns `remoteOnly: false` immediately for everyone else, so the common caller pays
+   * one small profile read and nothing more.
+   *
+   * The counts saturate at RETRIEVAL_POOL — they answer "is there anything, and roughly
+   * how much", not "exactly how many". `matchedIgnoringConstraints` is documented to the
+   * client as a floor for that reason.
+   */
+  async constraintImpact(userId: string): Promise<ConstraintImpact> {
+    const profile = await this.prisma.profile.findUnique({
+      where: { userId },
+      select: { desiredRemoteTypes: true, minSalary: true },
+    });
+    if (!profile || !isRemoteOnly(profile.desiredRemoteTypes)) {
+      return { remoteOnly: false, matchedWithConstraints: 0, matchedWithout: 0 };
+    }
+
+    // The salary floor stays suppressed on BOTH sides: it is not enabled in production,
+    // so counting with it would describe a pipeline the user is not actually running.
+    const base = { queryText: '', minSalary: null, place: null, desiredRemoteTypes: [] };
+    const [withConstraint, without] = await Promise.all([
+      this.denseCandidates(userId, RETRIEVAL_POOL, { ...base, remoteOnly: true }),
+      this.denseCandidates(userId, RETRIEVAL_POOL, { ...base, remoteOnly: false }),
+    ]);
+
+    return {
+      remoteOnly: true,
+      matchedWithConstraints: withConstraint.length,
+      matchedWithout: without.length,
+    };
   }
 
   /** Cosine similarity for a specific set of jobs (for BM25-only hits). */
@@ -645,7 +724,10 @@ export class RecomputeUserMatchesUseCase {
       queryText: parts.join(' ').slice(0, 2000),
       minSalary: profile?.minSalary ?? null,
       // Only a hard remote requirement (wants remote, nothing else) triggers the filter.
-      remoteOnly: remoteTypes.length > 0 && remoteTypes.every((t) => t === 'REMOTE'),
+      // Shared with the scorer so retrieval and scoring cannot disagree about what the
+      // preference means.
+      remoteOnly: isRemoteOnly(remoteTypes),
+      desiredRemoteTypes: remoteTypes,
       // Null for a profile with no location, or one naming a place the table does not
       // know; the location retriever is simply skipped then.
       place: this.locations.resolveStructured(profile?.city, profile?.country),

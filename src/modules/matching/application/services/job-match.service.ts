@@ -21,6 +21,7 @@ import { ComputeMatchScoreUseCase } from '../use-cases/compute-match-score.use-c
 import { RecomputeUserMatchesUseCase } from '../use-cases/recompute-user-matches.use-case';
 import { CandidateContext, JobContext, SubScores } from '../../domain/scoring/types';
 import { LocationResolverService } from '../../../location/location-resolver.service';
+import { deriveJobLevel } from '../../domain/scoring/experience-scorer';
 
 export interface JobMatchResult {
   /** 0-100 weighted total. */
@@ -68,6 +69,8 @@ export class JobMatchService {
           location: true,
           minSalary: true,
           maxSalary: true,
+          // Structured seniority; `deriveJobLevel` falls back to the title.
+          experienceLevel: true,
           // `city`/`country` back the location fallback below: an internal job whose
           // own `location` is blank still happens somewhere — at its company.
           company: { select: { industry: true, city: true, country: true } },
@@ -99,6 +102,7 @@ export class JobMatchService {
         this.locations.resolveText(job.location) ??
         this.locations.resolveStructured(job.company?.city, job.company?.country),
       locationLabel: job.location,
+      requiredLevel: deriveJobLevel(job),
       minSalary: job.minSalary,
       maxSalary: job.maxSalary,
       industry: job.company?.industry ?? null,
