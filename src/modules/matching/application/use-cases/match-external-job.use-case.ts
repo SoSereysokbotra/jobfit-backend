@@ -9,7 +9,6 @@ import { scoreLocation } from '../../domain/scoring/location-scorer';
 import { scoreSalary } from '../../domain/scoring/salary-scorer';
 import {
   blendMeasured,
-  scoreOther,
   weightedMatch,
 } from '../../domain/scoring/weighted-match.calculator';
 import { LocationResolverService } from '../../../location/location-resolver.service';
@@ -161,7 +160,6 @@ export class MatchExternalJobUseCase {
         desiredRemoteTypes: true,
         minSalary: true,
         maxSalary: true,
-        desiredIndustries: true,
       },
     });
     // No profile means we have nothing to match against — the caller turns this
@@ -175,7 +173,6 @@ export class MatchExternalJobUseCase {
       desiredRemoteTypes: profile.desiredRemoteTypes,
       minSalary: profile.minSalary,
       maxSalary: profile.maxSalary,
-      desiredIndustries: profile.desiredIndustries,
       experienceCount: await this.experienceCount(userId),
     };
 
@@ -192,7 +189,6 @@ export class MatchExternalJobUseCase {
       // about this company's other roles so the salary sub-score isn't blind.
       minSalary: company?.minSalary ?? null,
       maxSalary: company?.maxSalary ?? null,
-      industry: company?.industry ?? null,
     };
 
     const { cosineSim, semantic } = await this.semanticSimilarity(userId, job);
@@ -206,7 +202,6 @@ export class MatchExternalJobUseCase {
       experience: scoreExperience(candidate),
       location: scoreLocation(candidate, jobContext),
       salary: scoreSalary(candidate, jobContext),
-      other: scoreOther(candidate, jobContext),
     };
 
     // With company data (salary/industry meaningful) the full calibrated blend applies;
@@ -267,7 +262,7 @@ export class MatchExternalJobUseCase {
   private async findCompany(name: string) {
     const company = await this.prisma.company.findFirst({
       where: { name: { equals: name.trim(), mode: 'insensitive' } },
-      select: { id: true, industry: true },
+      select: { id: true },
     });
     if (!company) return null;
 
@@ -279,7 +274,6 @@ export class MatchExternalJobUseCase {
       _max: { maxSalary: true },
     });
     return {
-      industry: company.industry,
       minSalary: agg._min.minSalary,
       maxSalary: agg._max.maxSalary,
     };

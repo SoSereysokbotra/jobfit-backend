@@ -4,10 +4,7 @@ import { scoreSkills } from '../../domain/scoring/skills-scorer';
 import { scoreExperience } from '../../domain/scoring/experience-scorer';
 import { scoreLocation } from '../../domain/scoring/location-scorer';
 import { scoreSalary } from '../../domain/scoring/salary-scorer';
-import {
-  scoreOther,
-  weightedMatch,
-} from '../../domain/scoring/weighted-match.calculator';
+import { weightedMatch } from '../../domain/scoring/weighted-match.calculator';
 
 export interface MatchResult {
   score: number;
@@ -31,7 +28,6 @@ export class ComputeMatchScoreUseCase {
       experience: scoreExperience(params.candidate),
       location: scoreLocation(params.candidate, params.job),
       salary: scoreSalary(params.candidate, params.job),
-      other: scoreOther(params.candidate, params.job),
     };
     return { score: weightedMatch(breakdown), breakdown };
   }

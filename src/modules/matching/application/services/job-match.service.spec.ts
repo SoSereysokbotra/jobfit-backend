@@ -83,7 +83,7 @@ describe('JobMatchService', () => {
 
     expect(result!.score).toBeGreaterThan(0);
     expect(Object.keys(result!.breakdown).sort()).toEqual([
-      'experience', 'location', 'other', 'salary', 'skills',
+      'experience', 'location', 'salary', 'skills',
     ]);
     // Driven by the embedding similarity, not a constant.
     expect(result!.breakdown.skills).toBeGreaterThan(0);
