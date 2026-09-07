@@ -20,7 +20,6 @@ export class MatchBreakdownDto {
   })
   location: number | null;
   @ApiProperty() salary: number;
-  @ApiProperty() other: number;
 }
 
 export class JobMatchDto {

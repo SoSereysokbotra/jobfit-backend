@@ -57,7 +57,6 @@ export class JobMatchService {
           desiredRemoteTypes: true,
           minSalary: true,
           maxSalary: true,
-          desiredIndustries: true,
         },
       }),
       this.prisma.job.findUnique({
@@ -70,7 +69,7 @@ export class JobMatchService {
           maxSalary: true,
           // `city`/`country` back the location fallback below: an internal job whose
           // own `location` is blank still happens somewhere — at its company.
-          company: { select: { industry: true, city: true, country: true } },
+          company: { select: { city: true, country: true } },
         },
       }),
     ]);
@@ -86,7 +85,6 @@ export class JobMatchService {
       desiredRemoteTypes: profile.desiredRemoteTypes,
       minSalary: profile.minSalary,
       maxSalary: profile.maxSalary,
-      desiredIndustries: profile.desiredIndustries,
       experienceCount: await this.experienceCount(userId),
     };
     const jobCtx: JobContext = {
@@ -101,7 +99,6 @@ export class JobMatchService {
       locationLabel: job.location,
       minSalary: job.minSalary,
       maxSalary: job.maxSalary,
-      industry: job.company?.industry ?? null,
     };
 
     const { score, breakdown } = this.compute.execute({ candidate, job: jobCtx, cosineSim });

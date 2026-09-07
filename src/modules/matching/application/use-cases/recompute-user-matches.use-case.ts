@@ -185,7 +185,6 @@ export class RecomputeUserMatchesUseCase {
         desiredRemoteTypes: true,
         minSalary: true,
         maxSalary: true,
-        desiredIndustries: true,
       },
     });
     if (!profile) return null;
@@ -195,7 +194,6 @@ export class RecomputeUserMatchesUseCase {
       desiredRemoteTypes: profile.desiredRemoteTypes,
       minSalary: profile.minSalary,
       maxSalary: profile.maxSalary,
-      desiredIndustries: profile.desiredIndustries,
       experienceCount: await this.experienceCount(userId),
     };
 
@@ -209,18 +207,10 @@ export class RecomputeUserMatchesUseCase {
         minSalary: true,
         maxSalary: true,
         // `city`/`country` back the location fallback below.
-        company: { select: { industry: true, city: true, country: true } },
+        company: { select: { city: true, country: true } },
       },
     });
     const jobById = new Map(jobs.map((j) => [j.id, j]));
-    // `companies.industry` is an Industry ID; the candidate's desiredIndustries are
-    // NAMES. Resolving here is what makes scoreOther's match branch reachable at all —
-    // comparing the raw id could never equal a name, and measured 0 matches across the
-    // whole database.
-    const industryNameById = await this.industryNames(
-      jobs.map((j) => j.company?.industry).filter((i): i is string => !!i),
-    );
-
     const scored: ScoredJob[] = [];
     for (const row of near) {
       const job = jobById.get(row.id);
@@ -237,9 +227,6 @@ export class RecomputeUserMatchesUseCase {
         locationLabel: job.location,
         minSalary: job.minSalary,
         maxSalary: job.maxSalary,
-        industry: job.company?.industry
-          ? (industryNameById.get(job.company.industry) ?? null)
-          : null,
       };
       const { score, breakdown } = this.compute.execute({
         candidate,

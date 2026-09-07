@@ -110,16 +110,19 @@ export class GenerationController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Generate a cover letter for an external job (browser extension). Paid plan ' +
-      'required; composed from the user’s résumé + the job’s title/company (no stored ' +
-      'application).',
+      'Generate a cover letter for an external job (browser extension). Composed from ' +
+      'the user’s résumé + the job’s title/company (no stored application).',
   })
-  @ApiForbiddenResponse({ description: 'Requires a Premium or Professional plan.' })
   async extensionCoverLetter(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: ExtCoverLetterDto,
   ): Promise<ExtCoverLetterResponseDto> {
-    await this.entitlements.requirePaidPlan(user.id);
+    // NO PAID-PLAN GATE — removed 2026-09-07. There is no billing in this product, so
+    // `requirePaidPlan` could never be satisfied by anyone: every user is FREE and always
+    // will be. It threw 403 on every call, and the extension surfaced that as
+    // "Log in to JobFit to generate" — telling a signed-in user to sign in, with no
+    // action that could ever fix it. An unreachable gate is not a gate, it is an outage.
+    // Re-add this when a plan can actually be purchased.
     const result = await this.generation.coverLetterForExternalJob(
       user.id,
       dto.role ?? '',
@@ -133,18 +136,16 @@ export class GenerationController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Interview prep for an external job (browser extension). Paid plan required; ' +
-      'questions from the job title, mapped to question-type shares + a top-questions ' +
-      'list.',
+      'Interview prep for an external job (browser extension). Questions from the job ' +
+      'title, mapped to question-type shares + a top-questions list.',
   })
-  @ApiForbiddenResponse({ description: 'Requires a Premium or Professional plan.' })
   async extensionInterview(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: ExtInterviewDto,
   ): Promise<ExtInterviewResponseDto> {
-    // This route does not otherwise need the user — the questions come from the job
-    // title alone. It needs them to answer "may you run this at all".
-    await this.entitlements.requirePaidPlan(user.id);
+    // NO PAID-PLAN GATE — removed 2026-09-07, same reason as the cover-letter route
+    // above: there is no billing, so nobody can ever satisfy it. The questions come from
+    // the job title alone, so this route does not otherwise need the user at all.
     const result = await this.generation.interviewForExternalJob(dto.role ?? '');
     const total = result.questions.length || 1;
     const byCategory = new Map<string, number>();

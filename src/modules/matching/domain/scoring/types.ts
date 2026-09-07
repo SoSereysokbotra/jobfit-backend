@@ -16,7 +16,6 @@ export interface CandidateContext {
   desiredRemoteTypes: string[]; // RemoteType[] e.g. ["REMOTE","HYBRID"]
   minSalary: number | null;
   maxSalary: number | null;
-  desiredIndustries: string[]; // Industry ids
   experienceCount: number; // # of experience entries we know about
 }
 
@@ -32,14 +31,6 @@ export interface JobContext {
   locationLabel: string | null;
   minSalary: number | null;
   maxSalary: number | null;
-  /**
-   * The company's industry NAME, already resolved from the `companies.industry` id.
-   *
-   * Passing the raw column here is a bug: it holds an Industry id while
-   * `CandidateContext.desiredIndustries` holds names, so the two can never match. See
-   * scoreOther.
-   */
-  industry: string | null;
 }
 
 export interface SubScores {
@@ -56,5 +47,4 @@ export interface SubScores {
    */
   location: number | null;
   salary: number;
-  other: number;
 }
