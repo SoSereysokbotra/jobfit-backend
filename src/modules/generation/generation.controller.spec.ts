@@ -57,7 +57,13 @@ describe('GenerationController tier gating', () => {
 // caveat" on the assumption there was a working paywall elsewhere; there wasn't, so in
 // practice the paywall was optional if you knew the other URL. A different CLIENT is not
 // a different ENTITLEMENT.
-describe('GenerationController — extension routes are gated too', () => {
+// The two WEB routes stay gated. The two EXTENSION routes were deliberately UNGATED on
+// 2026-09-07: this product has no billing, so `requirePaidPlan` could never be satisfied
+// by anyone — every user is FREE permanently. The gate returned 403 on every call and the
+// extension rendered it as "Log in to JobFit to generate" to an already signed-in user.
+// These tests now pin the intended asymmetry, so re-adding a gate to the extension routes
+// (or dropping one from the web routes) fails loudly rather than silently.
+describe('GenerationController — web routes gated, extension routes open', () => {
   const user = { id: 'u1', email: 'u@x.com', role: 'JOB_SEEKER' } as AuthenticatedUser;
 
   const build = (tier: SubscriptionTier) => {
@@ -78,14 +84,11 @@ describe('GenerationController — extension routes are gated too', () => {
     };
   };
 
-  it('403s the extension cover letter for FREE tier', async () => {
+  it('runs the extension cover letter for a FREE tier — no billing exists to gate on', async () => {
     const { controller, generation } = build(SubscriptionTier.FREE);
 
-    await expect(
-      controller.extensionCoverLetter(user, { role: 'Engineer' } as never),
-    ).rejects.toBeInstanceOf(ForbiddenException);
-    // Refused before the model runs — the GPU cost is the thing being gated.
-    expect(generation.coverLetterForExternalJob).not.toHaveBeenCalled();
+    await controller.extensionCoverLetter(user, { role: 'Engineer' } as never);
+    expect(generation.coverLetterForExternalJob).toHaveBeenCalled();
   });
 
   it('allows the extension cover letter for PREMIUM tier', async () => {
@@ -95,13 +98,11 @@ describe('GenerationController — extension routes are gated too', () => {
     expect(generation.coverLetterForExternalJob).toHaveBeenCalled();
   });
 
-  it('403s extension interview prep for FREE tier', async () => {
+  it('runs extension interview prep for a FREE tier — no billing exists to gate on', async () => {
     const { controller, generation } = build(SubscriptionTier.FREE);
 
-    await expect(
-      controller.extensionInterview(user, { role: 'Engineer' } as never),
-    ).rejects.toBeInstanceOf(ForbiddenException);
-    expect(generation.interviewForExternalJob).not.toHaveBeenCalled();
+    await controller.extensionInterview(user, { role: 'Engineer' } as never);
+    expect(generation.interviewForExternalJob).toHaveBeenCalled();
   });
 
   it('allows extension interview prep for PROFESSIONAL tier', async () => {
@@ -111,9 +112,22 @@ describe('GenerationController — extension routes are gated too', () => {
     expect(generation.interviewForExternalJob).toHaveBeenCalled();
   });
 
-  it('gates every generation route on this controller — none left open', () => {
-    // A new route added here without an entitlement check would reopen the hole. This
-    // asserts the surface, not one path through it.
+  it('still gates the WEB generation routes for a FREE tier', async () => {
+    // Removing the extension gates must not have removed these. They belong to the web
+    // app, where a plan concept still exists in the schema.
+    const { controller } = build(SubscriptionTier.FREE);
+
+    await expect(
+      controller.coverLetter(user, 'app-1', {} as never),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      controller.interview(user, {} as never),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('lists every route on this controller, so a new one cannot slip in unnoticed', () => {
+    // Asserts the surface, not one path through it: a route added here forces a decision
+    // about whether it should be gated.
     const routes = Object.getOwnPropertyNames(GenerationController.prototype).filter(
       (n) => n !== 'constructor',
     );
