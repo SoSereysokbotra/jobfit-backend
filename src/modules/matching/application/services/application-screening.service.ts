@@ -107,7 +107,13 @@ export class ApplicationScreeningService {
 
       const outcome: ScreeningOutcome = {
         screened: true,
-        matchScore: match ? Math.round(match.score) : null,
+        // ROLE FIT, NOT THE OVERALL SCORE, and the distinction matters to the employer.
+        // `match.score` is damped by how well the job suits the CANDIDATE's stated
+        // preferences — remote-only, a salary floor, a preferred contract type. Those are
+        // the applicant's constraints, and this person has already resolved them by
+        // applying. An employer asking "can they do this job?" would otherwise see a
+        // qualified applicant marked down for a commute they evidently accepted.
+        matchScore: match ? Math.round(match.roleFitScore) : null,
         requirementsTotal: gap.requirements.length,
         requirementsCovered: gap.matchedCount,
         missingRequirements: gap.missing,

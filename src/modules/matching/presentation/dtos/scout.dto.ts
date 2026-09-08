@@ -37,11 +37,18 @@ export class ScoutMatchDto {
   @ApiProperty() title!: string;
   @ApiPropertyOptional({ type: String, nullable: true }) company!: string | null;
   /**
-   * ⚠️ ORDERING, NOT DISPLAY — the observed range is 41–69, not 0–100, and human grades
-   * overlap inside it (MENTOR_REVIEW_2026-08-18 §13). `minScore` filters on this, which
-   * is a legitimate use; the badge should render `band`.
+   * ⚠️ ORDERING AND FILTERING, NOT DISPLAY. Since the two-dimensional rewrite this is the
+   * gated composite — capability damped by how well the job fits the candidate's stated
+   * preferences — so it spans 0–100 and a job that breaks a stated preference lands in
+   * the twenties by design. Its magnitude has NOT been calibrated against human grades
+   * (MENTOR_REVIEW_2026-08-18 §13 measured the score it replaced). `minScore` filters on
+   * it, which is legitimate; the badge should render `band`.
    */
-  @ApiProperty({ description: 'Match score. For ordering/filtering — observed range 41–69.' })
+  @ApiProperty({
+    description:
+      'Match score 0–100 (gated composite of role fit and preference fit). For ' +
+      'ordering/filtering; render `band`.',
+  })
   score!: number;
 
   /** What the score is allowed to claim. Render this, not `score`. */

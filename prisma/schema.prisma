@@ -1151,9 +1151,32 @@ model Recommendation {
   jobId  String
   job    Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
-  score             Float // 0-100 weighted total
+  /// 0-100 ranking score. Since the two-dimensional rewrite this is the GATED COMPOSITE
+  /// of `roleFitScore` and `preferenceFitScore`, not a linear sum of the sub-scores —
+  /// same column, same scale, different meaning. Rows written before the rewrite still
+  /// hold the old number; they are recomputed on the next staleness pass, and until then
+  /// `roleFitScore` is NULL, which is how a reader tells the two apart.
+  score             Float
   breakdown         Json? // sub-scores: skills, experience, location, salary
   reasonExplanation String? // human-readable "why this matched"
+
+  /// 0-100 CAPABILITY fit: skills (embedding cosine) + seniority. NULL on rows scored
+  /// before the two-dimensional rewrite.
+  roleFitScore Float?
+
+  /// 0-100 LOGISTICS fit: work arrangement/location, employment type, job level, salary
+  /// against what the candidate explicitly asked for. NULL on pre-rewrite rows.
+  ///
+  /// Stored as its own column rather than inside `breakdown` because it is the number
+  /// that explains a demotion — "you can do this job, it is in the wrong country" — and a
+  /// question like "how many of this user's matches conflict with their preferences?" has
+  /// to be answerable in SQL, which a JSON blob is not.
+  preferenceFitScore Float?
+
+  /// `MatchFlags`: { hasDealbreakerMismatch, warnings[], highlights[] } — the two-way
+  /// summary behind `reasonExplanation`. Kept structured as well as prose so a client can
+  /// render the warnings as their own UI element instead of parsing a sentence.
+  matchFlags Json?
 
   /// Did this job state a location we could actually resolve?
   ///

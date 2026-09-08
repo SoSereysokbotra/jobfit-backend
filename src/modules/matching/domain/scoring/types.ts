@@ -19,10 +19,32 @@ export interface CandidateContext {
   maxSalary: number | null;
   desiredIndustries: string[]; // Industry ids
   experienceCount: number; // # of experience entries we know about
+  /**
+   * `JobLevel[]` the candidate asked for, e.g. ["SENIOR","LEAD"]. Raw enum strings, as
+   * stored on the profile.
+   *
+   * COLLECTED SINCE THE FIRST PROFILE FORM AND READ BY NOTHING until the preference
+   * dimension existed. An EMPTY OR ABSENT list is "never stated", which scores as full
+   * marks — not as a mismatch. Only a non-empty list is a statement.
+   */
+  desiredJobLevels?: string[];
+  /**
+   * `EmploymentType[]` the candidate asked for, e.g. ["FULL_TIME","CONTRACT"]. Same
+   * empty-means-no-preference contract as `desiredJobLevels`.
+   */
+  desiredEmploymentTypes?: string[];
 }
 
 export interface JobContext {
-  remoteType: string; // "REMOTE" | "HYBRID" | "ON_SITE"
+  /**
+   * "REMOTE" | "HYBRID" | "ON_SITE", or NULL/absent when the posting does not say.
+   *
+   * Nullable because the preference dimension has to tell "on-site" apart from "unstated":
+   * the first is a fact to score against a remote-only candidate, the second is nothing to
+   * score at all (see `scoreWorkArrangement`, which returns a neutral 70 for it rather
+   * than a penalty).
+   */
+  remoteType?: string | null;
   /** The job's location, resolved. Null when unknown or unrecognised. */
   place: ResolvedPlace | null;
   /**
@@ -51,6 +73,26 @@ export interface JobContext {
    * scoreOther.
    */
   industry: string | null;
+  /**
+   * `EmploymentType` as the posting states it ("FULL_TIME", "CONTRACT", ...). Null when
+   * the employer did not say — nullable on the `jobs` column for exactly that reason, and
+   * null must not read as FULL_TIME.
+   *
+   * PREFERENCE-DIMENSION INPUT ONLY. It is compared against `desiredEmploymentTypes`; it
+   * never feeds the role/capability score.
+   */
+  employmentType?: string | null;
+  /**
+   * `JobLevel` as the posting states it ("SENIOR", "MID", ...) — the raw structured
+   * column, NOT the resolved `requiredLevel` above.
+   *
+   * The two are deliberately separate. `requiredLevel` answers "how senior is this work?"
+   * and falls back to the title, because capability matching needs an answer for the two
+   * jobs in three that carry no structured level. This one answers "did the employer
+   * state a level the candidate asked for?", and an inference from a title is not a
+   * statement by the employer — so it stays null and scores as unstated (80).
+   */
+  jobLevel?: string | null;
 }
 
 export interface SubScores {
@@ -76,4 +118,47 @@ export interface SubScores {
   location: number | null;
   salary: number;
   other: number;
+}
+
+/**
+ * The two-way honest summary that travels with a score.
+ *
+ * WHY WARNINGS EXIST AT ALL: the previous explanation emitted positive bits only — it
+ * could say "strong skills match, salary in range" about a job that was on-site in
+ * another country for someone who had asked for remote, because nothing in the pipeline
+ * had anywhere to put that fact. A user reading "Strong Match" then discovered the
+ * conflict on the posting itself. Highlights and warnings are produced by the SAME pass,
+ * so a conflict cannot be silently dropped while the compliments survive.
+ */
+export interface MatchFlags {
+  /**
+   * At least one preference the candidate stated is violated outright (a preference
+   * sub-score of 0), rather than merely stretched.
+   */
+  hasDealbreakerMismatch: boolean;
+  /** Logistical conflicts, phrased for a user. Empty when there are none. */
+  warnings: string[];
+  /** What genuinely fits. Empty when there is nothing to claim. */
+  highlights: string[];
+}
+
+/**
+ * One job scored on both dimensions.
+ *
+ * `roleFitScore` and `preferenceFitScore` are ORTHOGONAL on purpose: capability and
+ * logistics answer different questions, and averaging them into one number is what let a
+ * 95% capability match carry a job that violated every stated preference to "70% — Strong
+ * Match". Both are published so a client can show why the composite landed where it did.
+ */
+export interface TwoDimensionalScoreResult {
+  /** 0-100 integer. Gated composite — the ranking key. See `compositeScore`. */
+  overallScore: number;
+  /** 0-100 integer. Capability: skills + seniority against the posting. */
+  roleFitScore: number;
+  /** 0-100 integer. Logistics: arrangement, location, employment type, level, salary. */
+  preferenceFitScore: number;
+  band: 'STRONG' | 'POSSIBLE' | 'WEAK';
+  flags: MatchFlags;
+  /** Human-readable, highlights and warnings in one line. */
+  explanation: string;
 }

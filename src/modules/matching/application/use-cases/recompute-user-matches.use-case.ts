@@ -1,12 +1,19 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import { AiClient } from '@infra/ai/ai.client';
 import { AiServiceError } from '@infra/ai/ai.errors';
 import { logAiFallback } from '@infra/ai/ai-degradation.logger';
 import { ActiveResumeService } from '../../../resume/application/services/active-resume.service';
 import { ComputeMatchScoreUseCase } from './compute-match-score.use-case';
-import { CandidateContext, JobContext, SubScores } from '../../domain/scoring/types';
+import {
+  CandidateContext,
+  JobContext,
+  MatchFlags,
+  SubScores,
+  TwoDimensionalScoreResult,
+} from '../../domain/scoring/types';
 import {
   scoreLocation,
   isRemoteOnly,
@@ -26,9 +33,21 @@ export interface NearJobRow {
 /** One job scored for one user by {@link RecomputeUserMatchesUseCase.scoreJobs}. */
 export interface ScoredJob {
   jobId: string;
-  /** 0-100 weighted total, same scale the recommendations cache stores. */
+  /**
+   * 0-100 ranking score, same scale and same column the recommendations cache has always
+   * stored — but now the GATED COMPOSITE of the two dimensions rather than one linear
+   * weighted sum. A job the candidate cannot take can no longer ride a strong résumé into
+   * the top of the list.
+   */
   score: number;
   breakdown: SubScores;
+  /** 0-100 capability fit (skills + seniority), published alongside the composite. */
+  roleFitScore: number;
+  /** 0-100 logistics fit (arrangement/location, employment type, level, salary). */
+  preferenceFitScore: number;
+  band: TwoDimensionalScoreResult['band'];
+  /** Warnings AND highlights — the conflicts a positive-only explanation used to hide. */
+  flags: MatchFlags;
   reasonExplanation: string;
 }
 
@@ -164,9 +183,21 @@ export class RecomputeUserMatchesUseCase {
     // per-row now() would make them look staggered in the UI.
     const now = new Date();
     const keptJobIds: string[] = [];
-    for (const { jobId, score, breakdown, reasonExplanation } of scored) {
-      // Prisma's Json input wants an index-signature type; SubScores is fixed-shape.
+    for (const {
+      jobId,
+      score,
+      breakdown,
+      roleFitScore,
+      preferenceFitScore,
+      flags,
+      reasonExplanation,
+    } of scored) {
+      // Prisma's Json input wants an index-signature type; SubScores and MatchFlags are
+      // fixed-shape.
       const breakdownJson = breakdown as unknown as Record<string, number>;
+      // `Prisma.InputJsonValue` is the only shape the Json column accepts; MatchFlags is a
+      // fixed-shape interface, which structurally is not one.
+      const flagsJson = flags as unknown as Prisma.InputJsonValue;
       // Did the posting tell us where the work is? Postings that do are shown first —
       // see the `locationKnown` column. This is listing quality, not fit: `score`
       // already carries the fit, and location is null there precisely because nothing
@@ -181,6 +212,13 @@ export class RecomputeUserMatchesUseCase {
         update: {
           score,
           breakdown: breakdownJson,
+          // The two dimensions are stored as COLUMNS, not folded into `breakdown`: a
+          // client showing "role 95 / preferences 12" needs them typed, and a future
+          // query that asks how many recommendations carry a dealbreaker cannot be
+          // written against a JSON blob.
+          roleFitScore,
+          preferenceFitScore,
+          matchFlags: flagsJson,
           locationKnown,
           reasonExplanation,
           computedAt: now,
@@ -191,6 +229,9 @@ export class RecomputeUserMatchesUseCase {
           jobId,
           score,
           breakdown: breakdownJson,
+          roleFitScore,
+          preferenceFitScore,
+          matchFlags: flagsJson,
           locationKnown,
           reasonExplanation,
           computedAt: now,
@@ -243,6 +284,11 @@ export class RecomputeUserMatchesUseCase {
         minSalary: true,
         maxSalary: true,
         desiredIndustries: true,
+        // Both columns have existed since the first profile form and were selected by
+        // NOTHING until the preference dimension: a candidate could tick "Contract" and
+        // "Senior" and every recommendation would be scored as if they had said nothing.
+        desiredEmploymentTypes: true,
+        desiredJobLevels: true,
       },
     });
     if (!profile) return null;
@@ -253,6 +299,8 @@ export class RecomputeUserMatchesUseCase {
       minSalary: profile.minSalary,
       maxSalary: profile.maxSalary,
       desiredIndustries: profile.desiredIndustries,
+      desiredEmploymentTypes: profile.desiredEmploymentTypes,
+      desiredJobLevels: profile.desiredJobLevels,
       experienceCount: await this.experienceCount(userId),
     };
 
@@ -268,6 +316,9 @@ export class RecomputeUserMatchesUseCase {
         // Structured seniority when the posting carries one; `deriveJobLevel` falls back
         // to the title, which is where the signal actually is (29% vs 0.3% coverage).
         experienceLevel: true,
+        // What the employer actually STATED, for the preference dimension. Null is
+        // common and means "not said" — never FULL_TIME.
+        employmentType: true,
         // `city`/`country` back the location fallback below.
         company: { select: { industry: true, city: true, country: true } },
       },
@@ -296,22 +347,33 @@ export class RecomputeUserMatchesUseCase {
           this.locations.resolveStructured(job.company?.city, job.company?.country),
         locationLabel: job.location,
         requiredLevel: deriveJobLevel(job),
+        employmentType: job.employmentType,
+        // The STRUCTURED level only. `requiredLevel` above may have been inferred from
+        // the title for the capability score; telling a user "role level is Senior"
+        // because we read the word in a title would present our guess as the employer's
+        // statement. See JobContext.jobLevel.
+        jobLevel: job.experienceLevel,
         minSalary: job.minSalary,
         maxSalary: job.maxSalary,
         industry: job.company?.industry
           ? (industryNameById.get(job.company.industry) ?? null)
           : null,
       };
-      const { score, breakdown } = this.compute.execute({
+      const result = this.compute.execute({
         candidate,
         job: jobCtx,
         cosineSim: Number(row.cosine_sim),
+        title: job.title,
       });
       scored.push({
         jobId: job.id,
-        score,
-        breakdown,
-        reasonExplanation: this.explain(job.title, breakdown),
+        score: result.score,
+        breakdown: result.breakdown,
+        roleFitScore: result.roleFitScore,
+        preferenceFitScore: result.preferenceFitScore,
+        band: result.band,
+        flags: result.flags,
+        reasonExplanation: result.explanation,
       });
     }
     return scored;
@@ -771,14 +833,15 @@ export class RecomputeUserMatchesUseCase {
     }
   }
 
-  private explain(title: string, b: SubScores): string {
-    const bits: string[] = [];
-    if (b.skills >= 70) bits.push('strong skills match');
-    else if (b.skills >= 45) bits.push('partial skills match');
-    else bits.push('some overlap');
-    // Only claim a location fit when one was actually measured.
-    if (b.location !== null && b.location >= 80) bits.push('location fits');
-    if (b.salary >= 100) bits.push('salary in range');
-    return `${title}: ${bits.join(', ')}.`;
-  }
+  /**
+   * The reason line now comes from `buildExplanation` in the domain, via
+   * `ComputeMatchScoreUseCase` — this method is gone, and its absence is the fix.
+   *
+   * It emitted POSITIVE BITS ONLY. "Backend Engineer: strong skills match, location
+   * fits." was a complete sentence about a job that could be on-site in another country
+   * for someone who had asked for remote, because it read `SubScores` and `SubScores` has
+   * nowhere to put a conflict. Rebuilding the sentence here from the same five numbers
+   * would reproduce that: the warnings exist only on `MatchFlags`, and the one formatter
+   * that sees both halves is the one that must write the line.
+   */
 }

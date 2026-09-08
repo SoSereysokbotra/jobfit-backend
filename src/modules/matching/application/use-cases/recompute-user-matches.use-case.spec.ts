@@ -58,6 +58,39 @@ describe('RecomputeUserMatchesUseCase', () => {
       ]);
     });
 
+    // The two rows this scoring path produces, pinned. Split out of the assertions below
+    // only because the two-dimensional fields made the inline objects unreadable.
+    const PAYLOAD_A = {
+      score: 80,
+      breakdown: { skills: 80, experience: null, location: 100, salary: 50, other: 50 },
+      // Role fit is the skills score alone: no seniority stated, so it rescales to 100%.
+      roleFitScore: 80,
+      // Nothing stated, nothing violated. An empty profile is not a set of conflicts.
+      preferenceFitScore: 100,
+      matchFlags: {
+        hasDealbreakerMismatch: false,
+        warnings: [],
+        highlights: ['Strong skills match (80%)', 'Fully remote'],
+      },
+      locationKnown: true,
+      reasonExplanation: 'Backend Engineer: Strong skills match (80%), Fully remote.',
+    };
+
+    const PAYLOAD_B = {
+      score: 45,
+      breakdown: { skills: 50, experience: null, location: null, salary: 50, other: 50 },
+      roleFitScore: 50,
+      // 70 (arrangement unmeasurable) x .35 + 100 x .25 + 100 x .20, salary excluded.
+      preferenceFitScore: 87,
+      matchFlags: {
+        hasDealbreakerMismatch: false,
+        warnings: [],
+        highlights: ['Partial skills match (50%)'],
+      },
+      locationKnown: false,
+      reasonExplanation: 'Frontend Engineer: Partial skills match (50%).',
+    };
+
     it('persists the exact recommendation payloads and returns the count', async () => {
       const written = await service.execute('u1', 50);
       expect(written).toBe(2);
@@ -70,17 +103,25 @@ describe('RecomputeUserMatchesUseCase', () => {
         // experience is NULL, not 80: "Backend Engineer" states no seniority and this job
         // carries no `experienceLevel`, so no comparison happened. It used to be a
         // function of the candidate alone and returned the same 80 for every job here.
-        update: { score: 76, breakdown: { skills: 80, experience: null, location: 100, salary: 50, other: 50 }, locationKnown: true, reasonExplanation: 'Backend Engineer: strong skills match, location fits.', computedAt: expect.any(Date), staleAt: null },
-        create: { userId: 'u1', jobId: 'jobA', score: 76, breakdown: { skills: 80, experience: null, location: 100, salary: 50, other: 50 }, locationKnown: true, reasonExplanation: 'Backend Engineer: strong skills match, location fits.', computedAt: expect.any(Date) },
+        //
+        // `score` is now the GATED COMPOSITE, and this row is the case where the gate
+        // does nothing: a remote posting, a candidate who stated no preferences at all,
+        // so P is 100 and the composite is exactly the role score.
+        update: { ...PAYLOAD_A, computedAt: expect.any(Date), staleAt: null },
+        create: { userId: 'u1', jobId: 'jobA', ...PAYLOAD_A, computedAt: expect.any(Date) },
       });
       expect(prisma.recommendation.upsert.mock.calls[1][0]).toEqual({
         where: { userId_jobId: { userId: 'u1', jobId: 'jobB' } },
         // location is NULL, not 50: this profile has no city, so no comparison happened.
         // The old scorer returned a neutral 50 here and folded it into the total as if it
-        // were a measurement. It is now dropped and the remaining weights rescaled, which
-        // is why the score is 59 rather than 58.
-        update: { score: 50, breakdown: { skills: 50, experience: null, location: null, salary: 50, other: 50 }, locationKnown: false, reasonExplanation: 'Frontend Engineer: partial skills match.', computedAt: expect.any(Date), staleAt: null },
-        create: { userId: 'u1', jobId: 'jobB', score: 50, breakdown: { skills: 50, experience: null, location: null, salary: 50, other: 50 }, locationKnown: false, reasonExplanation: 'Frontend Engineer: partial skills match.', computedAt: expect.any(Date) },
+        // were a measurement.
+        //
+        // On the preference side the same fact reads as the neutral 70 rather than a
+        // conflict, so P is 87 and this on-site job is damped only slightly — the
+        // candidate never said they would not go on site. Nothing is warned about,
+        // because nothing was measured to warn about.
+        update: { ...PAYLOAD_B, computedAt: expect.any(Date), staleAt: null },
+        create: { userId: 'u1', jobId: 'jobB', ...PAYLOAD_B, computedAt: expect.any(Date) },
       });
 
       // §6: the upsert only ever writes the new top-N, so anything else the user still
@@ -610,7 +651,12 @@ describe('RecomputeUserMatchesUseCase.scoreJobs', () => {
   // free-text city and the job's free-text location into real places before comparing.
   // Every other location test operates on already-resolved inputs.
   it('resolves both sides and grades a foreign job below a local one', async () => {
-    const prisma = buildPrisma(PROFILE);
+    // The candidate here is OPEN TO ON-SITE work. Under the two-dimensional scorer that
+    // is what makes geography decide anything: for a remote-only candidate both of these
+    // postings break the same stated preference and tie (see the test below), which is
+    // the correct answer for someone who cannot take either. `location` in the breakdown
+    // still separates them for display either way.
+    const prisma = buildPrisma({ ...PROFILE, desiredRemoteTypes: ['ON_SITE', 'HYBRID'] });
     prisma.job.findMany = jest.fn().mockResolvedValue([
       {
         id: 'local',
@@ -651,6 +697,47 @@ describe('RecomputeUserMatchesUseCase.scoreJobs', () => {
     // Identical in every other input, so the whole gap comes from geography — which is
     // exactly what the old scorer could not produce: both were 55 there.
     expect(local.score).toBeGreaterThan(foreign.score);
+    // Geography now reaches the ranking through the PREFERENCE dimension, and the foreign
+    // posting is a stated conflict rather than merely a lower number.
+    expect(foreign.preferenceFitScore).toBeLessThan(local.preferenceFitScore);
+    expect(foreign.flags.warnings).toContain(
+      'Located in Thailand (relocation required)',
+    );
+    expect(local.flags.warnings).toEqual([]);
+  });
+
+  // The other half of the same wiring, and a deliberate behaviour change: for a
+  // REMOTE-ONLY candidate the two on-site postings above are equally unavailable, so they
+  // tie on preferences and are both demoted. The old linear score ranked one above the
+  // other on a 15% location sub-score while showing both as acceptable matches — a
+  // ranking among jobs the candidate had said they could not take.
+  it('demotes BOTH on-site jobs for a remote-only candidate, and says why', async () => {
+    const prisma = buildPrisma(PROFILE); // desiredRemoteTypes: ['REMOTE']
+    prisma.job.findMany = jest.fn().mockResolvedValue([
+      { id: 'local', title: 'Backend Engineer', remoteType: 'ON_SITE', location: 'Phnom Penh, Cambodia', minSalary: null, maxSalary: null, company: { industry: null, city: null, country: null } },
+      { id: 'foreign', title: 'Backend Engineer', remoteType: 'ON_SITE', location: 'Bangkok, Thailand', minSalary: null, maxSalary: null, company: { industry: null, city: null, country: null } },
+    ]);
+    const service = new RecomputeUserMatchesUseCase(
+      prisma as never,
+      new ComputeMatchScoreUseCase(),
+      { rerank: jest.fn() } as never,
+      { findActiveResumeId: jest.fn().mockResolvedValue(null) } as never,
+      stubLocationResolver(),
+    );
+
+    const scored = await service.scoreJobs('u1', [
+      { id: 'local', cosine_sim: 0.95 },
+      { id: 'foreign', cosine_sim: 0.95 },
+    ]);
+
+    for (const job of scored!) {
+      expect(job.roleFitScore).toBe(95); // capability is untouched — they CAN do it
+      expect(job.preferenceFitScore).toBe(25); // dealbreaker ceiling
+      expect(job.band).toBe('WEAK');
+      expect(job.flags.hasDealbreakerMismatch).toBe(true);
+      expect(job.flags.warnings).toContain('Requires on-site / hybrid presence');
+      expect(job.reasonExplanation).toContain('— Note:');
+    }
   });
 
   it('scores the jobs it is given, without touching the recommendations cache', async () => {

@@ -59,6 +59,20 @@ const LEVEL_BY_JOB_LEVEL: Record<string, SeniorityLevel> = {
 };
 
 /**
+ * The ladder rung a raw `JobLevel` value names, or null when it names nothing we know.
+ *
+ * Exported so the PREFERENCE dimension measures seniority distance on the same ladder the
+ * capability dimension does. Two ladders would be two answers to "is MID next to SENIOR?",
+ * and they would drift.
+ */
+export function seniorityFromJobLevel(
+  level: string | null | undefined,
+): SeniorityLevel | null {
+  if (!level) return null;
+  return LEVEL_BY_JOB_LEVEL[level.trim().toUpperCase()] ?? null;
+}
+
+/**
  * Title patterns, most specific first — the first hit wins.
  *
  * ORDER MATTERS because ingested titles concatenate roles ("Admin and Operations Manager,

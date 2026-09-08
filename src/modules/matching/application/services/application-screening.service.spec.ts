@@ -35,7 +35,7 @@ describe('ApplicationScreeningService', () => {
     const jobMatch: any = {
       matchForJob: jest
         .fn()
-        .mockResolvedValue('match' in opts ? opts.match : { score: 72.4 }),
+        .mockResolvedValue('match' in opts ? opts.match : { score: 60, roleFitScore: 72.4 }),
     };
     const skillGap: any = {
       analyse: jest.fn().mockResolvedValue(
@@ -94,7 +94,7 @@ describe('ApplicationScreeningService', () => {
     // A pipeline built on a small model's reading of a CV must not end an application.
     const { service, transitions } = build({
       gap: { requirements: [{}, {}], matchedCount: 0, missing: ['a', 'b'], requirementsSource: 'EMPLOYER' },
-      match: { score: 3 },
+      match: { score: 2, roleFitScore: 3 },
     });
 
     await service.screen('a1');

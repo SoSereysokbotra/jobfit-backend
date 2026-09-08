@@ -19,14 +19,27 @@ import { PrismaService } from '@infra/prisma/prisma.service';
 import { ActiveResumeService } from '../../../resume/application/services/active-resume.service';
 import { ComputeMatchScoreUseCase } from '../use-cases/compute-match-score.use-case';
 import { RecomputeUserMatchesUseCase } from '../use-cases/recompute-user-matches.use-case';
-import { CandidateContext, JobContext, SubScores } from '../../domain/scoring/types';
+import {
+  CandidateContext,
+  JobContext,
+  MatchFlags,
+  SubScores,
+  TwoDimensionalScoreResult,
+} from '../../domain/scoring/types';
 import { LocationResolverService } from '../../../location/location-resolver.service';
 import { deriveJobLevel } from '../../domain/scoring/experience-scorer';
 
 export interface JobMatchResult {
-  /** 0-100 weighted total. */
+  /** 0-100 overall score: the gated composite of the two dimensions below. */
   score: number;
   breakdown: SubScores;
+  /** 0-100 capability fit (skills + seniority). */
+  roleFitScore: number;
+  /** 0-100 logistics fit against the candidate's stated preferences. */
+  preferenceFitScore: number;
+  band: TwoDimensionalScoreResult['band'];
+  /** Warnings and highlights — the conflicts the sub-score lines cannot express. */
+  flags: MatchFlags;
   /** Plain statements derived from the sub-scores. Never invented. */
   reasons: string[];
   /**
@@ -59,6 +72,12 @@ export class JobMatchService {
           minSalary: true,
           maxSalary: true,
           desiredIndustries: true,
+          // The preference dimension needs what the candidate actually asked for. Missing
+          // here and present in the recommendations pipeline would make this page and the
+          // list disagree about the same job — the one thing this service exists to
+          // prevent.
+          desiredEmploymentTypes: true,
+          desiredJobLevels: true,
         },
       }),
       this.prisma.job.findUnique({
@@ -71,6 +90,8 @@ export class JobMatchService {
           maxSalary: true,
           // Structured seniority; `deriveJobLevel` falls back to the title.
           experienceLevel: true,
+          // Stated employment type, for the preference dimension. Null means unsaid.
+          employmentType: true,
           // `city`/`country` back the location fallback below: an internal job whose
           // own `location` is blank still happens somewhere — at its company.
           company: { select: { industry: true, city: true, country: true } },
@@ -90,6 +111,8 @@ export class JobMatchService {
       minSalary: profile.minSalary,
       maxSalary: profile.maxSalary,
       desiredIndustries: profile.desiredIndustries,
+      desiredEmploymentTypes: profile.desiredEmploymentTypes,
+      desiredJobLevels: profile.desiredJobLevels,
       experienceCount: await this.experienceCount(userId),
     };
     const jobCtx: JobContext = {
@@ -103,17 +126,35 @@ export class JobMatchService {
         this.locations.resolveStructured(job.company?.city, job.company?.country),
       locationLabel: job.location,
       requiredLevel: deriveJobLevel(job),
+      employmentType: job.employmentType,
+      // Structured level only — see JobContext.jobLevel. `requiredLevel` above may be an
+      // inference from the title, and an inference must not be quoted back to the user as
+      // the employer's statement.
+      jobLevel: job.experienceLevel,
       minSalary: job.minSalary,
       maxSalary: job.maxSalary,
       industry: job.company?.industry ?? null,
     };
 
-    const { score, breakdown } = this.compute.execute({ candidate, job: jobCtx, cosineSim });
+    const result = this.compute.execute({
+      candidate,
+      job: jobCtx,
+      cosineSim,
+      title: job.title,
+    });
 
     return {
-      score,
-      breakdown,
-      reasons: this.explain(breakdown, candidate, jobCtx),
+      score: result.score,
+      breakdown: result.breakdown,
+      roleFitScore: result.roleFitScore,
+      preferenceFitScore: result.preferenceFitScore,
+      band: result.band,
+      flags: result.flags,
+      // The sub-score statements STAY, and the warnings are added to them rather than
+      // replacing them: this panel answers "why this number?" line by line, and the
+      // preference conflicts are the lines it never had. A conflict the list view warns
+      // about and the detail page does not mention is the same silence in a new place.
+      reasons: [...this.explain(result.breakdown, candidate, jobCtx), ...result.flags.warnings],
       skillsScored: Boolean(cosineRow),
     };
   }

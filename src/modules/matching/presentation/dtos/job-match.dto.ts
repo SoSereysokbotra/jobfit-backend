@@ -1,5 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsUUID } from 'class-validator';
+import { MatchFlagsDto } from './recommended-job.dto';
+import { MatchBand } from '../../domain/scoring/match-band';
 
 export class JobMatchQueryDto {
   @ApiProperty({ description: 'The job to score against the current user’s profile.' })
@@ -32,8 +34,41 @@ export class MatchBreakdownDto {
 }
 
 export class JobMatchDto {
-  @ApiProperty({ description: '0-100 weighted total from the deterministic scorer.' })
+  @ApiProperty({
+    description:
+      '0-100 overall score from the deterministic scorer: `roleFitScore` damped by ' +
+      '`preferenceFitScore`, so a job the candidate cannot take cannot score highly on ' +
+      'a strong résumé alone.',
+  })
   score: number;
+
+  @ApiProperty({
+    description:
+      'Role / capability fit, 0-100 — skills and seniority only. This is the number to ' +
+      'read when the question is "can this person do the job?".',
+  })
+  roleFitScore: number;
+
+  @ApiProperty({
+    description:
+      'Preference / logistics fit, 0-100 — work arrangement, location, employment type, ' +
+      'level and salary against what THIS candidate asked for.',
+  })
+  preferenceFitScore: number;
+
+  @ApiProperty({
+    enum: ['STRONG', 'POSSIBLE', 'WEAK'],
+    description: 'What the overall score is allowed to claim. Prefer it over `score`.',
+  })
+  band: MatchBand;
+
+  @ApiProperty({
+    type: MatchFlagsDto,
+    description:
+      'Highlights and warnings. `warnings` are also appended to `reasons`, so a client ' +
+      'showing only the list still shows the conflicts.',
+  })
+  flags: MatchFlagsDto;
 
   @ApiProperty({ type: MatchBreakdownDto })
   breakdown: MatchBreakdownDto;
@@ -41,8 +76,8 @@ export class JobMatchDto {
   @ApiProperty({
     type: [String],
     description:
-      'Statements derived from the sub-scores. Never generated text — each line ' +
-      'restates a number that was actually computed.',
+      'Statements derived from the sub-scores, followed by any preference warnings. ' +
+      'Never generated text — each line restates something that was actually computed.',
   })
   reasons: string[];
 

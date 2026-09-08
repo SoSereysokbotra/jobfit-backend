@@ -8,7 +8,6 @@ import {
   RECOMMENDATION_JOB_INCLUDE,
   toRecommendedJobDto,
 } from '../../presentation/dtos/recommended-job.mapper';
-import { matchBand } from '../../domain/scoring/match-band';
 
 const DEFAULT_LIMIT = 50;
 
@@ -323,7 +322,11 @@ export class RecommendationsQueryService {
             title: job.title,
             company: job.company?.name ?? null,
             score: Math.round(s.score),
-            band: matchBand(s.score),
+            // The band the SCORER produced, not `matchBand(score)`. These jobs are scored
+            // live through the two-dimensional path, and matchBand's 57/51 thresholds were
+            // read off the old linear score's 41–69 range — applied to a gated composite
+            // they would call almost everything WEAK.
+            band: s.band,
             url: job.externalUrl ?? (base ? `${base}/jobs/${job.id}` : ''),
           },
         ];
