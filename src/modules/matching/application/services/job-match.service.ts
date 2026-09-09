@@ -71,7 +71,6 @@ export class JobMatchService {
           desiredRemoteTypes: true,
           minSalary: true,
           maxSalary: true,
-          desiredIndustries: true,
           // The preference dimension needs what the candidate actually asked for. Missing
           // here and present in the recommendations pipeline would make this page and the
           // list disagree about the same job — the one thing this service exists to
@@ -94,7 +93,7 @@ export class JobMatchService {
           employmentType: true,
           // `city`/`country` back the location fallback below: an internal job whose
           // own `location` is blank still happens somewhere — at its company.
-          company: { select: { industry: true, city: true, country: true } },
+          company: { select: { city: true, country: true } },
         },
       }),
     ]);
@@ -110,7 +109,6 @@ export class JobMatchService {
       desiredRemoteTypes: profile.desiredRemoteTypes,
       minSalary: profile.minSalary,
       maxSalary: profile.maxSalary,
-      desiredIndustries: profile.desiredIndustries,
       desiredEmploymentTypes: profile.desiredEmploymentTypes,
       desiredJobLevels: profile.desiredJobLevels,
       experienceCount: await this.experienceCount(userId),
@@ -133,7 +131,6 @@ export class JobMatchService {
       jobLevel: job.experienceLevel,
       minSalary: job.minSalary,
       maxSalary: job.maxSalary,
-      industry: job.company?.industry ?? null,
     };
 
     const result = this.compute.execute({

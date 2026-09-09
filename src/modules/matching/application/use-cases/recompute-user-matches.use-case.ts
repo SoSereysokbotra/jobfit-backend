@@ -283,7 +283,6 @@ export class RecomputeUserMatchesUseCase {
         desiredRemoteTypes: true,
         minSalary: true,
         maxSalary: true,
-        desiredIndustries: true,
         // Both columns have existed since the first profile form and were selected by
         // NOTHING until the preference dimension: a candidate could tick "Contract" and
         // "Senior" and every recommendation would be scored as if they had said nothing.
@@ -298,7 +297,6 @@ export class RecomputeUserMatchesUseCase {
       desiredRemoteTypes: profile.desiredRemoteTypes,
       minSalary: profile.minSalary,
       maxSalary: profile.maxSalary,
-      desiredIndustries: profile.desiredIndustries,
       desiredEmploymentTypes: profile.desiredEmploymentTypes,
       desiredJobLevels: profile.desiredJobLevels,
       experienceCount: await this.experienceCount(userId),
@@ -320,18 +318,10 @@ export class RecomputeUserMatchesUseCase {
         // common and means "not said" — never FULL_TIME.
         employmentType: true,
         // `city`/`country` back the location fallback below.
-        company: { select: { industry: true, city: true, country: true } },
+        company: { select: { city: true, country: true } },
       },
     });
     const jobById = new Map(jobs.map((j) => [j.id, j]));
-    // `companies.industry` is an Industry ID; the candidate's desiredIndustries are
-    // NAMES. Resolving here is what makes scoreOther's match branch reachable at all —
-    // comparing the raw id could never equal a name, and measured 0 matches across the
-    // whole database.
-    const industryNameById = await this.industryNames(
-      jobs.map((j) => j.company?.industry).filter((i): i is string => !!i),
-    );
-
     const scored: ScoredJob[] = [];
     for (const row of near) {
       const job = jobById.get(row.id);
@@ -355,9 +345,6 @@ export class RecomputeUserMatchesUseCase {
         jobLevel: job.experienceLevel,
         minSalary: job.minSalary,
         maxSalary: job.maxSalary,
-        industry: job.company?.industry
-          ? (industryNameById.get(job.company.industry) ?? null)
-          : null,
       };
       const result = this.compute.execute({
         candidate,

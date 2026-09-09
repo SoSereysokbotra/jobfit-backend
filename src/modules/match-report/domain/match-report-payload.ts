@@ -75,7 +75,6 @@ export interface ReportMatchRate {
      */
     location: number | null;
     salary: number;
-    other: number;
   };
   /**
    * False when the skills sub-score could not use an embedding (no profile vector or

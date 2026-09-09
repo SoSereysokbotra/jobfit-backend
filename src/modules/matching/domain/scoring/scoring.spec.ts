@@ -15,7 +15,6 @@ import {
   roleFit,
   scoreEmploymentType,
   scoreJobLevel,
-  scoreOther,
   scoreSalaryPreference,
   scoreWorkArrangement,
   twoDimensionalBand,
@@ -36,7 +35,6 @@ const candidate = (over: Partial<CandidateContext> = {}): CandidateContext => ({
   desiredRemoteTypes: [],
   minSalary: null,
   maxSalary: null,
-  desiredIndustries: [],
   experienceCount: 0,
   ...over,
 });
@@ -48,7 +46,6 @@ const job = (over: Partial<JobContext> = {}): JobContext => ({
   requiredLevel: null,
   minSalary: null,
   maxSalary: null,
-  industry: null,
   ...over,
 });
 
@@ -294,69 +291,23 @@ describe('scoring', () => {
     });
   });
 
-  describe('scoreOther (industry)', () => {
-    it('industry in desired set -> 100', () => {
-      expect(
-        scoreOther(candidate({ desiredIndustries: ['tech'] }), job({ industry: 'tech' })),
-      ).toBe(100);
-    });
-    it('no preference or unknown industry -> 50', () => {
-      expect(scoreOther(candidate(), job({ industry: 'tech' }))).toBe(50);
-    });
-
-    // The 100 branch was UNREACHABLE in production. `companies.industry` holds an
-    // Industry id and `Profile.desiredIndustries` holds names, and the scorer compared
-    // them directly — measured across the whole database, 0 of 35 companies had an
-    // industry value appearing in any profile's desired list. Worse than useless: jobs
-    // WITH industry data got the mismatch score (40) and jobs missing it got the neutral
-    // 50, and in the labelled set the jobs with data are the good ones. Calibration
-    // measured ρ = -0.667 against human grades, flipping to +0.518 once names met names.
-    it('matches on the industry NAME, which is what callers must now pass', () => {
-      expect(
-        scoreOther(
-          candidate({ desiredIndustries: ['Technology'] }),
-          job({ industry: 'Technology' }),
-        ),
-      ).toBe(100);
-    });
-
-    it('does not match a raw Industry id against a name', () => {
-      // The exact production shape before the fix. It must score as "unknown industry"
-      // (50), never as a mismatch (40) — we do not know that it is not Technology.
-      expect(
-        scoreOther(
-          candidate({ desiredIndustries: ['Technology'] }),
-          job({ industry: '8449fe51-8c66-4c0f-ab46-9e4f4466c83a' }),
-        ),
-      ).toBe(40);
-    });
-
-    it('compares case-insensitively, because the two sides are authored separately', () => {
-      expect(
-        scoreOther(
-          candidate({ desiredIndustries: ['technology'] }),
-          job({ industry: 'Technology' }),
-        ),
-      ).toBe(100);
-    });
-
-    it('treats a blank preference entry as no preference', () => {
-      expect(
-        scoreOther(candidate({ desiredIndustries: ['  '] }), job({ industry: 'Technology' })),
-      ).toBe(50);
-    });
-  });
-
   describe('weightedMatch', () => {
-    it('applies 40/25/15/10/10 weights', () => {
-      // 100*.4 + 80*.25 + 60*.15 + 40*.1 + 20*.1 = 40+20+9+4+2 = 75
-      expect(
-        weightedMatch({ skills: 100, experience: 80, location: 60, salary: 40, other: 20 }),
-      ).toBe(75);
+    // The industry sub-score was deleted (see weighted-match.calculator.ts). The four
+    // remaining weights sum to 0.9, and blendMeasured normalises by the weights actually
+    // present, so they still produce a 0-100 total.
+    it('applies 40/25/15/10, normalised over the weights present', () => {
+      // (100*.4 + 80*.25 + 60*.15 + 40*.1) / .9 = 73 / .9 = 81.1 -> 81
+      expect(weightedMatch({ skills: 100, experience: 80, location: 60, salary: 40 })).toBe(81);
     });
     it('all 100 -> 100', () => {
       expect(
-        weightedMatch({ skills: 100, experience: 100, location: 100, salary: 100, other: 100 }),
+        weightedMatch({ skills: 100, experience: 100, location: 100, salary: 100 }),
+      ).toBe(100);
+    });
+    it('an unmeasured location is dropped, not scored', () => {
+      // Only skills/experience/salary remain: (100*.4 + 100*.25 + 100*.1) / .75 = 100
+      expect(
+        weightedMatch({ skills: 100, experience: 100, location: null, salary: 100 }),
       ).toBe(100);
     });
   });

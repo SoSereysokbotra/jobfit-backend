@@ -10,10 +10,7 @@ import { scoreSkills } from '../../domain/scoring/skills-scorer';
 import { scoreExperience } from '../../domain/scoring/experience-scorer';
 import { scoreLocation } from '../../domain/scoring/location-scorer';
 import { scoreSalary } from '../../domain/scoring/salary-scorer';
-import {
-  computeTwoDimensionalMatch,
-  scoreOther,
-} from '../../domain/scoring/weighted-match.calculator';
+import { computeTwoDimensionalMatch } from '../../domain/scoring/weighted-match.calculator';
 
 export interface MatchResult {
   /**
@@ -63,7 +60,6 @@ export class ComputeMatchScoreUseCase {
       experience: scoreExperience(params.candidate, params.job),
       location: scoreLocation(params.candidate, params.job),
       salary: scoreSalary(params.candidate, params.job),
-      other: scoreOther(params.candidate, params.job),
     };
 
     const twoDimensional = computeTwoDimensionalMatch({

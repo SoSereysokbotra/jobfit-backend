@@ -67,8 +67,6 @@ export class ExternalJobSubScoresDto {
   })
   location!: number | null;
   @ApiProperty() salary!: number;
-  @ApiProperty({ description: 'Industry alignment (weight 10%)' })
-  other!: number;
 }
 
 export class ExternalJobMatchDto {

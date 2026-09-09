@@ -62,7 +62,7 @@ describe('RecomputeUserMatchesUseCase', () => {
     // only because the two-dimensional fields made the inline objects unreadable.
     const PAYLOAD_A = {
       score: 80,
-      breakdown: { skills: 80, experience: null, location: 100, salary: 50, other: 50 },
+      breakdown: { skills: 80, experience: null, location: 100, salary: 50 },
       // Role fit is the skills score alone: no seniority stated, so it rescales to 100%.
       roleFitScore: 80,
       // Nothing stated, nothing violated. An empty profile is not a set of conflicts.
@@ -78,7 +78,7 @@ describe('RecomputeUserMatchesUseCase', () => {
 
     const PAYLOAD_B = {
       score: 45,
-      breakdown: { skills: 50, experience: null, location: null, salary: 50, other: 50 },
+      breakdown: { skills: 50, experience: null, location: null, salary: 50 },
       roleFitScore: 50,
       // 70 (arrangement unmeasurable) x .35 + 100 x .25 + 100 x .20, salary excluded.
       preferenceFitScore: 87,
