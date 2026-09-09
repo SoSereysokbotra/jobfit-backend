@@ -67,17 +67,33 @@ describe('RecomputeUserMatchesUseCase', () => {
       // field stays pinned exactly.
       expect(prisma.recommendation.upsert.mock.calls[0][0]).toEqual({
         where: { userId_jobId: { userId: 'u1', jobId: 'jobA' } },
+<<<<<<< HEAD
         update: { score: 80, breakdown: { skills: 80, experience: 80, location: 100, salary: 50 }, locationKnown: true, reasonExplanation: 'Backend Engineer: strong skills match, location fits.', computedAt: expect.any(Date), staleAt: null },
         create: { userId: 'u1', jobId: 'jobA', score: 80, breakdown: { skills: 80, experience: 80, location: 100, salary: 50 }, locationKnown: true, reasonExplanation: 'Backend Engineer: strong skills match, location fits.', computedAt: expect.any(Date) },
+=======
+        // experience is NULL, not 80: "Backend Engineer" states no seniority and this job
+        // carries no `experienceLevel`, so no comparison happened. It used to be a
+        // function of the candidate alone and returned the same 80 for every job here.
+        update: { score: 76, breakdown: { skills: 80, experience: null, location: 100, salary: 50, other: 50 }, locationKnown: true, reasonExplanation: 'Backend Engineer: strong skills match, location fits.', computedAt: expect.any(Date), staleAt: null },
+        create: { userId: 'u1', jobId: 'jobA', score: 76, breakdown: { skills: 80, experience: null, location: 100, salary: 50, other: 50 }, locationKnown: true, reasonExplanation: 'Backend Engineer: strong skills match, location fits.', computedAt: expect.any(Date) },
+>>>>>>> feature/loco
       });
       expect(prisma.recommendation.upsert.mock.calls[1][0]).toEqual({
         where: { userId_jobId: { userId: 'u1', jobId: 'jobB' } },
         // location is NULL, not 50: this profile has no city, so no comparison happened.
+<<<<<<< HEAD
         // It is dropped and the remaining weights rescaled rather than folded in as a
         // measurement. With `other` (industry) also gone the denominator is skills .4 +
         // experience .25 + salary .1 = .75, so (20 + 20 + 5) / .75 = 60.
         update: { score: 60, breakdown: { skills: 50, experience: 80, location: null, salary: 50 }, locationKnown: false, reasonExplanation: 'Frontend Engineer: partial skills match.', computedAt: expect.any(Date), staleAt: null },
         create: { userId: 'u1', jobId: 'jobB', score: 60, breakdown: { skills: 50, experience: 80, location: null, salary: 50 }, locationKnown: false, reasonExplanation: 'Frontend Engineer: partial skills match.', computedAt: expect.any(Date) },
+=======
+        // The old scorer returned a neutral 50 here and folded it into the total as if it
+        // were a measurement. It is now dropped and the remaining weights rescaled, which
+        // is why the score is 59 rather than 58.
+        update: { score: 50, breakdown: { skills: 50, experience: null, location: null, salary: 50, other: 50 }, locationKnown: false, reasonExplanation: 'Frontend Engineer: partial skills match.', computedAt: expect.any(Date), staleAt: null },
+        create: { userId: 'u1', jobId: 'jobB', score: 50, breakdown: { skills: 50, experience: null, location: null, salary: 50, other: 50 }, locationKnown: false, reasonExplanation: 'Frontend Engineer: partial skills match.', computedAt: expect.any(Date) },
+>>>>>>> feature/loco
       });
 
       // §6: the upsert only ever writes the new top-N, so anything else the user still
@@ -101,6 +117,273 @@ describe('RecomputeUserMatchesUseCase', () => {
       prisma.profile.findUnique.mockResolvedValue(null);
       expect(await service.execute('u1')).toBe(0);
       expect(prisma.recommendation.upsert).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── location as a RETRIEVAL signal (not just a sub-score) ──────────────────
+  //
+  // THE REPORTED BUG. A user moved their profile from the US to Cambodia and kept seeing
+  // US jobs. Neither retriever knew where they were: the candidate embedding is built
+  // from headline/bio/industries/résumé (no city, no country) and the BM25 query text is
+  // the same fields, so the candidate pool was chosen blind to geography — and `execute`
+  // then deletes everything outside that pool. Location only entered afterwards, as a
+  // 15%-weight sub-score re-sorting a set it had no say in choosing.
+  //
+  // Measured against the live corpus before the fix: moving San Francisco -> Phnom Penh
+  // changed the retrieved set by ZERO jobs. Local postings could not appear however the
+  // list was sorted, because they were never retrieved.
+  describe('retrieveRankedJobs() — location shapes the candidate pool', () => {
+    /** Dense returns the same two location-less jobs whatever the profile says. */
+    const denseRows = [
+      { id: 'dense1', cosine_sim: 0.9 },
+      { id: 'dense2', cosine_sim: 0.8 },
+    ];
+
+    /** The corpus the location retriever resolves over. */
+    const corpus = [
+      { id: 'kh1', remoteType: 'ON_SITE', location: 'Phnom Penh, Cambodia', company: null },
+      { id: 'kh2', remoteType: 'ON_SITE', location: 'Siem Reap', company: null },
+      { id: 'us1', remoteType: 'ON_SITE', location: 'San Francisco', company: null },
+      { id: 'th1', remoteType: 'ON_SITE', location: 'Bangkok, Thailand', company: null },
+      { id: 'dense1', remoteType: 'ON_SITE', location: null, company: null },
+    ];
+
+    const serviceFor = (city: string | null, country: string | null) => {
+      const prisma: any = {
+        $queryRawUnsafe: jest
+          .fn()
+          // 1) dense, 2) cosine backfill for whatever location pulled in
+          .mockResolvedValueOnce(denseRows)
+          .mockResolvedValue([]),
+        profile: {
+          findUnique: jest.fn().mockResolvedValue({
+            headline: null, // no query text -> no BM25 list, keeps the fusion readable
+            minSalary: null,
+            desiredRemoteTypes: [],
+            city,
+            country,
+          }),
+        },
+        parsedResumeData: { findUnique: jest.fn().mockResolvedValue(null) },
+        job: { findMany: jest.fn().mockResolvedValue(corpus) },
+      };
+      const service = new RecomputeUserMatchesUseCase(
+        prisma as never,
+        new ComputeMatchScoreUseCase(),
+        { rerank: jest.fn() } as never,
+        activeResume(false),
+        stubLocationResolver(),
+      );
+      return { service, prisma };
+    };
+
+    it('pulls jobs in the candidate country into a pool dense retrieval never saw', async () => {
+      const { service } = serviceFor('Phnom Penh', 'Cambodia');
+
+      const ids = (await service.retrieveRankedJobs('u1', 10, { rerank: false })).map(
+        (r) => r.id,
+      );
+
+      // Neither Cambodian job is in the dense list, and there is no BM25 list at all.
+      // Before the fix the only possible answer here was ['dense1','dense2'].
+      expect(ids).toEqual(expect.arrayContaining(['kh1', 'kh2']));
+      // The semantic hits are not evicted — location ADDS candidates, it does not filter.
+      expect(ids).toEqual(expect.arrayContaining(['dense1', 'dense2']));
+      // Wrong country stays out: `differentCountry` is not a reason to promote a job.
+      expect(ids).not.toContain('th1');
+      expect(ids).not.toContain('us1');
+    });
+
+    it('retrieves a DIFFERENT pool for the same candidate after they move', async () => {
+      const before = serviceFor('San Francisco', 'United States');
+      const beforeIds = (
+        await before.service.retrieveRankedJobs('u1', 10, { rerank: false })
+      ).map((r) => r.id);
+
+      const after = serviceFor('Phnom Penh', 'Cambodia');
+      const afterIds = (
+        await after.service.retrieveRankedJobs('u1', 10, { rerank: false })
+      ).map((r) => r.id);
+
+      expect(beforeIds).toContain('us1');
+      expect(beforeIds).not.toContain('kh1');
+
+      expect(afterIds).toContain('kh1');
+      expect(afterIds).not.toContain('us1');
+
+      // The point of the whole fix: the SET changed, not merely its order.
+      expect(new Set(afterIds)).not.toEqual(new Set(beforeIds));
+    });
+
+    it('ranks the closer place first — same city above same country', async () => {
+      const { service } = serviceFor('Phnom Penh', 'Cambodia');
+
+      const ids = (await service.retrieveRankedJobs('u1', 10, { rerank: false })).map(
+        (r) => r.id,
+      );
+
+      // kh1 is the same city (100); kh2 is only the same country (70). The location list
+      // is ranked by the same ladder the scorer uses, so kh1 enters fusion above kh2.
+      expect(ids.indexOf('kh1')).toBeLessThan(ids.indexOf('kh2'));
+    });
+
+    it('skips the location retriever entirely for a candidate with no place', async () => {
+      const { service, prisma } = serviceFor(null, null);
+
+      const ids = (await service.retrieveRankedJobs('u1', 10, { rerank: false })).map(
+        (r) => r.id,
+      );
+
+      expect(ids).toEqual(['dense1', 'dense2']);
+      // No place to rank against — do not read the corpus at all.
+      expect(prisma.job.findMany).not.toHaveBeenCalled();
+    });
+
+    it('widens the dense pool only when there is a location list to corroborate it', async () => {
+      const withPlace = serviceFor('Phnom Penh', 'Cambodia');
+      await withPlace.service.retrieveRankedJobs('u1', 10, { rerank: false });
+      // args: (sql, userId, limit, minSalary, remoteOnly)
+      expect(withPlace.prisma.$queryRawUnsafe.mock.calls[0][2]).toBe(100);
+
+      const without = serviceFor(null, null);
+      await without.service.retrieveRankedJobs('u1', 10, { rerank: false });
+      expect(without.prisma.$queryRawUnsafe.mock.calls[0][2]).toBe(50);
+    });
+  });
+
+  // ── experience must vary ACROSS A POOL ────────────────────────────────────
+  //
+  // The measurement that found the bug: `SELECT count(DISTINCT breakdown->>'experience')`
+  // over one user's stored recommendations returned 1, across all 50 rows, for both
+  // users in the database — 25% of the weight doing no ranking work. This asserts the
+  // same property at the pipeline level rather than on the scorer alone.
+  describe('execute() — experience across one candidate pool', () => {
+    it('writes more than one distinct experience value', async () => {
+      const prisma: any = {
+        profile: {
+          findUnique: jest.fn().mockResolvedValue({
+            city: null, country: null, desiredRemoteTypes: [],
+            minSalary: null, maxSalary: null, desiredIndustries: [],
+          }),
+        },
+        // 2 recorded roles -> Mid.
+        experience: { count: jest.fn().mockResolvedValue(2) },
+        parsedResumeData: { findUnique: jest.fn().mockResolvedValue(null) },
+        job: {
+          findMany: jest.fn().mockResolvedValue([
+            // Same candidate, three postings at different seniorities, plus one that
+            // states none at all.
+            { id: 'j1', title: 'Junior Developer', remoteType: 'ON_SITE', location: null, experienceLevel: null, minSalary: null, maxSalary: null, company: { industry: null } },
+            { id: 'j2', title: 'Software Engineer', remoteType: 'ON_SITE', location: null, experienceLevel: 'MID', minSalary: null, maxSalary: null, company: { industry: null } },
+            { id: 'j3', title: 'Engineering Director', remoteType: 'ON_SITE', location: null, experienceLevel: null, minSalary: null, maxSalary: null, company: { industry: null } },
+            { id: 'j4', title: 'Accountant', remoteType: 'ON_SITE', location: null, experienceLevel: null, minSalary: null, maxSalary: null, company: { industry: null } },
+          ]),
+        },
+        industry: { findMany: jest.fn().mockResolvedValue([]) },
+        recommendation: {
+          upsert: jest.fn().mockResolvedValue(undefined),
+          deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+        },
+      };
+      const service = new RecomputeUserMatchesUseCase(
+        prisma as never,
+        new ComputeMatchScoreUseCase(),
+        { rerank: jest.fn() } as never,
+        activeResume(false),
+        stubLocationResolver(),
+      );
+      jest.spyOn(service, 'retrieveRankedJobs').mockResolvedValue([
+        { id: 'j1', cosine_sim: 0.5 },
+        { id: 'j2', cosine_sim: 0.5 },
+        { id: 'j3', cosine_sim: 0.5 },
+        { id: 'j4', cosine_sim: 0.5 },
+      ]);
+
+      await service.execute('u1', 50);
+
+      const written = prisma.recommendation.upsert.mock.calls.map(
+        (c: any) => c[0].update.breakdown.experience,
+      );
+      // The bar the old scorer could not clear: not constant.
+      expect(new Set(written).size).toBeGreaterThan(1);
+      // A Mid candidate: exact on the MID posting, over-qualified for the junior one,
+      // far under for a director role, and NOT MEASURED where the title says nothing.
+      expect(written).toEqual([85, 100, 25, null]);
+
+      // And with the cosine identical for all four, experience alone reorders them —
+      // which is exactly what a constant could never do.
+      const scores = prisma.recommendation.upsert.mock.calls.map(
+        (c: any) => c[0].update.score,
+      );
+      expect(new Set(scores).size).toBeGreaterThan(1);
+    });
+  });
+
+  // ── remote-only as a RETRIEVAL constraint ─────────────────────────────────
+  //
+  // `desiredRemoteTypes` was collected by the onboarding form, written to the profile,
+  // and read by NOTHING — not the scorers, and not retrieval, because the only code that
+  // consulted it was the metadata pre-filter, which is gated on `opts.filter === true`
+  // and no production caller passes it. A user who ticked "Remote" and nothing else got
+  // a list that was 42/50 on-site, presented as their matches.
+  //
+  // The salary floor stays behind that flag (measured: ~11% recall for +25% MRR,
+  // commit 5a3b9da). Remote-only does not, because it is a constraint the user STATED
+  // rather than one inferred on their behalf.
+  describe('retrieveRankedJobs() — a remote-only candidate', () => {
+    const buildPrisma = (desiredRemoteTypes: string[]) => ({
+      $queryRawUnsafe: jest
+        .fn()
+        .mockResolvedValueOnce([{ id: 'r1', cosine_sim: 0.9 }])
+        .mockResolvedValue([]),
+      profile: {
+        findUnique: jest.fn().mockResolvedValue({
+          headline: null,
+          minSalary: 90000, // set, to prove the salary floor is NOT smuggled in with it
+          desiredRemoteTypes,
+          city: null,
+          country: null,
+        }),
+      },
+      parsedResumeData: { findUnique: jest.fn().mockResolvedValue(null) },
+      job: { findMany: jest.fn().mockResolvedValue([]) },
+    });
+
+    const serviceFor = (prisma: any) =>
+      new RecomputeUserMatchesUseCase(
+        prisma as never,
+        new ComputeMatchScoreUseCase(),
+        { rerank: jest.fn() } as never,
+        activeResume(false),
+        stubLocationResolver(),
+      );
+
+    it('constrains retrieval to remote jobs without the opt-in filter flag', async () => {
+      const prisma = buildPrisma(['REMOTE']);
+      await serviceFor(prisma).retrieveRankedJobs('u1', 10, { rerank: false });
+
+      // args: (sql, userId, limit, minSalary, remoteOnly)
+      const [, , , minSalary, remoteOnly] = prisma.$queryRawUnsafe.mock.calls[0];
+      expect(remoteOnly).toBe(true);
+      // The salary floor is still suppressed — the two used to travel together, and
+      // enabling the stated preference must not quietly enable the inferred one.
+      expect(minSalary).toBeNull();
+    });
+
+    it('does not constrain a candidate who accepts more than remote', async () => {
+      const prisma = buildPrisma(['REMOTE', 'HYBRID']);
+      await serviceFor(prisma).retrieveRankedJobs('u1', 10, { rerank: false });
+
+      // Someone who would also take hybrid ticks hybrid; only an exclusive choice is a
+      // constraint.
+      expect(prisma.$queryRawUnsafe.mock.calls[0][4]).toBe(false);
+    });
+
+    it('does not constrain a candidate who stated no preference', async () => {
+      const prisma = buildPrisma([]);
+      await serviceFor(prisma).retrieveRankedJobs('u1', 10, { rerank: false });
+
+      expect(prisma.$queryRawUnsafe.mock.calls[0][4]).toBe(false);
     });
   });
 

@@ -7,7 +7,14 @@ import { logAiFallback } from '@infra/ai/ai-degradation.logger';
 import { ActiveResumeService } from '../../../resume/application/services/active-resume.service';
 import { ComputeMatchScoreUseCase } from './compute-match-score.use-case';
 import { CandidateContext, JobContext, SubScores } from '../../domain/scoring/types';
+import {
+  scoreLocation,
+  isRemoteOnly,
+  LOCATION_SCORES,
+} from '../../domain/scoring/location-scorer';
+import { deriveJobLevel } from '../../domain/scoring/experience-scorer';
 import { LocationResolverService } from '../../../location/location-resolver.service';
+import { ResolvedPlace } from '../../../location/location.types';
 import { reciprocalRankFusion } from '../../domain/rrf';
 import { toExperienceTitles, toStringArray } from '../../domain/parsed-resume-json';
 
@@ -23,6 +30,19 @@ export interface ScoredJob {
   score: number;
   breakdown: SubScores;
   reasonExplanation: string;
+}
+
+/**
+ * What the candidate's own hard filters are costing them, for the readiness endpoint.
+ * See {@link RecomputeUserMatchesUseCase.constraintImpact}.
+ */
+export interface ConstraintImpact {
+  /** Whether the candidate stated remote-only — the one hard constraint today. */
+  remoteOnly: boolean;
+  /** Candidates retrieved WITH the constraint applied. Zero is the interesting case. */
+  matchedWithConstraints: number;
+  /** Candidates retrieved ignoring it — what relaxing the setting would give back. */
+  matchedWithout: number;
 }
 
 export interface RetrievalOptions {
@@ -55,10 +75,47 @@ interface CandidateRetrieval {
   queryText: string; // BM25 keyword query
   minSalary: number | null; // metadata pre-filter: salary floor
   remoteOnly: boolean; // metadata pre-filter: candidate wants remote only
+  /** Where the candidate is, resolved. Null when unset or unrecognised. */
+  place: ResolvedPlace | null;
+  /** Raw stated arrangement preference, so the location list scores it exactly as the
+   *  scorer does — a remote posting is only a location "win" for someone open to remote. */
+  desiredRemoteTypes: string[];
 }
 
 // How many candidates each retriever (dense, sparse) contributes to the fusion.
 const RETRIEVAL_POOL = 50;
+
+/**
+ * The dense/sparse pool when the candidate HAS a resolvable location.
+ *
+ * Widening matters because of how RRF works: a job that is #1 for location but sits at
+ * dense rank 70 contributes from one list only, while the same job inside a 100-deep
+ * dense pool is corroborated by two and rises properly. A 50-deep pool made the location
+ * retriever's picks look like outliers rather than agreement.
+ */
+const RETRIEVAL_POOL_WITH_LOCATION = 100;
+
+/** How many geographically-appropriate jobs the location retriever contributes. */
+const LOCATION_POOL = 50;
+
+/**
+ * Ceiling on how many postings the location retriever resolves in one call.
+ *
+ * Resolution is an in-memory map lookup (LocationIndex), and the SQL already discards
+ * postings with no location signal at all, so this scans a fraction of the corpus. Same
+ * tripwire as SCOUT_CANDIDATE_CAP: if real candidates are being truncated here, the
+ * resolved place belongs in a column on `jobs` so this becomes an indexed query.
+ */
+const LOCATION_CANDIDATE_CAP = 2000;
+
+/**
+ * Lowest rung the location retriever will promote: same country.
+ *
+ * Anything below is `differentCountry`, which is not a reason to pull a job into the pool
+ * — the dense and sparse retrievers already cover "good match, wrong country".
+ */
+const LOCATION_RETRIEVAL_FLOOR = LOCATION_SCORES.sameCountry;
+
 // How many top fused jobs the LLM reranker re-scores (kept small — it's an LLM call).
 const RERANK_POOL = 20;
 
@@ -206,6 +263,9 @@ export class RecomputeUserMatchesUseCase {
         location: true,
         minSalary: true,
         maxSalary: true,
+        // Structured seniority when the posting carries one; `deriveJobLevel` falls back
+        // to the title, which is where the signal actually is (29% vs 0.3% coverage).
+        experienceLevel: true,
         // `city`/`country` back the location fallback below.
         company: { select: { city: true, country: true } },
       },
@@ -225,6 +285,7 @@ export class RecomputeUserMatchesUseCase {
           this.locations.resolveText(job.location) ??
           this.locations.resolveStructured(job.company?.city, job.company?.country),
         locationLabel: job.location,
+        requiredLevel: deriveJobLevel(job),
         minSalary: job.minSalary,
         maxSalary: job.maxSalary,
       };
@@ -245,9 +306,24 @@ export class RecomputeUserMatchesUseCase {
 
   /**
    * Hybrid retrieval (Phase B): metadata pre-filter → fuse dense semantic search
-   * (pgvector cosine) + sparse keyword search (Postgres BM25/`tsvector`) via
-   * Reciprocal Rank Fusion → optional LLM rerank, returning the top `limit` jobs
-   * each with its dense cosine similarity (the skills signal downstream needs).
+   * (pgvector cosine) + sparse keyword search (Postgres BM25/`tsvector`) + the
+   * candidate's own geography via Reciprocal Rank Fusion → optional LLM rerank,
+   * returning the top `limit` jobs each with its dense cosine similarity (the skills
+   * signal downstream needs).
+   *
+   * LOCATION IS A RETRIEVER, not only a sub-score. It used to enter the pipeline solely
+   * in `scoreJobs`, AFTER the candidate pool had been chosen — and neither the embedding
+   * (`buildCandidateText` has no city or country in it) nor the BM25 query text carries
+   * where the user is. So the pool was picked blind to geography and `execute` then
+   * deleted everything outside it, which made the reported bug structural rather than
+   * merely mis-weighted: measured against the live corpus, moving a profile from San
+   * Francisco to Phnom Penh changed the retrieved set by ZERO jobs. The same 50 rows were
+   * re-sorted, so local postings that had never been retrieved could not appear no matter
+   * how the list was ordered afterwards.
+   *
+   * The location list only ever ADDS candidates — it is fused, not intersected. That
+   * matters on this corpus: 276 of 368 published jobs state no location at all, so a hard
+   * geographic pre-filter would discard three quarters of the market to fix a ranking bug.
    *
    * The metadata pre-filter drops clearly-wrong jobs BEFORE ranking (§5/§6):
    * inactive postings, jobs paying entirely below the candidate's floor, and —
@@ -267,19 +343,40 @@ export class RecomputeUserMatchesUseCase {
     // Metadata pre-filter is OPT-IN and OFF by default: measured to trade ~11%
     // recall for +MRR on the eval set, and recall is the priority. Kept as a
     // measurable capability (valuable at scale) but not enabled in production.
+    //
+    // REMOTE-ONLY IS EXEMPT FROM THAT FLAG, and that is the fix for a preference nobody
+    // was reading. The flag bundles two filters that are not the same kind of thing: the
+    // salary floor INFERS what a candidate would accept, while "remote only" is a
+    // constraint they stated explicitly on a multi-select. Welding them to one boolean
+    // meant honouring the stated one required also enabling the inferred one — which had
+    // been measured to cost ~11% recall (commit 5a3b9da) and so was left off. The
+    // preference was not rejected on its merits; it was collateral. Salary stays behind
+    // the flag, untouched.
     const filterCand: CandidateRetrieval =
-      opts.filter === true ? cand : { ...cand, minSalary: null, remoteOnly: false };
+      opts.filter === true
+        ? cand
+        : { ...cand, minSalary: null, remoteOnly: cand.remoteOnly };
 
-    const dense = await this.denseCandidates(userId, RETRIEVAL_POOL, filterCand);
+    // A wider dense/sparse pool only pays for itself when there is a third list to
+    // corroborate against — see RETRIEVAL_POOL_WITH_LOCATION.
+    const pool = cand.place ? RETRIEVAL_POOL_WITH_LOCATION : RETRIEVAL_POOL;
+
+    const dense = await this.denseCandidates(userId, pool, filterCand);
     const cosineById = new Map(dense.map((d) => [d.id, Number(d.cosine_sim)]));
 
     const sparse = cand.queryText
-      ? await this.sparseCandidates(cand.queryText, RETRIEVAL_POOL, filterCand)
+      ? await this.sparseCandidates(cand.queryText, pool, filterCand)
+      : [];
+
+    // THIRD RETRIEVER: jobs that are geographically right for this candidate.
+    const local = cand.place
+      ? await this.localCandidates(cand.place, LOCATION_POOL, filterCand)
       : [];
 
     let fusedIds = reciprocalRankFusion([
       dense.map((d) => d.id),
       sparse.map((s) => s.id),
+      local,
     ]).map((f) => f.id);
 
     // LLM rerank of the fused shortlist (Phase B). ON in production — measured
@@ -443,6 +540,124 @@ export class RecomputeUserMatchesUseCase {
     );
   }
 
+  /**
+   * Location retriever: published jobs that are geographically appropriate for this
+   * candidate, best geographic fit first.
+   *
+   * Ranks through the SAME `scoreLocation` ladder the scorer uses, so a job promoted into
+   * the pool for being local scores as local when it gets there — the single-scoring-path
+   * rule that `scoreJobs` already enforces for the scout.
+   *
+   * The SQL narrows to postings that could possibly match before any resolution happens:
+   * a job with no location text, no company address and no REMOTE flag has nothing to
+   * compare and can never clear the floor. On the live corpus that is 368 published jobs
+   * down to ~112, so the in-memory resolve stays small.
+   *
+   * Resolution order mirrors `scoreJobs`: the posting's own location first, then the
+   * employer's structured address — a fact we hold, not an inference.
+   */
+  private async localCandidates(
+    place: ResolvedPlace,
+    limit: number,
+    cand: CandidateRetrieval,
+  ): Promise<string[]> {
+    const jobs = await this.prisma.job.findMany({
+      where: {
+        status: 'PUBLISHED',
+        AND: [
+          // Something to compare. Without one of these there is nothing to resolve and
+          // the job could never clear the floor.
+          {
+            OR: [
+              { location: { not: null } },
+              { remoteType: 'REMOTE' },
+              { company: { city: { not: null } } },
+            ],
+          },
+          // The same conservative metadata pre-filter the other two retrievers apply, in
+          // Prisma terms — mirrors `filterSql`, including its NULL allowances, so an
+          // opt-in filter run cannot admit a job here that the others drop.
+          ...(cand.minSalary !== null
+            ? [{ OR: [{ maxSalary: null }, { maxSalary: { gte: cand.minSalary } }] }]
+            : []),
+          ...(cand.remoteOnly ? [{ remoteType: 'REMOTE' as const }] : []),
+        ],
+      },
+      take: LOCATION_CANDIDATE_CAP,
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        remoteType: true,
+        location: true,
+        company: { select: { city: true, country: true } },
+      },
+    });
+
+    // Same shape the scorer receives, so a job ranked here as a location win is one that
+    // scores as a location win. Passing the preference is what stops a remote posting
+    // being promoted for a candidate who asked for on-site work.
+    const candidate = { place, desiredRemoteTypes: cand.desiredRemoteTypes };
+    return jobs
+      .map((job) => ({
+        id: job.id,
+        score: scoreLocation(candidate, {
+          remoteType: job.remoteType,
+          place:
+            this.locations.resolveText(job.location) ??
+            this.locations.resolveStructured(job.company?.city, job.company?.country),
+        }),
+      }))
+      .filter(
+        (row): row is { id: string; score: number } =>
+          row.score !== null && row.score >= LOCATION_RETRIEVAL_FLOOR,
+      )
+      // id breaks ties so the list is deterministic between calls — RRF positions are
+      // ranks, and an unstable rank would make fused order wobble for no reason.
+      .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
+      .slice(0, limit)
+      .map((row) => row.id);
+  }
+
+  /**
+   * Did this candidate's OWN hard filter empty their list, and how much would relaxing it
+   * give them back?
+   *
+   * DIAGNOSTIC ONLY — feeds the readiness endpoint's explanation of an empty list, never
+   * the recommendations themselves. Deliberately NOT `retrieveRankedJobs`: that fuses
+   * three retrievers and can call the LLM reranker, and none of that is needed to answer
+   * "would there be anything here without the filter". This is two pgvector queries.
+   *
+   * Returns `remoteOnly: false` immediately for everyone else, so the common caller pays
+   * one small profile read and nothing more.
+   *
+   * The counts saturate at RETRIEVAL_POOL — they answer "is there anything, and roughly
+   * how much", not "exactly how many". `matchedIgnoringConstraints` is documented to the
+   * client as a floor for that reason.
+   */
+  async constraintImpact(userId: string): Promise<ConstraintImpact> {
+    const profile = await this.prisma.profile.findUnique({
+      where: { userId },
+      select: { desiredRemoteTypes: true, minSalary: true },
+    });
+    if (!profile || !isRemoteOnly(profile.desiredRemoteTypes)) {
+      return { remoteOnly: false, matchedWithConstraints: 0, matchedWithout: 0 };
+    }
+
+    // The salary floor stays suppressed on BOTH sides: it is not enabled in production,
+    // so counting with it would describe a pipeline the user is not actually running.
+    const base = { queryText: '', minSalary: null, place: null, desiredRemoteTypes: [] };
+    const [withConstraint, without] = await Promise.all([
+      this.denseCandidates(userId, RETRIEVAL_POOL, { ...base, remoteOnly: true }),
+      this.denseCandidates(userId, RETRIEVAL_POOL, { ...base, remoteOnly: false }),
+    ]);
+
+    return {
+      remoteOnly: true,
+      matchedWithConstraints: withConstraint.length,
+      matchedWithout: without.length,
+    };
+  }
+
   /** Cosine similarity for a specific set of jobs (for BM25-only hits). */
   /** Public so single-job scoring reuses this exact query instead of restating it. */
   cosineForJobs(userId: string, jobIds: string[]): Promise<NearJobRow[]> {
@@ -460,13 +675,21 @@ export class RecomputeUserMatchesUseCase {
 
   /**
    * Load the candidate's retrieval context: the BM25 keyword query (headline +
-   * résumé skills + titles) plus the metadata pre-filter inputs (min salary,
-   * remote-only preference).
+   * résumé skills + titles), the metadata pre-filter inputs (min salary, remote-only
+   * preference), and the resolved place the location retriever ranks against.
    */
   private async loadCandidate(userId: string): Promise<CandidateRetrieval> {
     const profile = await this.prisma.profile.findUnique({
       where: { userId },
-      select: { headline: true, minSalary: true, desiredRemoteTypes: true },
+      // city/country back the location retriever. Read here rather than in a second
+      // query: this is already the "who is this candidate, for retrieval" lookup.
+      select: {
+        headline: true,
+        minSalary: true,
+        desiredRemoteTypes: true,
+        city: true,
+        country: true,
+      },
     });
     const resumeId = await this.activeResume.findActiveResumeId(userId);
     const parsed = resumeId
@@ -488,7 +711,13 @@ export class RecomputeUserMatchesUseCase {
       queryText: parts.join(' ').slice(0, 2000),
       minSalary: profile?.minSalary ?? null,
       // Only a hard remote requirement (wants remote, nothing else) triggers the filter.
-      remoteOnly: remoteTypes.length > 0 && remoteTypes.every((t) => t === 'REMOTE'),
+      // Shared with the scorer so retrieval and scoring cannot disagree about what the
+      // preference means.
+      remoteOnly: isRemoteOnly(remoteTypes),
+      desiredRemoteTypes: remoteTypes,
+      // Null for a profile with no location, or one naming a place the table does not
+      // know; the location retriever is simply skipped then.
+      place: this.locations.resolveStructured(profile?.city, profile?.country),
     };
   }
 

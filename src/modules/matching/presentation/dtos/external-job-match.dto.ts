@@ -48,7 +48,15 @@ export class ExternalJobMatchQueryDto {
 
 export class ExternalJobSubScoresDto {
   @ApiProperty() skills!: number;
-  @ApiProperty() experience!: number;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'NULL when the posting stated no seniority — no structured `experienceLevel` and ' +
+      'nothing recognisable in the title (two jobs in three). EXCLUDED from the total ' +
+      'rather than scored as a neutral value; render it as "not computed".',
+  })
+  experience!: number | null;
   @ApiProperty({
     type: Number,
     nullable: true,

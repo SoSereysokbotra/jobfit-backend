@@ -1,5 +1,10 @@
 import { cosineSimilarity, scoreSkills } from './skills-scorer';
-import { scoreExperience } from './experience-scorer';
+import {
+  scoreExperience,
+  deriveJobLevel,
+  candidateLevel,
+  SeniorityLevel,
+} from './experience-scorer';
 import { scoreLocation } from './location-scorer';
 import { scoreSalary } from './salary-scorer';
 import { weightedMatch } from './weighted-match.calculator';
@@ -26,6 +31,7 @@ const job = (over: Partial<JobContext> = {}): JobContext => ({
   remoteType: 'ON_SITE',
   place: null,
   locationLabel: null,
+  requiredLevel: null,
   minSalary: null,
   maxSalary: null,
   ...over,
@@ -50,18 +56,132 @@ describe('scoring', () => {
     });
   });
 
+  describe('deriveJobLevel', () => {
+    it('prefers the structured column over the title', () => {
+      // The field is something a person set; the title is an inference from prose.
+      expect(deriveJobLevel({ experienceLevel: 'ENTRY', title: 'Senior Engineer' })).toBe(
+        SeniorityLevel.Entry,
+      );
+    });
+
+    it('reads seniority out of the title when the column is empty', () => {
+      expect(deriveJobLevel({ title: 'Senior Accountant' })).toBe(SeniorityLevel.Senior);
+      expect(deriveJobLevel({ title: 'Junior Full-Stack Developer' })).toBe(
+        SeniorityLevel.Entry,
+      );
+      expect(deriveJobLevel({ title: 'Finance Manager' })).toBe(SeniorityLevel.Lead);
+      expect(deriveJobLevel({ title: 'Marketing Intern' })).toBe(SeniorityLevel.Intern);
+    });
+
+    it('lets the most senior claim in a compound title win', () => {
+      // Ingested titles concatenate roles; a posting listing several is at the top one.
+      expect(
+        deriveJobLevel({ title: 'Admin and Operations Manager, Head of School' }),
+      ).toBe(SeniorityLevel.Lead);
+      expect(
+        deriveJobLevel({ title: 'Assistant to CEO, Finance and Accounting Manager' }),
+      ).toBe(SeniorityLevel.Executive);
+    });
+
+    it('does not match seniority words inside other words', () => {
+      // Unanchored /lead/ matches "Leadership", /sr/ matches "Personal Assistant".
+      expect(deriveJobLevel({ title: 'Leadership Programme Coordinator' })).toBeNull();
+      expect(deriveJobLevel({ title: 'Personal Assistant' })).toBeNull();
+    });
+
+    it('returns null when the posting says nothing — the common case', () => {
+      // Two jobs in three on the live corpus. Null is "not measured", not "junior".
+      expect(deriveJobLevel({ title: 'Accountant' })).toBeNull();
+      expect(deriveJobLevel({ title: null, experienceLevel: null })).toBeNull();
+    });
+  });
+
   describe('scoreExperience', () => {
-    it('scales with experience count', () => {
-      expect(scoreExperience(candidate({ experienceCount: 0 }))).toBe(40);
-      expect(scoreExperience(candidate({ experienceCount: 1 }))).toBe(65);
-      expect(scoreExperience(candidate({ experienceCount: 2 }))).toBe(80);
-      expect(scoreExperience(candidate({ experienceCount: 5 }))).toBe(90);
+    // THE BUG THIS PINS. scoreExperience used to take only the candidate, so it returned
+    // the same number for every job in a pool — measured as 1 distinct value across all
+    // 50 of a user's rows, with 25% of the weight behind it. It could not reorder
+    // anything while reporting itself as this job's "experience match".
+    it('VARIES with the job, not just the candidate', () => {
+      const mid = candidate({ experienceCount: 1 }); // -> Mid
+      const scores = [
+        scoreExperience(mid, job({ requiredLevel: SeniorityLevel.Mid })),
+        scoreExperience(mid, job({ requiredLevel: SeniorityLevel.Entry })),
+        scoreExperience(mid, job({ requiredLevel: SeniorityLevel.Executive })),
+      ];
+      expect(new Set(scores).size).toBeGreaterThan(1);
+    });
+
+    it('scores an exact level match highest', () => {
+      expect(
+        scoreExperience(
+          candidate({ experienceCount: 1 }),
+          job({ requiredLevel: SeniorityLevel.Mid }),
+        ),
+      ).toBe(100);
+    });
+
+    it('penalises being under-qualified harder than being over-qualified', () => {
+      // A senior can take a mid role; a graduate cannot take a director role, and
+      // showing it to them is the more damaging mistake.
+      const senior = candidate({ experienceCount: 5 }); // -> Senior
+      const graduate = candidate({ experienceCount: 0 }); // -> Entry
+      const over = scoreExperience(senior, job({ requiredLevel: SeniorityLevel.Entry }));
+      const under = scoreExperience(
+        graduate,
+        job({ requiredLevel: SeniorityLevel.Executive }),
+      );
+      expect(over).toBeGreaterThan(under!);
+      expect(under).toBeLessThan(50);
+    });
+
+    it('is NULL when the posting states no seniority', () => {
+      // Not a low score — no comparison happened. weightedMatch drops it and rescales.
+      expect(scoreExperience(candidate({ experienceCount: 2 }), job())).toBeNull();
+    });
+
+    it('maps a role count to a level, capped at senior', () => {
+      expect(candidateLevel(0)).toBe(SeniorityLevel.Entry);
+      expect(candidateLevel(1)).toBe(SeniorityLevel.Mid);
+      // Nothing in a role count distinguishes a lead from an executive.
+      expect(candidateLevel(9)).toBe(SeniorityLevel.Senior);
     });
   });
 
   describe('scoreLocation', () => {
-    it('remote job suits everyone, even an unresolved candidate', () => {
+    it('remote job suits a candidate who has stated no preference', () => {
       expect(scoreLocation(candidate(), job({ remoteType: 'REMOTE' }))).toBe(100);
+    });
+
+    it('remote job suits a candidate who asked for remote', () => {
+      expect(
+        scoreLocation(
+          candidate({ desiredRemoteTypes: ['REMOTE', 'HYBRID'] }),
+          job({ remoteType: 'REMOTE' }),
+        ),
+      ).toBe(100);
+    });
+
+    it('does NOT hand a remote job a perfect location score to an on-site candidate', () => {
+      // `desiredRemoteTypes` was collected from these users and read by nothing, so every
+      // remote posting scored 100 for everybody — which is why "Remote (US)" ranked 4th
+      // for a Phnom Penh profile and 4th for a San Francisco one, identically.
+      const onSite = candidate({ desiredRemoteTypes: ['ON_SITE'] });
+      // Nothing to compare geographically -> not measured, rather than an invented penalty.
+      expect(scoreLocation(onSite, job({ remoteType: 'REMOTE' }))).toBeNull();
+    });
+
+    it('falls through to real geography for a remote job the candidate did not ask for', () => {
+      const onSite = candidate({
+        desiredRemoteTypes: ['ON_SITE'],
+        place: at('Phnom Penh'),
+      });
+      // The posting says remote AND names a place: compare the places like any other job.
+      expect(
+        scoreLocation(onSite, { remoteType: 'REMOTE', place: at('Phnom Penh') }),
+      ).toBe(100);
+      expect(
+        scoreLocation(onSite, { remoteType: 'REMOTE', place: at('Bangkok, Thailand') }),
+      ).toBe(30);
     });
 
     it('same city -> 100', () => {

@@ -25,7 +25,7 @@ export class ComputeMatchScoreUseCase {
   }): MatchResult {
     const breakdown: SubScores = {
       skills: scoreSkills(params.cosineSim),
-      experience: scoreExperience(params.candidate),
+      experience: scoreExperience(params.candidate, params.job),
       location: scoreLocation(params.candidate, params.job),
       salary: scoreSalary(params.candidate, params.job),
     };

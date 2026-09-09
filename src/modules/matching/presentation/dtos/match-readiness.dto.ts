@@ -9,11 +9,19 @@
 //   1. The user has no profile yet            → onboarding is incomplete
 //   2. The profile has no embedding yet       → we are still working
 //   3. The embedding FAILED                   → we broke, and it will not fix itself
-//   4. Everything worked, nothing scored      → genuinely no matches
+//   4. Their own hard constraint excluded everything → their preferences are too narrow
+//   5. Everything worked, nothing scored      → genuinely no matches
 //
-// Only (4) is about the user. Showing (1)-(3) as "no jobs match you" tells a brand-new
-// candidate in a market with 366 live postings that the product has nothing for them —
-// which is not a degraded experience, it is a wrong and discouraging one.
+// Only (4) and (5) are about the user. Showing (1)-(3) as "no jobs match you" tells a
+// brand-new candidate in a market with 366 live postings that the product has nothing for
+// them — which is not a degraded experience, it is a wrong and discouraging one.
+//
+// (4) IS NEW, and it is not the same answer as (5). "Remote only" is now a hard retrieval
+// constraint rather than a preference nobody read, and on this corpus 4 of 368 published
+// jobs are REMOTE — so a remote-only candidate can legitimately retrieve nothing. Under
+// (5) the client says "no jobs match you", which reads as a verdict on the CANDIDATE when
+// the true cause is a filter they set and can undo. Telling those apart is the same
+// distinction this endpoint exists to make.
 //
 // This is a SEPARATE endpoint rather than an envelope on the list because the list is
 // already `RecommendedJobDto[]` in a published contract, and the PWA caches it. Adding a
@@ -31,15 +39,33 @@ export type MatchReadinessState =
   | 'READY'
   | 'NO_PROFILE'
   | 'EMBEDDING_PENDING'
-  | 'EMBEDDING_FAILED';
+  | 'EMBEDDING_FAILED'
+  | 'NO_MATCHES_FOR_CONSTRAINTS';
+
+/**
+ * A hard constraint the candidate set that retrieval enforces as a filter.
+ *
+ * Only REMOTE_ONLY exists today. It is a LIST and a named type rather than a boolean so
+ * adding the next one (a salary floor, once that filter is enabled) does not change the
+ * response shape or need a new state.
+ */
+export type MatchConstraint = 'REMOTE_ONLY';
 
 export class MatchReadinessDto {
   @ApiProperty({
-    enum: ['READY', 'NO_PROFILE', 'EMBEDDING_PENDING', 'EMBEDDING_FAILED'],
+    enum: [
+      'READY',
+      'NO_PROFILE',
+      'EMBEDDING_PENDING',
+      'EMBEDDING_FAILED',
+      'NO_MATCHES_FOR_CONSTRAINTS',
+    ],
     description:
       'READY means an empty recommendations list genuinely means "no matches". ' +
-      'Anything else means the list is empty because of us or because onboarding is ' +
-      'incomplete — do NOT render it as "no jobs match you".',
+      'NO_MATCHES_FOR_CONSTRAINTS means the candidate WOULD have matches but their own ' +
+      'hard filter removed them — render it as "widen your preferences", never as "no ' +
+      'jobs match you". Anything else means the list is empty because of us or because ' +
+      'onboarding is incomplete — also not "no jobs match you".',
   })
   state: MatchReadinessState;
 
@@ -76,6 +102,27 @@ export class MatchReadinessDto {
   })
   detail?: string;
 
+  @ApiPropertyOptional({
+    isArray: true,
+    enum: ['REMOTE_ONLY'],
+    description:
+      "Which of the candidate's own hard filters emptied the list. Present only on " +
+      'NO_MATCHES_FOR_CONSTRAINTS. Machine-readable so the client can name the exact ' +
+      'setting to relax and link to it, rather than parsing `message`.',
+  })
+  constraints?: MatchConstraint[];
+
+  @ApiPropertyOptional({
+    description:
+      'How many jobs retrieval found for this candidate IGNORING the constraints above ' +
+      '— i.e. how many they would see if they relaxed them. Lets the client say ' +
+      '"12 jobs matched you, but none are remote". ' +
+      'A FLOOR, NOT AN EXACT TOTAL: retrieval stops at its pool size, so this saturates ' +
+      '(currently at 50). Word it as "at least N" once it reaches that ceiling rather ' +
+      'than quoting it as a count.',
+  })
+  matchedIgnoringConstraints?: number;
+
   constructor(init: MatchReadinessDto) {
     this.state = init.state;
     this.message = init.message;
@@ -83,5 +130,7 @@ export class MatchReadinessDto {
     this.action = init.action;
     this.embeddedAt = init.embeddedAt;
     this.detail = init.detail;
+    this.constraints = init.constraints;
+    this.matchedIgnoringConstraints = init.matchedIgnoringConstraints;
   }
 }
