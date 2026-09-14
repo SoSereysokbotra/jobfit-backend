@@ -141,10 +141,13 @@ export class AuthController {
   })
   async register(
     @Body() dto: RegisterDto,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
     const result = (await this.commandBus.execute(
-      new RegisterCommand(dto.email, dto.password, dto.name),
+      // `req.ip` feeds the terms-acceptance audit trail (D7), the same source the login
+      // lockout already uses.
+      new RegisterCommand(dto.email, dto.password, dto.name, req.ip ?? ''),
     )) as { email: string };
     // base64(email) so verify-email knows whose account without a body field.
     this.setCookie(

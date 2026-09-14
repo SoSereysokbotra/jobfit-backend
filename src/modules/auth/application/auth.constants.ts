@@ -37,3 +37,13 @@ export const REFRESH_TOKEN_TTL_SECONDS = REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60;
  * absorb network jitter.
  */
 export const REFRESH_ROTATION_GRACE_SECONDS = 15;
+
+/**
+ * The Terms of Service version currently presented at registration.
+ *
+ * BUMP THIS WHENEVER THE PUBLISHED TERMS CHANGE, in the same commit that publishes them.
+ * The whole point of storing a version beside the timestamp is to answer "which words did
+ * this person agree to?"; a constant that lags the published document answers it wrongly,
+ * which is worse than not answering at all.
+ */
+export const TERMS_VERSION = '2026-09-v1';

@@ -42,6 +42,17 @@ export interface UserProps {
   updatedAt: Date;
   lastLogin?: Date | null;
   deletedAt?: Date | null;
+  /**
+   * Terms-of-service consent, as three facts that only mean something together: WHEN they
+   * accepted, WHICH published version was in force, and the IP the act came from.
+   *
+   * All optional, and null is a real state — every account created before the audit trail
+   * existed has no record, and that must read as "not known" rather than being quietly
+   * back-filled. See the `users.termsAcceptedAt` column comment.
+   */
+  termsAcceptedAt?: Date | null;
+  termsVersion?: string | null;
+  termsAcceptedIp?: string | null;
 }
 
 export interface CreateUserProps {
@@ -50,6 +61,10 @@ export interface CreateUserProps {
   name?: string;
   passwordHash: string;
   role?: UserRole;
+  /** Version of the Terms presented at registration, recorded as proof of consent. */
+  termsVersion?: string | null;
+  /** Originating IP of the registration request. */
+  termsAcceptedIp?: string | null;
 }
 
 export class UserEntity {
@@ -69,6 +84,9 @@ export class UserEntity {
   updatedAt: Date;
   lastLogin?: Date | null;
   deletedAt?: Date | null;
+  termsAcceptedAt?: Date | null;
+  termsVersion?: string | null;
+  termsAcceptedIp?: string | null;
 
   private constructor(props: UserProps) {
     this.id = props.id;
@@ -89,6 +107,9 @@ export class UserEntity {
     this.updatedAt = props.updatedAt;
     this.lastLogin = props.lastLogin ?? null;
     this.deletedAt = props.deletedAt ?? null;
+    this.termsAcceptedAt = props.termsAcceptedAt ?? null;
+    this.termsVersion = props.termsVersion ?? null;
+    this.termsAcceptedIp = props.termsAcceptedIp ?? null;
   }
 
   /** New, unverified user (Flow 1 — Register). */
@@ -110,6 +131,11 @@ export class UserEntity {
       updatedAt: now,
       lastLogin: null,
       deletedAt: null,
+      // Stamped only when a version was actually presented. A caller that supplies none
+      // records no consent rather than a consent to nothing.
+      termsAcceptedAt: props.termsVersion ? now : null,
+      termsVersion: props.termsVersion ?? null,
+      termsAcceptedIp: props.termsVersion ? (props.termsAcceptedIp ?? null) : null,
     });
   }
 
@@ -135,7 +161,23 @@ export class UserEntity {
       updatedAt: this.updatedAt,
       lastLogin: this.lastLogin ?? null,
       deletedAt: this.deletedAt ?? null,
+      termsAcceptedAt: this.termsAcceptedAt ?? null,
+      termsVersion: this.termsVersion ?? null,
+      termsAcceptedIp: this.termsAcceptedIp ?? null,
     };
+  }
+
+  /**
+   * Record acceptance of a published Terms version.
+   *
+   * Called on re-registration too, because that path reuses an existing unverified row and
+   * the person is agreeing again, now — to whatever version is in force now. Leaving the
+   * old stamp would record consent to a document they may never have seen.
+   */
+  acceptTerms(version: string, ip?: string | null): void {
+    this.termsAcceptedAt = new Date();
+    this.termsVersion = version;
+    this.termsAcceptedIp = ip ?? null;
   }
 
   // ----- State transitions (Flows 1–6) -----

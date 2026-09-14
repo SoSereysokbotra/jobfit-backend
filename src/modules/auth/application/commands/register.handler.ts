@@ -19,6 +19,7 @@ import {
   WeakPasswordError,
 } from '../errors/auth.errors';
 import {
+  TERMS_VERSION,
   VERIFICATION_CODE_LENGTH,
   VERIFICATION_CODE_TTL_MINUTES,
 } from '../auth.constants';
@@ -63,6 +64,8 @@ export class RegisterHandler implements ICommandHandler<RegisterCommand> {
       if (command.name) existing.name = command.name;
       existing.passwordHash = passwordHash;
       existing.setVerificationCode(code, expiry);
+      // They are agreeing again, now, to the version in force now — see `acceptTerms`.
+      existing.acceptTerms(TERMS_VERSION, command.ipAddress);
       user = existing;
     } else {
       user = UserEntity.create({
@@ -70,6 +73,11 @@ export class RegisterHandler implements ICommandHandler<RegisterCommand> {
         email,
         name: command.name,
         passwordHash,
+        // Proof of consent (D7): the version the signup form presented, stamped with the
+        // moment and the originating IP. Recorded here rather than trusted from the
+        // client — a version number supplied by the caller is a claim, not a record.
+        termsVersion: TERMS_VERSION,
+        termsAcceptedIp: command.ipAddress,
       });
       user.setVerificationCode(code, expiry);
     }

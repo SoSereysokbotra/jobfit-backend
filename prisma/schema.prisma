@@ -232,6 +232,26 @@ model User {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
+  // ── Terms acceptance audit trail (D7) ──────────────────────────────────────
+  //
+  // PROOF OF CONSENT, AND IT HAS TO BE THREE COLUMNS, NOT ONE. "Did this person agree to
+  // our terms?" is not answerable by `createdAt` alone: terms change, and consent to the
+  // February wording is not consent to the September wording. What makes the record
+  // defensible is WHICH text was in force at the moment they clicked, which is why the
+  // version travels with the timestamp.
+  //
+  // NULL on every row created before this shipped, and that null must be read as "we do
+  // not know", never back-filled with a guess. Inventing a timestamp for a consent that
+  // was never recorded is worse than admitting the gap: the gap is a missing record, the
+  // invention is a false one.
+  /// When the account holder accepted the Terms of Service. Null = never recorded.
+  termsAcceptedAt DateTime?
+  /// Which published version they accepted, e.g. "2026-09-v1". Null = never recorded.
+  termsVersion    String?
+  /// Originating IP at acceptance. Evidence of the act, and deliberately not used for
+  /// anything else — it is not a login record and must not become one.
+  termsAcceptedIp String?
+
   /// The address this account used before it was deleted.
   ///
   /// Soft delete RELEASES `email` to a reserved tombstone, because `email` is @unique and

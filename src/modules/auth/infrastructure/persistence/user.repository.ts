@@ -227,6 +227,9 @@ export class UserRepository implements IUserRepository {
       updatedAt: row.updatedAt,
       lastLogin: row.lastLogin,
       deletedAt: row.deletedAt,
+      termsAcceptedAt: row.termsAcceptedAt,
+      termsVersion: row.termsVersion,
+      termsAcceptedIp: row.termsAcceptedIp,
     };
     return UserEntity.fromPersistence(props);
   }
@@ -249,6 +252,9 @@ export class UserRepository implements IUserRepository {
       isActive: user.isActive,
       lastLogin: user.lastLogin ?? null,
       deletedAt: user.deletedAt ?? null,
+      termsAcceptedAt: user.termsAcceptedAt ?? null,
+      termsVersion: user.termsVersion ?? null,
+      termsAcceptedIp: user.termsAcceptedIp ?? null,
     };
   }
 

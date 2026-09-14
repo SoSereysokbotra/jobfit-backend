@@ -15,6 +15,7 @@ import { RegisterCommand } from './register.command';
 import { AuthDomainService } from '../../domain/services/auth.domain.service';
 import { UserEntity, type UserRole } from '../../domain/entities/user.entity';
 import { EmailAlreadyRegisteredError } from '../errors/auth.errors';
+import { TERMS_VERSION } from '../auth.constants';
 
 const PASSWORD = 'S3curePass';
 
@@ -90,5 +91,56 @@ describe('RegisterHandler — duplicate address gate', () => {
     ).rejects.toBeInstanceOf(EmailAlreadyRegisteredError);
 
     expect(userRepo.save).not.toHaveBeenCalled();
+  });
+
+  // ── Terms acceptance audit trail (D7) ──────────────────────────────────────
+  //
+  // These exist because the failure mode is SILENT. If the stamp stops being written, the
+  // app keeps working perfectly and nothing looks wrong — the loss only surfaces the day
+  // someone disputes having agreed, by which point every account registered since is
+  // missing its evidence and cannot be repaired retroactively.
+
+  it('stamps the terms version, time and IP when a new account is created', async () => {
+    userRepo.findByEmail.mockResolvedValue(null);
+    const before = Date.now();
+
+    await handler.execute(
+      new RegisterCommand('jane@techcorp.com', PASSWORD, 'Jane', '203.0.113.7'),
+    );
+
+    const saved = userRepo.save.mock.calls[0][0] as UserEntity;
+    expect(saved.termsVersion).toBe(TERMS_VERSION);
+    expect(saved.termsAcceptedIp).toBe('203.0.113.7');
+    expect(saved.termsAcceptedAt).toBeInstanceOf(Date);
+    expect(saved.termsAcceptedAt!.getTime()).toBeGreaterThanOrEqual(before);
+  });
+
+  it('re-stamps on re-registration, because the agreement is to the CURRENT version', async () => {
+    // The reused row carries an older consent. Keeping it would record agreement to a
+    // document this person may never have been shown.
+    const existing = makeUser('JOB_SEEKER', false);
+    existing.acceptTerms('2020-01-v0', '198.51.100.1');
+    userRepo.findByEmail.mockResolvedValue(existing);
+
+    await handler.execute(
+      new RegisterCommand('jane@techcorp.com', PASSWORD, 'Jane', '203.0.113.9'),
+    );
+
+    const saved = userRepo.save.mock.calls[0][0] as UserEntity;
+    expect(saved.termsVersion).toBe(TERMS_VERSION);
+    expect(saved.termsAcceptedIp).toBe('203.0.113.9');
+  });
+
+  it('records no consent at all when no IP was captured, rather than an empty one', async () => {
+    // A missing IP is missing evidence of one part of the act; it must not blank out the
+    // version or the timestamp, which are the parts we do have.
+    userRepo.findByEmail.mockResolvedValue(null);
+
+    await handler.execute(new RegisterCommand('jane@techcorp.com', PASSWORD, 'Jane'));
+
+    const saved = userRepo.save.mock.calls[0][0] as UserEntity;
+    expect(saved.termsVersion).toBe(TERMS_VERSION);
+    expect(saved.termsAcceptedAt).toBeInstanceOf(Date);
+    expect(saved.termsAcceptedIp).toBeNull();
   });
 });
