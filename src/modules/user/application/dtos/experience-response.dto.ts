@@ -35,8 +35,13 @@ export class ExperienceResponseDto {
   @ApiProperty()
   isCurrentJob: boolean;
 
-  @ApiProperty()
-  startDate: Date;
+  /**
+   * Absent when no dates were recorded. The profile form no longer collects employment
+   * dates, so rows added through it carry none; older rows keep what they were saved
+   * with. Clients must render the absence rather than substituting a date.
+   */
+  @ApiPropertyOptional()
+  startDate?: Date;
 
   @ApiPropertyOptional()
   endDate?: Date;
@@ -60,7 +65,7 @@ export class ExperienceResponseDto {
     this.industry = experience.industry;
     this.description = experience.description;
     this.isCurrentJob = experience.isCurrentJob;
-    this.startDate = experience.startDate;
+    this.startDate = experience.startDate ?? undefined;
     this.endDate = experience.endDate;
     this.technologies = experience.technologies;
     this.createdAt = experience.createdAt;

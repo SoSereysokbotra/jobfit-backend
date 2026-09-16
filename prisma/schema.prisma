@@ -424,7 +424,13 @@ model Experience {
   description  String?
   isCurrentJob Boolean @default(false)
 
-  startDate DateTime
+  /// OPTIONAL SINCE THE PROFILE FORM STOPPED ASKING. Employment dates were a required
+  /// field on the profile's Experience tab; they are no longer collected there, so a row
+  /// added through the UI has none. Existing rows keep the dates they were saved with.
+  ///
+  /// Null means "not recorded", never "started today". Nothing may substitute a default:
+  /// a fabricated start date would silently become a duration on a generated CV.
+  startDate DateTime?
   endDate   DateTime?
 
   technologies String[] // tech used

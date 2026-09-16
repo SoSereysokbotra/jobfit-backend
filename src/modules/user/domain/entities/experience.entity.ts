@@ -16,7 +16,7 @@ export interface ExperienceProps {
   industry: string;
   description?: string;
   isCurrentJob?: boolean;
-  startDate: Date;
+  startDate?: Date | null;
   endDate?: Date;
   technologies?: string[];
   createdAt?: Date;
@@ -32,7 +32,7 @@ export class Experience extends Entity {
   industry: string;
   description?: string;
   isCurrentJob: boolean;
-  startDate: Date;
+  startDate?: Date | null;
   endDate?: Date;
   technologies: string[];
 
@@ -51,7 +51,9 @@ export class Experience extends Entity {
     if (props.description && props.description.length > VALIDATION.BIO_MAX_LENGTH) {
       throw new Error(`description must be at most ${VALIDATION.BIO_MAX_LENGTH} characters`);
     }
-    if (props.endDate && props.endDate < props.startDate) {
+    // Only an ORDERING check, and only when both ends exist. With dates now optional,
+    // an end date without a start is incomplete data, not invalid data.
+    if (props.endDate && props.startDate && props.endDate < props.startDate) {
       throw new Error('endDate cannot be before startDate');
     }
 
@@ -77,8 +79,14 @@ export class Experience extends Entity {
     return this.isCurrentJob;
   }
 
-  /** Duration in years (to 1 decimal) between startDate and endDate (or now if current). */
-  getDuration(): number {
+  /**
+   * Duration in years (to 1 decimal), or NULL when no start date was recorded.
+   *
+   * Null rather than 0: zero is a duration ("this lasted no time"), and a role with no
+   * recorded dates has not been measured at all. Callers must render the difference.
+   */
+  getDuration(): number | null {
+    if (!this.startDate) return null;
     const end = this.endDate ?? new Date();
     const years =
       (end.getTime() - this.startDate.getTime()) /

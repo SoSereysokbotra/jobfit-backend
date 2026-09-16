@@ -48,10 +48,15 @@ export class AddExperienceDto {
   @IsBoolean()
   isCurrentJob?: boolean;
 
-  @ApiProperty({ type: String, format: 'date-time' })
+  /**
+   * Optional: the profile form no longer collects employment dates. Absent means the
+   * user did not supply one, and it is stored as null rather than defaulted.
+   */
+  @ApiPropertyOptional({ type: String, format: 'date-time' })
+  @IsOptional()
   @Type(() => Date)
   @IsDate()
-  startDate: Date;
+  startDate?: Date;
 
   @ApiPropertyOptional({ type: String, format: 'date-time' })
   @IsOptional()

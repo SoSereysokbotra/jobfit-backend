@@ -24,7 +24,8 @@ import { PrismaService } from '@infra/prisma/prisma.service';
 export interface ProfileExperienceRow {
   company: string;
   title: string;
-  startDate: Date;
+  /** Null when the user recorded no dates — the profile form no longer asks for them. */
+  startDate: Date | null;
   endDate: Date | null;
   isCurrentJob: boolean;
   description: string | null;
@@ -62,7 +63,10 @@ export class ProfileContentRepository {
   async experiences(userId: string): Promise<ProfileExperienceRow[]> {
     const rows = await this.prisma.experience.findMany({
       where: { userId, deletedAt: null },
-      orderBy: { startDate: 'desc' },
+      // Newest first, with undated roles last rather than first: a row with no start date
+      // is not "the most recent", it is unknown, and leading a generated CV with it would
+      // present missing data as recency.
+      orderBy: [{ startDate: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
       select: {
         company: true,
         title: true,
