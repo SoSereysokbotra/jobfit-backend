@@ -112,22 +112,30 @@ steps:
       # REDIS_PREFIX namespaces every key this app writes, so two environments sharing one
       # Redis instance cannot collide on `lockout:*` / `blacklist:*` (Redis audit R7).
       # Each environment needs its OWN value: dev:, staging:, prod:.
-      - '--set-env-vars=^|^NODE_ENV=production|LOG_FORMAT=json|LOG_LEVEL=info|METRICS_ENABLED=true|TRACE_ENABLED=false|SERVICE_NAME=${_SERVICE}|SERVICE_VERSION=$BUILD_ID|GCP_PROJECT_ID=$PROJECT_ID|CORS_ORIGIN=${_CORS_ORIGIN}|REDIS_PREFIX=prod:|EMAIL_HOST=smtp.gmail.com|EMAIL_PORT=587|EMAIL_USER=soviseth869@gmail.com|SMTP_FROM=JobFit Support <soviseth869@gmail.com>|AI_SERVICE_URL=${_AI_SERVICE_URL}'
+      - '--set-env-vars=^|^NODE_ENV=production|LOG_FORMAT=json|LOG_LEVEL=info|METRICS_ENABLED=true|TRACE_ENABLED=false|SERVICE_NAME=${_SERVICE}|SERVICE_VERSION=$BUILD_ID|GCP_PROJECT_ID=$PROJECT_ID|CORS_ORIGIN=${_CORS_ORIGIN}|REDIS_PREFIX=prod:|EMAIL_HOST=smtp.gmail.com|EMAIL_PORT=587|EMAIL_USER=soviseth869@gmail.com|SMTP_FROM=JobFit Support <soviseth869@gmail.com>'
       # AI_SERVICE_KEY is the shared secret for jobfits-ai-service (sent as
       # X-AI-Service-Key). It pairs with _AI_SERVICE_URL above: the URL is public config,
       # the key is not. Both are needed — a URL without a key gets 401 on every call
       # except /health and /ready.
       #
-      # NOT IN --set-secrets, DELIBERATELY (2026-09-21). The secret does not exist in
-      # Secret Manager, and referencing a missing secret fails the whole deploy — that is
-      # exactly what sank the 2026-09-01 build ("Permission denied on secret
-      # AI_SERVICE_KEY", which is also what GCP says for a secret that is not there).
-      # There is no production AI service today: _AI_SERVICE_URL defaults to '' and the
-      # serving revision has carried neither variable since it was created. The app treats
-      # both as optional (env.validation.ts). When a production AI service exists, create
-      # the secret, grant the runtime account secretAccessor on it, set _AI_SERVICE_URL,
-      # and add `AI_SERVICE_KEY=AI_SERVICE_KEY:latest` back below — all in one change,
-      # because a key without a URL is inert and a URL without a key is a 401.
+      # NEITHER IS SET, DELIBERATELY (2026-09-21). Three separate failures, one cause —
+      # there is no production AI service, and half-wiring one breaks the deploy:
+      #
+      #   · AI_SERVICE_KEY in --set-secrets: the secret does not exist in Secret Manager,
+      #     and a missing secret fails the deploy ("Permission denied on secret", which is
+      #     also what GCP says for a secret that is not there). Sank the 2026-09-01 build.
+      #   · AI_SERVICE_URL=${_AI_SERVICE_URL} in --set-env-vars with the substitution at
+      #     its default '': an EMPTY STRING is not "unset". env.validation.ts accepts a
+      #     missing AI_SERVICE_URL but rejects '' as "Invalid url", so the container dies
+      #     at ConfigModule and Cloud Run reports it never listened on 8080. Sank build
+      #     a7a24d39 today. This is why the revision serving since 1 September carries
+      #     no AI_SERVICE_* variable at all — it was removed by hand for that deploy.
+      #
+      # When a production AI service exists: create the secret, grant the runtime
+      # account secretAccessor on it, set _AI_SERVICE_URL to a real URL, and add BOTH
+      # `AI_SERVICE_URL=${_AI_SERVICE_URL}` to --set-env-vars and
+      # `AI_SERVICE_KEY=AI_SERVICE_KEY:latest` to --set-secrets in one change — a key
+      # without a URL is inert, a URL without a key is a 401, and an empty URL is a crash.
       #
       # REDIS_URL is now wired from Secret Manager. It was deliberately omitted for a long
       # time — "the secret exists but its value is unverified, and a bad host is worse
