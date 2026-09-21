@@ -27,11 +27,20 @@ substitutions:
   #
   # Set it when the AI service has a host. See docs/AI_DEGRADATION_PLAN.md §6, item 5.
   #
-  # DECLARED NOWHERE UNTIL THEN. Cloud Build rejects a substitution that is declared but
-  # not referenced ("key _AI_SERVICE_URL ... is not matched in the template"), and the
-  # env-var line that referenced it is gone — an empty value there crashed the container
-  # (see the deploy step). Re-add `_AI_SERVICE_URL: ''` here in the same change that
-  # puts `AI_SERVICE_URL=${_AI_SERVICE_URL}` back into --set-env-vars.
+  # THE HOST IS A LAPTOP (2026-09-21). jobfits-ai-service runs on the owner's machine and
+  # is exposed through ngrok on the account's reserved domain, which is fixed across
+  # restarts — that is the whole reason it can be written here. `run-tunnel.ps1` in the
+  # AI repo starts the tunnel on this exact hostname. When the laptop is off the backend
+  # sees a connection failure, reports `ai.degraded: true` on /health/ready and keeps
+  # serving everything that does not need the AI. This is a demo arrangement, not a
+  # production one: a real deployment runs the AI service somewhere always-on and changes
+  # only this line. MUST end in /api/v1 — env.validation.ts requires the versioned base.
+  #
+  # NEVER SET THIS TO ''. An empty string is not "unset": it fails URL validation and the
+  # container dies at ConfigModule (build a7a24d39). To run without an AI service, remove
+  # this substitution AND the AI_SERVICE_URL entry in --set-env-vars together; Cloud Build
+  # rejects a declared-but-unused substitution.
+  _AI_SERVICE_URL: 'https://stellar-nanny-thermos.ngrok-free.dev/api/v1'
 
 options:
   logging: CLOUD_LOGGING_ONLY
@@ -117,14 +126,15 @@ steps:
       # REDIS_PREFIX namespaces every key this app writes, so two environments sharing one
       # Redis instance cannot collide on `lockout:*` / `blacklist:*` (Redis audit R7).
       # Each environment needs its OWN value: dev:, staging:, prod:.
-      - '--set-env-vars=^|^NODE_ENV=production|LOG_FORMAT=json|LOG_LEVEL=info|METRICS_ENABLED=true|TRACE_ENABLED=false|SERVICE_NAME=${_SERVICE}|SERVICE_VERSION=$BUILD_ID|GCP_PROJECT_ID=$PROJECT_ID|CORS_ORIGIN=${_CORS_ORIGIN}|REDIS_PREFIX=prod:|EMAIL_HOST=smtp.gmail.com|EMAIL_PORT=587|EMAIL_USER=soviseth869@gmail.com|SMTP_FROM=JobFit Support <soviseth869@gmail.com>'
+      - '--set-env-vars=^|^NODE_ENV=production|LOG_FORMAT=json|LOG_LEVEL=info|METRICS_ENABLED=true|TRACE_ENABLED=false|SERVICE_NAME=${_SERVICE}|SERVICE_VERSION=$BUILD_ID|GCP_PROJECT_ID=$PROJECT_ID|CORS_ORIGIN=${_CORS_ORIGIN}|REDIS_PREFIX=prod:|EMAIL_HOST=smtp.gmail.com|EMAIL_PORT=587|EMAIL_USER=soviseth869@gmail.com|SMTP_FROM=JobFit Support <soviseth869@gmail.com>|AI_SERVICE_URL=${_AI_SERVICE_URL}'
       # AI_SERVICE_KEY is the shared secret for jobfits-ai-service (sent as
       # X-AI-Service-Key). It pairs with _AI_SERVICE_URL above: the URL is public config,
       # the key is not. Both are needed — a URL without a key gets 401 on every call
       # except /health and /ready.
       #
-      # NEITHER IS SET, DELIBERATELY (2026-09-21). Three separate failures, one cause —
-      # there is no production AI service, and half-wiring one breaks the deploy:
+      # BOTH ARE SET AS OF 2026-09-21, and the history below is why they must always be
+      # set TOGETHER. Earlier that day three separate failures had one cause — an AI
+      # service half-wired into a deploy that had nowhere real to point:
       #
       #   · AI_SERVICE_KEY in --set-secrets: the secret does not exist in Secret Manager,
       #     and a missing secret fails the deploy ("Permission denied on secret", which is
@@ -136,11 +146,12 @@ steps:
       #     a7a24d39 today. This is why the revision serving since 1 September carries
       #     no AI_SERVICE_* variable at all — it was removed by hand for that deploy.
       #
-      # When a production AI service exists: create the secret, grant the runtime
-      # account secretAccessor on it, set _AI_SERVICE_URL to a real URL, and add BOTH
-      # `AI_SERVICE_URL=${_AI_SERVICE_URL}` to --set-env-vars and
-      # `AI_SERVICE_KEY=AI_SERVICE_KEY:latest` to --set-secrets in one change — a key
-      # without a URL is inert, a URL without a key is a 401, and an empty URL is a crash.
+      # Resolved the same day: the AI_SERVICE_KEY secret now exists (a generated 64-char
+      # value replacing the "change-me" placeholder both sides had been using — fine on
+      # localhost, indefensible on a public hostname), the runtime account has
+      # secretAccessor on it, and _AI_SERVICE_URL points at the fixed ngrok domain. A key
+      # without a URL is inert, a URL without a key is a 401, and an empty URL is a crash,
+      # so if either is ever removed again, remove both.
       #
       # REDIS_URL is now wired from Secret Manager. It was deliberately omitted for a long
       # time — "the secret exists but its value is unverified, and a bad host is worse
@@ -173,4 +184,4 @@ steps:
       # SLACK_WEBHOOK_URL wired (Phase 4 alerts).
       # HEALTHCHECKS_PING_URL wired (dead-man's-switch heartbeat).
       # SUPABASE_* required at boot. EMAIL_PASS is the Gmail app password.
-      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,METRICS_TOKEN=METRICS_TOKEN:latest,SLACK_WEBHOOK_URL=SLACK_WEBHOOK_URL:latest,HEALTHCHECKS_PING_URL=HEALTHCHECKS_PING_URL:latest,SUPABASE_URL=SUPABASE_URL:latest,SUPABASE_SERVICE_ROLE_KEY=SUPABASE_SERVICE_ROLE_KEY:latest,SUPABASE_ANON_KEY=SUPABASE_ANON_KEY:latest,SUPABASE_JWT_SECRET=SUPABASE_JWT_SECRET:latest,EMAIL_PASS=EMAIL_PASS:latest'
+      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,METRICS_TOKEN=METRICS_TOKEN:latest,SLACK_WEBHOOK_URL=SLACK_WEBHOOK_URL:latest,HEALTHCHECKS_PING_URL=HEALTHCHECKS_PING_URL:latest,SUPABASE_URL=SUPABASE_URL:latest,SUPABASE_SERVICE_ROLE_KEY=SUPABASE_SERVICE_ROLE_KEY:latest,SUPABASE_ANON_KEY=SUPABASE_ANON_KEY:latest,SUPABASE_JWT_SECRET=SUPABASE_JWT_SECRET:latest,EMAIL_PASS=EMAIL_PASS:latest,AI_SERVICE_KEY=AI_SERVICE_KEY:latest'
