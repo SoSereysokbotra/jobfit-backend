@@ -46,7 +46,7 @@ substitutions:
   # takes a plain optional string, and the verifier treats '' as "not configured" — the
   # endpoint answers 503 and nothing else changes. Set it to the Web-application client
   # id from Google Cloud Console once it exists; the frontend must carry the same value.
-  _GOOGLE_CLIENT_ID: ''
+  _GOOGLE_CLIENT_ID: '39884178646-s0o8qfjot5p40cniiij8j3t3san5if0v.apps.googleusercontent.com'
 
 options:
   logging: CLOUD_LOGGING_ONLY
