@@ -65,6 +65,17 @@ export class UserRepository implements IUserRepository {
     return this.liveOnly(user);
   }
 
+  /**
+   * Not cached on purpose. A Google sign-in is one lookup per session start — the
+   * cache-aside path exists for /auth/me, which runs on every page load. Adding a third
+   * lookup key here would be a third thing to invalidate for no measurable gain.
+   */
+  async findByGoogleId(sub: string): Promise<UserEntity | null> {
+    const row = await this.prisma.user.findUnique({ where: { googleId: sub } });
+    if (!row) return null;
+    return this.liveOnly(this.toDomain(row));
+  }
+
   // Code lookups are not cached (codes are short-lived and change frequently).
   async findByVerificationCode(code: string): Promise<UserEntity | null> {
     const row = await this.prisma.user.findFirst({
@@ -230,6 +241,7 @@ export class UserRepository implements IUserRepository {
       termsAcceptedAt: row.termsAcceptedAt,
       termsVersion: row.termsVersion,
       termsAcceptedIp: row.termsAcceptedIp,
+      googleId: row.googleId,
     };
     return UserEntity.fromPersistence(props);
   }
@@ -255,6 +267,7 @@ export class UserRepository implements IUserRepository {
       termsAcceptedAt: user.termsAcceptedAt ?? null,
       termsVersion: user.termsVersion ?? null,
       termsAcceptedIp: user.termsAcceptedIp ?? null,
+      googleId: user.googleId ?? null,
     };
   }
 

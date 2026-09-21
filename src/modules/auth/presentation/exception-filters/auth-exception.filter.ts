@@ -29,6 +29,9 @@ import {
   RefreshTokenReuseDetectedError,
   UserNotFoundError,
   WeakPasswordError,
+  InvalidGoogleTokenError,
+  GoogleSignInNotAllowedError,
+  GoogleSignInNotConfiguredError,
 } from '../../application/errors/auth.errors';
 
 @Catch(AuthError)
@@ -101,6 +104,18 @@ export class AuthExceptionFilter implements ExceptionFilter {
     }
     if (exception instanceof LoginBlockedError) {
       return HttpStatus.TOO_MANY_REQUESTS; // 429
+    }
+    // 401 — the token was not accepted. Same class as a wrong password.
+    if (exception instanceof InvalidGoogleTokenError) {
+      return HttpStatus.UNAUTHORIZED; // 401
+    }
+    // 403 — a valid identity that this route refuses to sign in (admin, unactivated
+    // employer). Not 401: retrying with a better token will not help.
+    if (exception instanceof GoogleSignInNotAllowedError) {
+      return HttpStatus.FORBIDDEN; // 403
+    }
+    if (exception instanceof GoogleSignInNotConfiguredError) {
+      return HttpStatus.SERVICE_UNAVAILABLE; // 503
     }
     if (exception instanceof EmailNotVerifiedError) {
       return HttpStatus.FORBIDDEN; // 403

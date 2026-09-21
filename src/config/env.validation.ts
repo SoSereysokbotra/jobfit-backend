@@ -39,6 +39,14 @@ const envSchema = z.object({
   HEALTHCHECKS_PING_URL: z.string().url().optional(),
   HEALTHCHECKS_INTERVAL_SECONDS: z.string().optional(),
 
+  // ── Google sign-in ────────────────────────────────────────────────────────
+  // The OAuth 2.0 client id (…apps.googleusercontent.com). It is the AUDIENCE the
+  // backend checks ID tokens against — a token minted for any other client is refused
+  // — and it is public by nature: the frontend embeds the same value. No client secret
+  // is needed for the ID-token flow. Optional (and '' counts as unset) so the backend
+  // boots before the client exists; POST /auth/google then answers 503.
+  GOOGLE_CLIENT_ID: z.string().optional(),
+
   // ── AI service (jobfits-ai-service) ───────────────────────────────────────
   // AI_SERVICE_URL: versioned base URL of the FastAPI AI service (must include
   // `/api/v1`). AI_SERVICE_KEY: shared secret sent as `X-AI-Service-Key`.

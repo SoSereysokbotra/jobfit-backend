@@ -38,6 +38,8 @@ import { VerifyPasswordResetHandler } from './application/commands/verify-passwo
 import { ResetPasswordHandler } from './application/commands/reset-password.handler';
 import { ResendPasswordResetVerificationHandler } from './application/commands/resend-password-reset-verification.handler';
 import { LoginHandler } from './application/commands/login.handler';
+import { GoogleLoginHandler } from './application/commands/google-login.handler';
+import { GoogleIdTokenVerifier } from './infrastructure/services/google-id-token.verifier';
 import { RefreshTokenHandler } from './application/commands/refresh-token.handler';
 import { LogoutHandler } from './application/commands/logout.handler';
 
@@ -50,6 +52,7 @@ const CommandHandlers = [
   ResetPasswordHandler,
   ResendPasswordResetVerificationHandler,
   LoginHandler,
+  GoogleLoginHandler,
   RefreshTokenHandler,
   LogoutHandler,
 ];
@@ -72,6 +75,7 @@ const CommandHandlers = [
     // services
     AuthDomainService,
     AuthTokenService,
+    GoogleIdTokenVerifier,
     // @OnEvent handlers are picked up because this listener is a provider
     AuthEventsListener,
     // CQRS command handlers

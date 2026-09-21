@@ -232,6 +232,18 @@ model User {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
+  // ── Google sign-in ─────────────────────────────────────────────────────────
+  //
+  // Google's stable subject id (`sub` in the ID token), NOT the email. Emails can be
+  // changed on the Google side and re-issued to someone else after deletion; `sub` never
+  // moves. Lookup by `sub` first, email second, is what stops a recycled address from
+  // inheriting an old account.
+  //
+  // Null for every password account. An account created through Google has an empty
+  // `passwordHash` and can only sign in this way until it sets a password via the
+  // reset flow — bcrypt.compare against '' is false, so password login simply fails.
+  googleId String? @unique
+
   // ── Terms acceptance audit trail (D7) ──────────────────────────────────────
   //
   // PROOF OF CONSENT, AND IT HAS TO BE THREE COLUMNS, NOT ONE. "Did this person agree to

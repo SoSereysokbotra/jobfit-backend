@@ -8,6 +8,8 @@ import { UserEntity } from '../entities/user.entity';
 export interface IUserRepository {
   findById(id: string): Promise<UserEntity | null>;
   findByEmail(email: string): Promise<UserEntity | null>;
+  /** Live account linked to this Google `sub`, or null. Same liveness rules as findByEmail. */
+  findByGoogleId(sub: string): Promise<UserEntity | null>;
   findByVerificationCode(code: string): Promise<UserEntity | null>;
   findByPasswordResetCode(code: string): Promise<UserEntity | null>;
   existsByEmail(email: string): Promise<boolean>;

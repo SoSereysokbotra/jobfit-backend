@@ -13,6 +13,17 @@ export class AuthResponseDto {
   accessToken: string;
 }
 
+/** POST /auth/google success body — /login's shape plus one routing hint. */
+export class GoogleAuthResponseDto extends AuthResponseDto {
+  @ApiProperty({
+    description:
+      'True when this sign-in created the account. The client sends a new user to ' +
+      'onboarding and a returning one to their home; nothing else differs.',
+    example: false,
+  })
+  isNewUser: boolean;
+}
+
 /** Generic success body for state-changing routes that return no data. */
 export class MessageResponseDto {
   @ApiProperty({ example: true, required: false })

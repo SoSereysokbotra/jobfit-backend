@@ -121,3 +121,37 @@ export class UserNotFoundError extends AuthError {
     super(message);
   }
 }
+
+/**
+ * The Google ID token did not verify — wrong audience, expired, bad signature, or not
+ * a token at all. One error for every reason, on purpose: the caller learns "not
+ * accepted", never which check failed.
+ */
+export class InvalidGoogleTokenError extends AuthError {
+  readonly code = 'INVALID_GOOGLE_TOKEN';
+  constructor(message = 'Google sign-in could not be verified') {
+    super(message);
+  }
+}
+
+/**
+ * The token verified, but this address cannot be signed into through Google — it belongs
+ * to an admin, or to an employer account that has not been activated. Those flows have
+ * their own gates and Google must not be a way around them.
+ */
+export class GoogleSignInNotAllowedError extends AuthError {
+  readonly code = 'GOOGLE_SIGN_IN_NOT_ALLOWED';
+  constructor(
+    message = 'This account cannot sign in with Google. Use your password instead.',
+  ) {
+    super(message);
+  }
+}
+
+/** GOOGLE_CLIENT_ID is not set on this deployment. */
+export class GoogleSignInNotConfiguredError extends AuthError {
+  readonly code = 'GOOGLE_SIGN_IN_NOT_CONFIGURED';
+  constructor(message = 'Google sign-in is not available on this server') {
+    super(message);
+  }
+}

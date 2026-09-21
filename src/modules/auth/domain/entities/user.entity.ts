@@ -53,6 +53,8 @@ export interface UserProps {
   termsAcceptedAt?: Date | null;
   termsVersion?: string | null;
   termsAcceptedIp?: string | null;
+  /** Google's `sub` for accounts linked to Google sign-in. See the schema comment. */
+  googleId?: string | null;
 }
 
 export interface CreateUserProps {
@@ -65,6 +67,12 @@ export interface CreateUserProps {
   termsVersion?: string | null;
   /** Originating IP of the registration request. */
   termsAcceptedIp?: string | null;
+  /**
+   * Google's `sub`, when the account is being created from a verified Google identity.
+   * Implies `isVerified: true` — Google has already verified the address, and sending
+   * our own 6-digit code to an address Google vouches for would be theatre.
+   */
+  googleId?: string | null;
 }
 
 export class UserEntity {
@@ -87,6 +95,7 @@ export class UserEntity {
   termsAcceptedAt?: Date | null;
   termsVersion?: string | null;
   termsAcceptedIp?: string | null;
+  googleId?: string | null;
 
   private constructor(props: UserProps) {
     this.id = props.id;
@@ -110,6 +119,7 @@ export class UserEntity {
     this.termsAcceptedAt = props.termsAcceptedAt ?? null;
     this.termsVersion = props.termsVersion ?? null;
     this.termsAcceptedIp = props.termsAcceptedIp ?? null;
+    this.googleId = props.googleId ?? null;
   }
 
   /** New, unverified user (Flow 1 — Register). */
@@ -121,7 +131,8 @@ export class UserEntity {
       name: props.name ?? '',
       passwordHash: props.passwordHash,
       role: props.role ?? 'JOB_SEEKER',
-      isVerified: false,
+      // A Google-backed identity arrives already verified; see CreateUserProps.googleId.
+      isVerified: Boolean(props.googleId),
       verificationCode: null,
       verificationCodeExpiry: null,
       passwordResetCode: null,
@@ -136,6 +147,7 @@ export class UserEntity {
       termsAcceptedAt: props.termsVersion ? now : null,
       termsVersion: props.termsVersion ?? null,
       termsAcceptedIp: props.termsVersion ? (props.termsAcceptedIp ?? null) : null,
+      googleId: props.googleId ?? null,
     });
   }
 
@@ -164,6 +176,7 @@ export class UserEntity {
       termsAcceptedAt: this.termsAcceptedAt ?? null,
       termsVersion: this.termsVersion ?? null,
       termsAcceptedIp: this.termsAcceptedIp ?? null,
+      googleId: this.googleId ?? null,
     };
   }
 
@@ -190,6 +203,20 @@ export class UserEntity {
   }
 
   /** Flow 2 — email verified: mark verified and discard the code. */
+  /**
+   * Attach a Google identity to an existing account.
+   *
+   * Linking by verified email is the standard pattern and carries the same trust as our
+   * own code-by-email verification: both prove control of the address. The caller
+   * decides WHETHER this account may link (role gates live in the handler); this only
+   * records it, and marks the address verified because Google already did.
+   */
+  linkGoogle(sub: string): void {
+    this.googleId = sub;
+    if (!this.isVerified) this.markVerified();
+    else this.touch();
+  }
+
   markVerified(): void {
     this.isVerified = true;
     this.verificationCode = null;

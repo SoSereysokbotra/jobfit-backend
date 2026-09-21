@@ -70,6 +70,8 @@ import { VerifyPasswordResetCommand } from '../../application/commands/verify-pa
 import { ResetPasswordCommand } from '../../application/commands/reset-password.command';
 import { ResendPasswordResetVerificationCommand } from '../../application/commands/resend-password-reset-verification.command';
 import { LoginCommand } from '../../application/commands/login.command';
+import { GoogleLoginCommand } from '../../application/commands/google-login.command';
+import type { GoogleLoginResult } from '../../application/commands/google-login.handler';
 import { RefreshTokenCommand } from '../../application/commands/refresh-token.command';
 import { LogoutCommand } from '../../application/commands/logout.command';
 import { LoginResult } from '../../application/commands/login.handler';
@@ -84,8 +86,10 @@ import { VerifyPasswordResetDto } from '../../application/dtos/verify-password-r
 import { ResetPasswordDto } from '../../application/dtos/reset-password.dto';
 import { ResendPasswordResetVerificationDto } from '../../application/dtos/resend-password-reset-verification.dto';
 import { LoginDto } from '../../application/dtos/login.dto';
+import { GoogleLoginDto } from '../../application/dtos/google-login.dto';
 import {
   AuthResponseDto,
+  GoogleAuthResponseDto,
   MessageResponseDto,
 } from '../../application/dtos/auth-response.dto';
 
@@ -366,6 +370,43 @@ export class AuthController {
       REFRESH_TOKEN_TTL_SECONDS * 1000,
     );
     return { accessToken: result.accessToken };
+  }
+
+  // ---- Google sign-in: log in OR create an account from a Google ID token ----
+  @Post('google')
+  @Public()
+  // Shares the login limiter: a stream of forged tokens is a credential attack, and it
+  // should hit the same ceiling a stream of wrong passwords does.
+  @RateLimit(THROTTLERS.login.name)
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Sign in with Google',
+    description:
+      'Verifies a Google ID token and either signs the matching account in or creates a ' +
+      'JOB_SEEKER account for it. Same response shape as /login: access token in the ' +
+      'body, `refresh_token` httpOnly cookie. `isNewUser` tells the client whether to ' +
+      'route to onboarding. Admins and unactivated employers are refused (403).',
+  })
+  @ApiBody({ type: GoogleLoginDto })
+  @ApiOkResponse({ description: 'Authenticated.', type: GoogleAuthResponseDto })
+  @ApiResponse({ status: 401, description: 'Token could not be verified.' })
+  @ApiResponse({ status: 403, description: 'This account may not sign in with Google.' })
+  @ApiResponse({ status: 503, description: 'Google sign-in is not configured here.' })
+  async googleLogin(
+    @Body() dto: GoogleLoginDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = (await this.commandBus.execute(
+      new GoogleLoginCommand(dto.idToken, req.ip ?? ''),
+    )) as GoogleLoginResult;
+    this.setCookie(
+      res,
+      COOKIE.refreshToken,
+      result.refreshToken,
+      REFRESH_TOKEN_TTL_SECONDS * 1000,
+    );
+    return { accessToken: result.accessToken, isNewUser: result.isNewUser };
   }
 
   // ---- Flow 5: Refresh (rotation) ----
