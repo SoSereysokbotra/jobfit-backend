@@ -147,7 +147,17 @@ steps:
       # require). A malformed value now throws AT BOOT by design — better a failed deploy
       # than a service silently talking to nothing. See docs/REDIS_PRODUCTION_SETUP.md.
       #
+      # NOT IN --set-secrets YET (2026-09-21). The verification above was never done: the
+      # REDIS_URL secret exists in Secret Manager as an EMPTY SHELL with zero versions, so
+      # `REDIS_URL:latest` resolves to nothing and the deploy fails with "Secret .../
+      # versions/latest was not found" — the second thing that sank the 2026-09-01 build
+      # and the first thing that sank the one after this note was written. Production has
+      # run without Redis since 1 September (cache fails open, queue idle). To wire it:
+      # add a version to the secret with a real rediss:// URL, THEN add
+      # `REDIS_URL=REDIS_URL:latest` back below. Not before — a build cannot reference a
+      # secret that has no value, whatever the comment above it promises.
+      #
       # SLACK_WEBHOOK_URL wired (Phase 4 alerts).
       # HEALTHCHECKS_PING_URL wired (dead-man's-switch heartbeat).
       # SUPABASE_* required at boot. EMAIL_PASS is the Gmail app password.
-      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,METRICS_TOKEN=METRICS_TOKEN:latest,SLACK_WEBHOOK_URL=SLACK_WEBHOOK_URL:latest,HEALTHCHECKS_PING_URL=HEALTHCHECKS_PING_URL:latest,SUPABASE_URL=SUPABASE_URL:latest,SUPABASE_SERVICE_ROLE_KEY=SUPABASE_SERVICE_ROLE_KEY:latest,SUPABASE_ANON_KEY=SUPABASE_ANON_KEY:latest,SUPABASE_JWT_SECRET=SUPABASE_JWT_SECRET:latest,EMAIL_PASS=EMAIL_PASS:latest,REDIS_URL=REDIS_URL:latest'
+      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,METRICS_TOKEN=METRICS_TOKEN:latest,SLACK_WEBHOOK_URL=SLACK_WEBHOOK_URL:latest,HEALTHCHECKS_PING_URL=HEALTHCHECKS_PING_URL:latest,SUPABASE_URL=SUPABASE_URL:latest,SUPABASE_SERVICE_ROLE_KEY=SUPABASE_SERVICE_ROLE_KEY:latest,SUPABASE_ANON_KEY=SUPABASE_ANON_KEY:latest,SUPABASE_JWT_SECRET=SUPABASE_JWT_SECRET:latest,EMAIL_PASS=EMAIL_PASS:latest'
