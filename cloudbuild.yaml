@@ -118,6 +118,17 @@ steps:
       # the key is not. Both are needed — a URL without a key gets 401 on every call
       # except /health and /ready.
       #
+      # NOT IN --set-secrets, DELIBERATELY (2026-09-21). The secret does not exist in
+      # Secret Manager, and referencing a missing secret fails the whole deploy — that is
+      # exactly what sank the 2026-09-01 build ("Permission denied on secret
+      # AI_SERVICE_KEY", which is also what GCP says for a secret that is not there).
+      # There is no production AI service today: _AI_SERVICE_URL defaults to '' and the
+      # serving revision has carried neither variable since it was created. The app treats
+      # both as optional (env.validation.ts). When a production AI service exists, create
+      # the secret, grant the runtime account secretAccessor on it, set _AI_SERVICE_URL,
+      # and add `AI_SERVICE_KEY=AI_SERVICE_KEY:latest` back below — all in one change,
+      # because a key without a URL is inert and a URL without a key is a 401.
+      #
       # REDIS_URL is now wired from Secret Manager. It was deliberately omitted for a long
       # time — "the secret exists but its value is unverified, and a bad host is worse
       # than none". Two things changed that calculation:
@@ -139,4 +150,4 @@ steps:
       # SLACK_WEBHOOK_URL wired (Phase 4 alerts).
       # HEALTHCHECKS_PING_URL wired (dead-man's-switch heartbeat).
       # SUPABASE_* required at boot. EMAIL_PASS is the Gmail app password.
-      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,METRICS_TOKEN=METRICS_TOKEN:latest,SLACK_WEBHOOK_URL=SLACK_WEBHOOK_URL:latest,HEALTHCHECKS_PING_URL=HEALTHCHECKS_PING_URL:latest,SUPABASE_URL=SUPABASE_URL:latest,SUPABASE_SERVICE_ROLE_KEY=SUPABASE_SERVICE_ROLE_KEY:latest,SUPABASE_ANON_KEY=SUPABASE_ANON_KEY:latest,SUPABASE_JWT_SECRET=SUPABASE_JWT_SECRET:latest,EMAIL_PASS=EMAIL_PASS:latest,AI_SERVICE_KEY=AI_SERVICE_KEY:latest,REDIS_URL=REDIS_URL:latest'
+      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,METRICS_TOKEN=METRICS_TOKEN:latest,SLACK_WEBHOOK_URL=SLACK_WEBHOOK_URL:latest,HEALTHCHECKS_PING_URL=HEALTHCHECKS_PING_URL:latest,SUPABASE_URL=SUPABASE_URL:latest,SUPABASE_SERVICE_ROLE_KEY=SUPABASE_SERVICE_ROLE_KEY:latest,SUPABASE_ANON_KEY=SUPABASE_ANON_KEY:latest,SUPABASE_JWT_SECRET=SUPABASE_JWT_SECRET:latest,EMAIL_PASS=EMAIL_PASS:latest,REDIS_URL=REDIS_URL:latest'
