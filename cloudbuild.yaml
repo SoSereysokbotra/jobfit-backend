@@ -26,7 +26,12 @@ substitutions:
   # while looking configured.
   #
   # Set it when the AI service has a host. See docs/AI_DEGRADATION_PLAN.md §6, item 5.
-  _AI_SERVICE_URL: ''
+  #
+  # DECLARED NOWHERE UNTIL THEN. Cloud Build rejects a substitution that is declared but
+  # not referenced ("key _AI_SERVICE_URL ... is not matched in the template"), and the
+  # env-var line that referenced it is gone — an empty value there crashed the container
+  # (see the deploy step). Re-add `_AI_SERVICE_URL: ''` here in the same change that
+  # puts `AI_SERVICE_URL=${_AI_SERVICE_URL}` back into --set-env-vars.
 
 options:
   logging: CLOUD_LOGGING_ONLY
