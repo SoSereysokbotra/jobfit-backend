@@ -902,7 +902,9 @@ model Resume {
   fileName String
   fileUrl  String
   fileSize Int
-  fileType String // "PDF" | "DOCX"
+  /// "PDF" | "DOCX" | "IMAGE". A plain column rather than an enum, which is why
+  /// adding IMAGE needed no migration. IMAGE is a photographed CV, read by OCR.
+  fileType String
 
   title     String?
   isDefault Boolean @default(false)

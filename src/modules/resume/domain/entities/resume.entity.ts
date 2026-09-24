@@ -5,7 +5,14 @@
 
 import { AggregateRoot } from '@common/abstracts/aggregate-root';
 
-export type ResumeFileType = 'PDF' | 'DOCX';
+/**
+ * What kind of file the résumé is.
+ *
+ * IMAGE is a photographed CV (PNG/JPEG/WebP). It has no text layer, so the parser
+ * reads it with OCR — as it also does for a PDF that turns out to be a photo in a
+ * PDF wrapper, which is what a phone produces when you "scan" a document.
+ */
+export type ResumeFileType = 'PDF' | 'DOCX' | 'IMAGE';
 export type ResumeParsingStatus =
   | 'PENDING'
   | 'PROCESSING'

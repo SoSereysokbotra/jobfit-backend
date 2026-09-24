@@ -49,6 +49,7 @@ describe('ResumeParserService (AI parse + fallback)', () => {
   let storage: { download: jest.Mock };
   let eventBus: { publish: jest.Mock };
   let aiClient: { parseResume: jest.Mock };
+  let ocr: { readImage: jest.Mock; readRawImage: jest.Mock };
   let service: ResumeParserService;
 
   beforeEach(() => {
@@ -60,6 +61,10 @@ describe('ResumeParserService (AI parse + fallback)', () => {
     storage = { download: jest.fn().mockResolvedValue(Buffer.from('%PDF-fake')) };
     eventBus = { publish: jest.fn().mockResolvedValue(undefined) };
     aiClient = { parseResume: jest.fn() };
+    // OCR is the fallback for a PDF with no text layer. Stubbed to return nothing, so
+    // these tests keep exercising the ordinary text-layer path; the OCR path has its
+    // own spec.
+    ocr = { readImage: jest.fn().mockResolvedValue(''), readRawImage: jest.fn().mockResolvedValue('') };
 
     service = new ResumeParserService(
       resumeRepository as never,
@@ -67,6 +72,7 @@ describe('ResumeParserService (AI parse + fallback)', () => {
       storage as never,
       eventBus as never,
       aiClient as never,
+      ocr as never,
     );
   });
 

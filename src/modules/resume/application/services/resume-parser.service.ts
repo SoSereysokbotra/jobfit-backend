@@ -10,6 +10,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import * as mammoth from 'mammoth';
+import { OcrService, type RawImage } from './ocr.service';
 import { ResumeRepository } from '../../infrastructure/repositories/resume.repository';
 import { ParsedResumeDataRepository } from '../../infrastructure/repositories/parsed-resume-data.repository';
 import { StorageService } from '@infra/storage/storage.service';
@@ -30,11 +31,17 @@ interface PdfJsModule {
     useSystemFonts?: boolean;
     isEvalSupported?: boolean;
   }): { promise: Promise<PdfDocument> };
+  /** Operator ids. Only paintImageXObject is read — see ocrPdfPages. */
+  OPS: { paintImageXObject: number };
 }
 interface PdfDocument {
   numPages: number;
   getPage(n: number): Promise<{
     getTextContent(): Promise<{ items: PositionedTextItem[] }>;
+    /** Drawing operations for the page; how an embedded image is located. */
+    getOperatorList(): Promise<{ fnArray: number[]; argsArray: unknown[][] }>;
+    /** Resolved page objects, keyed by the name the operator list gives. */
+    objs: { get(name: string, cb: (obj: RawImage) => void): void };
   }>;
   destroy(): Promise<void>;
 }
@@ -84,6 +91,7 @@ export class ResumeParserService {
     private readonly storage: StorageService,
     private readonly eventBus: DomainEventBus,
     private readonly aiClient: AiClient,
+    private readonly ocr: OcrService,
   ) {}
 
   async parseResume(
@@ -157,15 +165,97 @@ export class ResumeParserService {
     }
   }
 
+  /**
+   * Shortest length that counts as a real text layer.
+   *
+   * A scanned PDF is not always empty: a phone's "scan" often stamps a few characters of
+   * metadata, and a cover page may carry a stray label. Testing for `=== ''` therefore
+   * misses the common case. Forty characters is comfortably below any real résumé and
+   * comfortably above that noise.
+   */
+  private static readonly MIN_TEXT_LAYER_CHARS = 40;
+
   private async extractText(buffer: Buffer, fileType: string): Promise<string> {
     if (fileType === 'PDF') {
-      return this.extractPdfText(buffer);
+      const text = await this.extractPdfText(buffer);
+      if (text.trim().length >= ResumeParserService.MIN_TEXT_LAYER_CHARS) {
+        return text;
+      }
+      // No usable text layer: this is a photograph wrapped in a PDF, which is how a
+      // phone "scans" a document. It used to reach the AI with an empty string and fail
+      // with a message that blamed the AI service.
+      this.logger.log(
+        'PDF carries no usable text layer — falling back to OCR on the page images',
+      );
+      const ocr = await this.ocrPdfPages(buffer);
+      if (ocr.trim().length >= ResumeParserService.MIN_TEXT_LAYER_CHARS) return ocr;
+      throw new Error(
+        'This PDF contains no readable text. If it is a scan or a photo, try a ' +
+          'clearer image, or upload the original Word or PDF file.',
+      );
     }
     if (fileType === 'DOCX') {
       const result = await mammoth.extractRawText({ buffer });
       return result.value;
     }
+    if (fileType === 'IMAGE') {
+      const text = await this.ocr.readImage(buffer);
+      if (text.trim().length >= ResumeParserService.MIN_TEXT_LAYER_CHARS) return text;
+      throw new Error(
+        'No readable text was found in this image. Try a sharper photo taken ' +
+          'straight on, in good light.',
+      );
+    }
     throw new Error(`Unsupported file type for parsing: ${fileType}`);
+  }
+
+  /**
+   * OCR every page image of a PDF that has no text layer.
+   *
+   * Reads the page's embedded image objects rather than RENDERING the page. Rendering
+   * would need a canvas implementation — a native dependency in the deploy — to redraw
+   * pixels that are already sitting in the file. A scanned page is one full-page image,
+   * which is exactly what this finds.
+   *
+   * Capped at MAX_OCR_PAGES: OCR costs seconds per page, and a résumé that runs past
+   * three pages is not one the first three pages fail to describe.
+   */
+  private async ocrPdfPages(buffer: Buffer): Promise<string> {
+    const MAX_OCR_PAGES = 3;
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const pdfjs = require('pdfjs-dist/legacy/build/pdf.js') as PdfJsModule;
+
+    const doc = await pdfjs.getDocument({
+      data: new Uint8Array(buffer),
+      useSystemFonts: true,
+      isEvalSupported: false,
+    }).promise;
+
+    try {
+      const out: string[] = [];
+      const pageCount = Math.min(doc.numPages, MAX_OCR_PAGES);
+      for (let n = 1; n <= pageCount; n++) {
+        const page = await doc.getPage(n);
+        const ops = await page.getOperatorList();
+        for (let i = 0; i < ops.fnArray.length; i++) {
+          if (ops.fnArray[i] !== pdfjs.OPS.paintImageXObject) continue;
+          const name = ops.argsArray[i][0] as string;
+          const img = await new Promise<RawImage | null>((resolve) => {
+            try {
+              page.objs.get(name, (o: RawImage) => resolve(o));
+            } catch {
+              // An image the worker never resolved. Skip it rather than fail the page.
+              resolve(null);
+            }
+          });
+          if (!img?.data || !img.width || !img.height) continue;
+          out.push(await this.ocr.readRawImage(img));
+        }
+      }
+      return out.filter(Boolean).join('\n');
+    } finally {
+      await doc.destroy();
+    }
   }
 
   /**

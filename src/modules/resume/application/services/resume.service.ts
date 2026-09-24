@@ -40,6 +40,13 @@ const MIME_TO_TYPE: Record<string, ResumeFileType> = {
   'application/pdf': 'PDF',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
     'DOCX',
+  // A photograph of a CV. Common here: people photograph documents rather than scan
+  // them, and the phone either hands over the JPEG or wraps it in a PDF — the PDF case
+  // is handled by the OCR fallback in ResumeParserService. Both end up at the same
+  // place, an image read by OCR, so both are accepted.
+  'image/png': 'IMAGE',
+  'image/jpeg': 'IMAGE',
+  'image/webp': 'IMAGE',
 };
 
 @Injectable()
@@ -64,7 +71,9 @@ export class ResumeService {
 
     const fileType = MIME_TO_TYPE[file.mimetype];
     if (!fileType) {
-      throw new BadRequestException('Only PDF and DOCX resumes are supported');
+      throw new BadRequestException(
+        'Only PDF, DOCX and image (PNG, JPEG, WebP) resumes are supported',
+      );
     }
     if (file.size <= 0 || file.size > MAX_FILE_SIZE) {
       throw new BadRequestException('Resume must be between 1 byte and 5 MB');

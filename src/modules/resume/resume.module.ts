@@ -13,6 +13,7 @@ import { ParsedResumeDataRepository } from './infrastructure/repositories/parsed
 import { ResumeParsingProcessor } from './infrastructure/queue/resume-parsing.processor';
 import { ResumeService } from './application/services/resume.service';
 import { ResumeParserService } from './application/services/resume-parser.service';
+import { OcrService } from './application/services/ocr.service';
 import { ResumeScorerService } from './application/services/resume-scorer.service';
 
 @Module({
@@ -29,6 +30,7 @@ import { ResumeScorerService } from './application/services/resume-scorer.servic
     ParsedResumeDataRepository,
     ResumeService,
     ResumeParserService,
+    OcrService,
     ResumeScorerService,
     ResumeParsingProcessor,
   ],
