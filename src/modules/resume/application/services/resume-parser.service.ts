@@ -117,7 +117,12 @@ export class ResumeParserService {
 
       const text = await this.extractText(buffer, fileType);
       // AI-only: an AiServiceError propagates to the catch below and fails the job.
-      const ai = await this.aiClient.parseResume(text, fileType as FileType);
+      const ai = await this.aiClient.parseResume(
+        text,
+        // No longer a blind cast: FileType carries IMAGE too, so a new résumé kind
+        // fails to compile here rather than 422-ing at the AI boundary at runtime.
+        fileType as FileType,
+      );
       const parsed = this.fromAiResponse(ai);
 
       await this.parsedResumeDataRepository.save({

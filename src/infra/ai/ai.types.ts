@@ -6,7 +6,14 @@
  * service's pydantic `CamelModel` schemas.
  */
 
-export type FileType = 'PDF' | 'DOCX';
+/**
+ * What the résumé text was extracted from. Mirrors FileType in the AI service.
+ *
+ * IMAGE is a photographed or scanned CV, read by OCR before the text gets here.
+ * The service validates this field and then does not use it, so an unknown value
+ * costs a 422 and buys nothing — keep the two lists in step.
+ */
+export type FileType = 'PDF' | 'DOCX' | 'IMAGE';
 
 // ── GET /health ──────────────────────────────────────────────────────────────
 export interface AiHealth {
