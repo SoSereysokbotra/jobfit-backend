@@ -96,7 +96,7 @@ export class ProfileService {
           firstName: dto.firstName ?? existing.firstName,
           lastName: dto.lastName ?? existing.lastName,
           phone: dto.phone ?? existing.phone,
-          photoUrl: existing.photoUrl,
+          photoUrl: dto.photoUrl ?? existing.photoUrl,
           bio: dto.bio ?? existing.bio,
           headline: dto.headline ?? existing.headline,
           location: dto.location ? this.toLocation(dto.location) : existing.location,

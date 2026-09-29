@@ -38,6 +38,15 @@ export class UpdateProfileDto {
   @IsString()
   phone?: string;
 
+  @ApiPropertyOptional({
+    description:
+      'Profile photo. The client sends a data URL, so this is a plain string rather ' +
+      'than @IsUrl. An empty string clears the photo.',
+  })
+  @IsOptional()
+  @IsString()
+  photoUrl?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
