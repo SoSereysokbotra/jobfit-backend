@@ -3,6 +3,7 @@
 //.\.venv\Scripts\python.exe -m uvicorn app.main:app --port 8000 --reload
 import "./tracing";
 import { NestFactory } from "@nestjs/core";
+import type { NestExpressApplication } from "@nestjs/platform-express";
 import { ValidationPipe, Logger } from "@nestjs/common";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { Logger as PinoAppLogger } from "nestjs-pino";
@@ -14,7 +15,9 @@ async function bootstrap() {
   const logger = new Logger("Bootstrap");
   // bufferLogs: hold early bootstrap logs until the pino logger is installed, then
   // flush them through it — so every line (including startup) is structured.
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bufferLogs: true,
+  });
   app.useLogger(app.get(PinoAppLogger));
   app.flushLogs();
 
@@ -24,6 +27,12 @@ async function bootstrap() {
   // Cookie parsing — the auth flow uses httpOnly cookies (refresh token, verification
   // sessions). Must run before guards/controllers read req.cookies.
   app.use(cookieParser());
+
+  // JSON bodies up to 1 MB, not Express's 100 KB default. The profile photo arrives as a
+  // data URL inside the JSON (a 512x512 JPEG, base64-encoded — about a third larger than
+  // the file), and a detailed photo passes 100 KB, which Express refuses with a 413
+  // before any handler runs. File uploads (résumés) are multipart and not affected.
+  app.useBodyParser("json", { limit: "1mb" });
 
   // CORS — credentials enabled so the browser sends/receives auth cookies.
   // CORS_ORIGIN is a comma-separated allowlist (deployed frontend + local dev), so the
