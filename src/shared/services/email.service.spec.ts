@@ -125,6 +125,35 @@ describe('EmailService', () => {
     });
   });
 
+  describe('links', () => {
+    it('builds the activation link from the first CORS origin, not the whole list', async () => {
+      // Production sets no FRONTEND_URL, and CORS_ORIGIN is a comma-separated list.
+      // Used whole, the link became "https://site,http://localhost:3000/employer/...".
+      const service = new EmailService(
+        configOf({
+          NODE_ENV: 'production',
+          ...SMTP_ENV,
+          CORS_ORIGIN: 'https://jobfit.example, http://localhost:3000',
+        }),
+        suppression,
+      );
+      service.onModuleInit();
+
+      await service.sendEmployerActivationCode(
+        'hr@acme.com',
+        '903162',
+        'Acme',
+        '24 hours',
+      );
+
+      const { text, html } = sendMail.mock.calls[0][0];
+      const link = 'https://jobfit.example/employer/activate?email=hr%40acme.com';
+      expect(text).toContain(link);
+      expect(html).toContain(`href="${link}"`);
+      expect(text).not.toContain('localhost');
+    });
+  });
+
   describe('delivery', () => {
     let service: EmailService;
 

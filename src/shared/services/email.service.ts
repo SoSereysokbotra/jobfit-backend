@@ -85,7 +85,11 @@ export class EmailService implements OnModuleInit {
       this.config.get<string>('SMTP_FROM') ?? user ?? 'no-reply@localhost';
     this.appUrl = (
       this.config.get<string>('FRONTEND_URL') ??
-      this.config.get<string>('CORS_ORIGIN') ??
+      // CORS_ORIGIN is a comma-separated LIST in production (deployed site + localhost).
+      // Used whole, every link read "https://site,http://localhost:3000/employer/activate"
+      // — the activation link was broken for every approved employer. The first entry
+      // is the deployed front end.
+      this.config.get<string>('CORS_ORIGIN')?.split(',')[0]?.trim() ??
       'http://localhost:3000'
     )
       // A trailing slash would produce '//employer/activate'.
