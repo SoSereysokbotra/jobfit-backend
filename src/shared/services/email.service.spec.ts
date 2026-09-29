@@ -89,7 +89,7 @@ describe('EmailService', () => {
       expect(service.isConfigured).toBe(false);
       // The skip must not throw — the test suite runs without a mail server.
       await expect(
-        service.sendVerificationCode('user@example.com', '123456'),
+        service.sendVerificationCode('user@example.com', '123456', 10),
       ).resolves.toBeUndefined();
       expect(sendMail).not.toHaveBeenCalled();
     });
@@ -137,7 +137,7 @@ describe('EmailService', () => {
     });
 
     it('sends the verification code and includes it in both bodies', async () => {
-      await service.sendVerificationCode('user@example.com', '482913');
+      await service.sendVerificationCode('user@example.com', '482913', 10);
 
       expect(sendMail).toHaveBeenCalledTimes(1);
       const mail = sendMail.mock.calls[0][0];
@@ -148,19 +148,22 @@ describe('EmailService', () => {
       });
       expect(mail.text).toContain('482913');
       expect(mail.html).toContain('482913');
+      // The expiry sentence comes from the caller, not a default inside the service.
+      expect(mail.text).toContain('This code expires in 10 minutes.');
+      expect(mail.html).toContain('This code expires in 10 minutes.');
     });
 
     it('throws when the transport rejects, rather than reporting success', async () => {
       sendMail.mockRejectedValueOnce(new Error('550 mailbox unavailable'));
 
       await expect(
-        service.sendVerificationCode('user@example.com', '482913'),
+        service.sendVerificationCode('user@example.com', '482913', 10),
       ).rejects.toThrow('550 mailbox unavailable');
       expect(service.getStatus().lastError).toBe('550 mailbox unavailable');
     });
 
     it('records the last send in the readiness snapshot', async () => {
-      await service.sendPasswordResetCode('user@example.com', '111111');
+      await service.sendPasswordResetCode('user@example.com', '111111', 10);
 
       const status = service.getStatus();
       expect(status.configured).toBe(true);
@@ -187,7 +190,7 @@ describe('EmailService', () => {
       );
 
       await expect(
-        service.sendVerificationCode('bounced@example.com', '482913'),
+        service.sendVerificationCode('bounced@example.com', '482913', 10),
       ).resolves.toBeUndefined();
 
       // The point of the whole finding: the transport is never reached.
@@ -195,8 +198,8 @@ describe('EmailService', () => {
     });
 
     it('consults the list on every send path, not just one of them', async () => {
-      await service.sendVerificationCode('a@example.com', '111111');
-      await service.sendPasswordResetCode('b@example.com', '222222');
+      await service.sendVerificationCode('a@example.com', '111111', 10);
+      await service.sendPasswordResetCode('b@example.com', '222222', 10);
       await service.sendPasswordResetSuccess('c@example.com');
 
       expect(assertSendable.mock.calls.map((c) => c[0])).toEqual([
@@ -214,7 +217,7 @@ describe('EmailService', () => {
       );
       unconfigured.onModuleInit();
 
-      await unconfigured.sendVerificationCode('user@example.com', '482913');
+      await unconfigured.sendVerificationCode('user@example.com', '482913', 10);
 
       expect(assertSendable).toHaveBeenCalledWith('user@example.com');
     });
@@ -225,13 +228,13 @@ describe('EmailService', () => {
       );
 
       await expect(
-        service.sendVerificationCode('user@example.com', '482913'),
+        service.sendVerificationCode('user@example.com', '482913', 10),
       ).rejects.toBeInstanceOf(SuppressionCheckUnavailableError);
       expect(sendMail).not.toHaveBeenCalled();
     });
 
     it('sends normally when the address is not suppressed', async () => {
-      await service.sendVerificationCode('fine@example.com', '482913');
+      await service.sendVerificationCode('fine@example.com', '482913', 10);
 
       expect(sendMail).toHaveBeenCalledTimes(1);
       expect(sendMail.mock.calls[0][0]).toMatchObject({

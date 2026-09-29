@@ -11,6 +11,10 @@ import { AuthEventsListener } from './auth-events.listener';
 import { UserRegisteredEvent } from '../../domain/events/user-registered.event';
 import { PasswordResetRequestedEvent } from '../../domain/events/password-reset-requested.event';
 import { PasswordResetSuccessEvent } from '../../domain/events/password-reset-success.event';
+import {
+  PASSWORD_RESET_CODE_TTL_MINUTES,
+  VERIFICATION_CODE_TTL_MINUTES,
+} from '../../application/auth.constants';
 
 describe('AuthEventsListener', () => {
   let emailService: jest.Mocked<
@@ -45,6 +49,7 @@ describe('AuthEventsListener', () => {
     expect(emailService.sendVerificationCode).toHaveBeenCalledWith(
       'new@example.com',
       '482913',
+      VERIFICATION_CODE_TTL_MINUTES,
     );
   });
 
@@ -72,6 +77,7 @@ describe('AuthEventsListener', () => {
     expect(emailService.sendPasswordResetCode).toHaveBeenCalledWith(
       'user@example.com',
       '111111',
+      PASSWORD_RESET_CODE_TTL_MINUTES,
     );
 
     emailService.sendPasswordResetCode.mockRejectedValueOnce(new Error('smtp down'));

@@ -17,6 +17,10 @@ import { EmailService } from '../../../../shared/services/email.service';
 import { UserRegisteredEvent } from '../../domain/events/user-registered.event';
 import { PasswordResetRequestedEvent } from '../../domain/events/password-reset-requested.event';
 import { PasswordResetSuccessEvent } from '../../domain/events/password-reset-success.event';
+import {
+  PASSWORD_RESET_CODE_TTL_MINUTES,
+  VERIFICATION_CODE_TTL_MINUTES,
+} from '../../application/auth.constants';
 
 @Injectable()
 export class AuthEventsListener {
@@ -32,6 +36,7 @@ export class AuthEventsListener {
         this.emailService.sendVerificationCode(
           event.email,
           event.verificationCode,
+          VERIFICATION_CODE_TTL_MINUTES,
         ),
       `verification code to ${event.email}`,
       'that user cannot verify and therefore cannot log in until they resend',
@@ -44,7 +49,12 @@ export class AuthEventsListener {
   ): Promise<void> {
     this.logger.log(`Sending password-reset email to ${event.email}`);
     await this.deliver(
-      () => this.emailService.sendPasswordResetCode(event.email, event.resetCode),
+      () =>
+        this.emailService.sendPasswordResetCode(
+          event.email,
+          event.resetCode,
+          PASSWORD_RESET_CODE_TTL_MINUTES,
+        ),
       `password-reset code to ${event.email}`,
       'that user cannot complete the reset until they request a new code',
     );

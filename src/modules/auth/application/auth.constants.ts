@@ -5,11 +5,17 @@
 
 export const VERIFICATION_CODE_LENGTH = 6;
 
-/** Email verification code validity window. */
-export const VERIFICATION_CODE_TTL_MINUTES = 15;
+/**
+ * Email verification code validity window.
+ *
+ * 10 minutes: the NIST SP 800-63B ceiling for a one-time secret sent out of band, and
+ * still long enough for a slow Gmail delivery plus switching to the inbox. The email
+ * text and the frontend countdowns (verify-email, forgot-password/verify) follow this.
+ */
+export const VERIFICATION_CODE_TTL_MINUTES = 10;
 
-/** Password reset code validity window. */
-export const PASSWORD_RESET_CODE_TTL_MINUTES = 15;
+/** Password reset code validity window. Same reasoning as above. */
+export const PASSWORD_RESET_CODE_TTL_MINUTES = 10;
 
 /** Short-lived access token. */
 export const ACCESS_TOKEN_TTL = '15m';

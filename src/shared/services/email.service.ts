@@ -158,7 +158,11 @@ export class EmailService implements OnModuleInit {
     }
   }
 
-  async sendVerificationCode(to: string, code: string): Promise<void> {
+  async sendVerificationCode(
+    to: string,
+    code: string,
+    ttlMinutes: number,
+  ): Promise<void> {
     await this.send(
       to,
       'Verify your email address',
@@ -166,11 +170,16 @@ export class EmailService implements OnModuleInit {
         'Verify your email',
         'Use the code below to verify your email address.',
         code,
+        `${ttlMinutes} minutes`,
       ),
     );
   }
 
-  async sendPasswordResetCode(to: string, code: string): Promise<void> {
+  async sendPasswordResetCode(
+    to: string,
+    code: string,
+    ttlMinutes: number,
+  ): Promise<void> {
     await this.send(
       to,
       'Reset your password',
@@ -178,6 +187,7 @@ export class EmailService implements OnModuleInit {
         'Reset your password',
         'Use the code below to reset your password. If you did not request this, ignore this email.',
         code,
+        `${ttlMinutes} minutes`,
       ),
     );
   }
@@ -349,10 +359,9 @@ ${question}
     title: string,
     intro: string,
     code: string,
-    // Employer activation codes live far longer than a verification code, so the
-    // sentence has to be told rather than assumed. The default keeps every
-    // existing caller byte-identical.
-    ttlText = '15 minutes',
+    // Always passed in, never defaulted. A default here once said '15 minutes' while the
+    // real TTL lived in the auth constants, so the two could drift apart silently.
+    ttlText: string,
     /**
      * Where to use the code. Optional because the seeker flows do not need it — the user
      * is already on the page that asked for the code.
