@@ -32,11 +32,15 @@ import {
   EmailSuppressedError,
   EmailSuppressionService,
 } from './email-suppression.service';
-
-interface MailBody {
-  text: string;
-  html: string;
-}
+import {
+  type MailBody,
+  employerActivationEmail,
+  employerMoreInfoEmail,
+  employerRejectedEmail,
+  passwordChangedEmail,
+  passwordResetCodeEmail,
+  verificationCodeEmail,
+} from './email-templates';
 
 /** Snapshot of transport state, for the readiness probe. */
 export interface MailTransportStatus {
@@ -170,12 +174,7 @@ export class EmailService implements OnModuleInit {
     await this.send(
       to,
       'Verify your email address',
-      this.codeTemplate(
-        'Verify your email',
-        'Use the code below to verify your email address.',
-        code,
-        `${ttlMinutes} minutes`,
-      ),
+      verificationCodeEmail(this.appUrl, code, `${ttlMinutes} minutes`),
     );
   }
 
@@ -187,24 +186,16 @@ export class EmailService implements OnModuleInit {
     await this.send(
       to,
       'Reset your password',
-      this.codeTemplate(
-        'Reset your password',
-        'Use the code below to reset your password. If you did not request this, ignore this email.',
-        code,
-        `${ttlMinutes} minutes`,
-      ),
+      passwordResetCodeEmail(this.appUrl, code, `${ttlMinutes} minutes`),
     );
   }
 
   async sendPasswordResetSuccess(to: string): Promise<void> {
-    await this.send(to, 'Your password was changed', {
-      text:
-        'Your password was changed successfully. ' +
-        "If this wasn't you, contact support immediately.",
-      html:
-        '<p>Your password was changed successfully.</p>' +
-        "<p>If this wasn't you, please contact support immediately.</p>",
-    });
+    await this.send(
+      to,
+      'Your password was changed',
+      passwordChangedEmail(this.appUrl),
+    );
   }
 
   /**
@@ -228,15 +219,7 @@ export class EmailService implements OnModuleInit {
     await this.send(
       to,
       'Your JobFit employer account is approved',
-      this.codeTemplate(
-        'Activate your employer account',
-        `Your request for ${companyName} has been approved. Use the code below to set ` +
-          'your password and sign in. By activating this account you agree to the ' +
-          'JobFit Employer Terms of Service.',
-        code,
-        ttlText,
-        { url, label: 'Activate my account' },
-      ),
+      employerActivationEmail(this.appUrl, code, companyName, ttlText, url),
     );
   }
 
@@ -257,26 +240,15 @@ export class EmailService implements OnModuleInit {
     to: string,
     companyName: string,
     question: string,
-    requestId: string,
+    // Kept for the caller's signature; no longer linked — the page it pointed at,
+    // /employer/request/:id, never existed on the front end.
+    _requestId: string,
   ): Promise<void> {
-    const url = `${this.appUrl}/employer/request/${requestId}`;
-    await this.send(to, 'We need a little more about your JobFit request', {
-      text:
-        `We are reviewing the employer request for ${companyName} and need one more ` +
-        `thing before we can decide.
-
-${question}
-
-` +
-        'Reply to this email with the details and we will pick it up from there. Your ' +
-        `request is still open — you can check it at ${url}`,
-      html:
-        `<p>We are reviewing the employer request for <strong>${companyName}</strong> and ` +
-        'need one more thing before we can decide.</p>' +
-        `<blockquote>${question}</blockquote>` +
-        '<p>Reply to this email with the details and we will pick it up from there. Your ' +
-        `request is still open — you can <a href="${url}">check its status</a>.</p>`,
-    });
+    await this.send(
+      to,
+      'We need a little more about your JobFit request',
+      employerMoreInfoEmail(this.appUrl, companyName, question),
+    );
   }
 
   /**
@@ -288,17 +260,11 @@ ${question}
     companyName: string,
     reason: string,
   ): Promise<void> {
-    await this.send(to, 'About your JobFit employer request', {
-      text:
-        `We reviewed the employer request for ${companyName} and cannot approve it ` +
-        `at this time.\n\nReason: ${reason}\n\n` +
-        'If you believe this is a mistake, reply to this email with more detail.',
-      html:
-        `<p>We reviewed the employer request for <strong>${companyName}</strong> and ` +
-        'cannot approve it at this time.</p>' +
-        `<p><strong>Reason:</strong> ${reason}</p>` +
-        '<p>If you believe this is a mistake, reply to this email with more detail.</p>',
-    });
+    await this.send(
+      to,
+      'About your JobFit employer request',
+      employerRejectedEmail(this.appUrl, companyName, reason),
+    );
   }
 
   /**
@@ -357,46 +323,5 @@ ${question}
       );
       throw err;
     }
-  }
-
-  private codeTemplate(
-    title: string,
-    intro: string,
-    code: string,
-    // Always passed in, never defaulted. A default here once said '15 minutes' while the
-    // real TTL lived in the auth constants, so the two could drift apart silently.
-    ttlText: string,
-    /**
-     * Where to use the code. Optional because the seeker flows do not need it — the user
-     * is already on the page that asked for the code.
-     */
-    action?: { url: string; label: string },
-  ): MailBody {
-    const text =
-      `${intro}\n\nYour code: ${code}\n\nThis code expires in ${ttlText}.` +
-      (action ? `\n\n${action.label}: ${action.url}` : '');
-    const html = `
-      <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto;">
-        <h2 style="margin-bottom: 8px;">${title}</h2>
-        <p style="color: #444;">${intro}</p>
-        <div style="font-size: 32px; font-weight: 700; letter-spacing: 6px;
-                    background: #f4f4f5; padding: 16px 0; text-align: center;
-                    border-radius: 8px; margin: 16px 0;">${code}</div>
-        ${
-          action
-            ? `<p style="text-align: center; margin: 20px 0;">
-                 <a href="${action.url}"
-                    style="display: inline-block; background: #5A189A; color: #ffffff;
-                           text-decoration: none; padding: 12px 24px; border-radius: 8px;
-                           font-weight: 700;">${action.label}</a>
-               </p>
-               <p style="color: #888; font-size: 12px; word-break: break-all;">
-                 Or paste this into your browser: ${action.url}
-               </p>`
-            : ''
-        }
-        <p style="color: #888; font-size: 13px;">This code expires in ${ttlText}.</p>
-      </div>`;
-    return { text, html };
   }
 }
